@@ -1,32 +1,38 @@
-# ClipMint — a native Linux Mint app
+# ClipMint ve-02 / v0.3.0 — Linux Mint Desktop Preview
 
-ClipMint is a mouse-driven clipboard history, screenshot and area-video recorder for **Linux Mint 22 Cinnamon/X11**. It is independent of ClipClip and does not use Wine.
+A mouse-first clipboard manager, screenshot tool, and dedicated MP4/GIF recorder for **Linux Mint 22 Cinnamon X11, x86-64**. Independent of Windows ClipClip; no Wine.
 
-## Install: one file, no terminal
+## Install normally, no terminal
 
-1. Open [Releases](https://github.com/cryogenized-spec/clipmint-linux/releases) in this private GitHub repository.
-2. Download the newest **clipmint_0.2.0_amd64.deb** from a successful preview build.
-3. Double-click the .deb file in Nemo and choose **Install Package** in Linux Mint's graphical installer.
-4. Find **ClipMint** in your application menu. Open it whenever you want. There is no terminal to keep open.
+1. Open [ClipMint Releases](https://github.com/cryogenized-spec/clipmint-linux/releases).
+2. Download **clipmint_0.3.0_amd64.deb** from the latest successful preview release.
+3. Double-click the file in Nemo and choose **Install Package**.
+4. Open **ClipMint** from the application menu. No terminal remains open.
 
-The package bundles Python, Qt, and FFmpeg into the app. It does not use pip, apt, Wine, or runtime downloads on your laptop. It does not install any development libraries or change CopyQ. Building the downloadable .deb happens only on GitHub's machines. Do not use the old source ZIP or old install.sh as a user installer.
+The installer bundles Python, Qt, and FFmpeg. GitHub downloads build-time dependencies on the **GitHub runner**, not on your laptop. The app doesn't run pip/apt or fetch packages on first use.
 
-## How to use
+## Clipboard bins and sorting
 
-Copy some text or an image. The history appears in ClipMint. Right-click a snippet to **Copy**, **Pin** or **Delete**. Select **Screenshot area** or **Record area** and drag a rectangle. Click **Stop recording** in the window or tray menu to save your MP4. No global shortcuts.
+Three independent bins — **Work**, **Personal**, and **Temporary** — are provided. Click **+** to create further bins (up to 32-character names). New copied snippets go into the currently selected bin. Right-click an entry to Copy, Pin, Move to another bin, or Delete. Double-click to copy.
 
-- Screenshots: ~/Pictures/ClipMint
-- Videos: ~/Videos/ClipMint
-- Local database: ~/.local/share/clipmint/history.sqlite3
+**View:** All, Text, URLs, Phone numbers, or Images. **Sort:** Latest first (default), Oldest first, A–Z, Z–A, or Numbered list. Search is scoped to the active bin. Pinned items remain in chronological order unless explicitly filtered or re-sorted.
 
-## What is and is not verified
+Your old v0.2.0 history database is automatically migrated without erasing entries; old entries are assigned to Work. Data is stored in `~/.local/share/clipmint/history.sqlite3`. Clipboard entries are currently **unencrypted**. Obvious password/token assignments are skipped, but detection is incomplete and is not a security boundary. Use **Settings → Pause monitoring** when copying credentials. The Secrets & Variables page is an informational placeholder, **not** a password vault.
 
-GitHub Actions builds the frozen app and runs Python/SQLite tests plus a launch test under virtual X11. Recording and screenshot capture must still be tested on an actual Linux Mint Cinnamon laptop. This is an **early preview**, not production tested.
+Autosort currently classifies previews as URLs, phone numbers, text and images for filters. Custom sort rules and variable templates are not implemented in this preview.
 
-## Privacy and limitations
+## Screenshots and screen recording
 
-The SQLite history is unencrypted. Pause monitoring before copying confidential data; delete saved secrets if they were captured. Video is silent (no microphone or system audio). Primary-display-only capture selection; no built-in OCR or annotation, and no Wayland support yet. The main ClipMint window may overlap the recorded area until you minimize or move it.
+The **Screenshot** button captures the entire primary screen. Its **▾** menu lets you instead select a rectangle with a mouse. Screenshots are saved to `~/Pictures/ClipMint` and can be opened from the Screenshots section.
 
-## Developers
+Choose **Start Recording MP4 / GIF** or use its **▾** for GIF. The ClipMint main window hides. Click and drag the recording region. A **separate floating recorder window** appears: choose High/Medium/Low quality, choose MP4 or GIF, and click **Start recording**. The same button then says **Stop recording** and shows elapsed time plus an **approximate** estimated file size. After FFmpeg finishes, a **Save this clip?** dialog appears: **Yes (Save)** is selected by default; **Enter** saves and **← / →** switch focus to No. The No option discards the pending recording. Saved files are in `~/Videos/ClipMint`. File size shown during capture is an estimate, not a storage quota or exact output size.
 
-The source tree contains Python and PySide6 code. The GitHub Actions workflow builds a .deb using PyInstaller and bundles a pinned, checksum-verified separate GPL FFmpeg executable downloaded on the **build runner only**. Original ClipMint code is MIT-licensed; FFmpeg follows its own GPL licence. This project is not affiliated with the original ClipClip.
+The recorder tries to place the floating controls outside the captured rectangle. For fullscreen capture with no free space, the controls may appear in the footage. When the capture is running, do not forcibly terminate ClipMint or power off the system; unexpected termination may leave an unfinished hidden `.pending-recording-...` file behind. No microphone or system audio support yet.
+
+## Verification and limitations
+
+Automated tests cover SQLite bins/migration, UI launch and screen-recorder state where possible. GitHub Actions performs a frozen Qt/X11 start test and verifies the included FFmpeg has X11 capture and H264 encoders. **Actual capture on the HP OMEN / Mint Cinnamon has not yet been field-tested.** X11, single-primary-screen selector only; not Wayland. This is a preview, not a security-hardened release.
+
+## Licences
+
+Original ClipMint code: MIT. Bundled FFmpeg: separate GPL executable, licence/source details inside the package.

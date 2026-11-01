@@ -18,7 +18,7 @@ FFmpeg is invoked as a separate GPL command-line executable.
 EOF
 cat > "$root/DEBIAN/control" <<'EOF'
 Package: clipmint
-Version: 0.2.0
+Version: 0.3.0
 Section: utils
 Priority: optional
 Architecture: amd64
@@ -28,6 +28,6 @@ Description: Clipboard manager, screenshot tool, and screen recorder
  Native application for Linux Mint 22 Cinnamon/X11 with bundled
  Python, Qt and FFmpeg. No runtime network dependencies.
 EOF
-dpkg-deb --root-owner-group --build "$root" "dist-packages/clipmint_0.2.0_amd64.deb"
-dpkg-deb --info "dist-packages/clipmint_0.2.0_amd64.deb"
-sha256sum "dist-packages/clipmint_0.2.0_amd64.deb" > "dist-packages/SHA256SUMS"
+dpkg-deb --root-owner-group --build "$root" "dist-packages/clipmint_0.3.0_amd64.deb"
+dpkg-deb --info "dist-packages/clipmint_0.3.0_amd64.deb"
+sha256sum "dist-packages/clipmint_0.3.0_amd64.deb" > "dist-packages/SHA256SUMS"

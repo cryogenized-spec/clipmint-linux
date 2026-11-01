@@ -119,48 +119,72 @@ def ffmpeg_binary() -> str:
 
 
 class RegionRecorder:
-    """Own an FFmpeg subprocess and stop it cleanly through its stdin."""
+    """FFmpeg X11 recorder. Captures to a temporary file until user confirms saving."""
+
+    QUALITY = {
+        "High": (30, 20, 450_000),
+        "Medium": (25, 25, 230_000),
+        "Low": (15, 30, 110_000),
+    }
+
     def __init__(self):
         self.process: subprocess.Popen | None = None
         self.output: Path | None = None
         self.log = None
         self.stopping = False
+        self.format = "MP4"
+        self.quality = "High"
+        self.estimated_bytes_per_second = 450_000
 
     @property
     def active(self) -> bool:
         return self.process is not None and self.process.poll() is None
 
-    def start(self, rect: QRect) -> Path:
+    def start(self, rect: QRect, quality: str = "High", file_format: str = "MP4") -> Path:
         if self.process is not None:
-            raise RuntimeError("A recording is still running or being finalized")
-        if os.environ.get("XDG_SESSION_TYPE", "x11") != "x11":
-            raise RuntimeError("Recording currently requires an X11 session")
+            raise RuntimeError("A previous recording is still running or finalizing")
+        if os.environ.get("XDG_SESSION_TYPE", "x11").lower() != "x11":
+            raise RuntimeError("Screen recording requires X11")
         ffmpeg_path = ffmpeg_binary()
         display = os.environ.get("DISPLAY")
         if not display:
             raise RuntimeError("DISPLAY is unset; an X11 desktop is required")
+        if quality not in self.QUALITY or file_format not in ("MP4", "GIF"):
+            raise ValueError("Unsupported recording options")
         width, height = rect.width() // 2 * 2, rect.height() // 2 * 2
         if width < 10 or height < 10:
             raise RuntimeError("Selected area is too small")
-        path = recordings_dir() / stamped_filename("recording", "mp4")
+        rate, crf, byte_rate = self.QUALITY[quality]
+        self.format, self.quality = file_format, quality
+        self.estimated_bytes_per_second = byte_rate * (2.5 if file_format == "GIF" else 1)
+        suffix = "mp4" if file_format == "MP4" else "gif"
+        # Filename starts with a dot to hide unfinished captures from ordinary file browsers.
+        path = recordings_dir() / stamped_filename(".pending-recording", suffix)
         log_path = path.with_suffix(".ffmpeg.log")
         args = [
             ffmpeg_path, "-hide_banner", "-loglevel", "warning", "-y",
-            "-f", "x11grab", "-framerate", "25",
+            "-f", "x11grab", "-framerate", str(rate),
             "-video_size", f"{width}x{height}",
             "-i", f"{display}+{rect.x()},{rect.y()}",
-            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "25",
-            "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(path),
         ]
+        if file_format == "MP4":
+            args += ["-c:v", "libx264", "-preset", "ultrafast",
+                     "-crf", str(crf), "-pix_fmt", "yuv420p",
+                     "-movflags", "+faststart"]
+        else:
+            # GIF has no audio, uses a bounded frame rate to constrain file sizes.
+            gif_rate = {"High": 15, "Medium": 12, "Low": 8}[quality]
+            args += ["-vf", f"fps={gif_rate},scale=iw:-1:flags=lanczos", "-f", "gif"]
+        args.append(str(path))
         self.log = log_path.open("wb")
         try:
             self.process = subprocess.Popen(
-                args, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
-                stderr=self.log
+                args, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=self.log
             )
         except Exception:
             self.log.close()
             self.log = None
+            log_path.unlink(missing_ok=True)
             raise
         self.output = path
         self.stopping = False
@@ -193,3 +217,16 @@ class RegionRecorder:
         self.output = None
         self.stopping = False
         return status, path
+
+    @staticmethod
+    def resolve(path: Path, keep: bool) -> Path | None:
+        """Save or discard a finished recording; never remove it before ffmpeg exits."""
+        log = path.with_suffix(".ffmpeg.log")
+        if not keep:
+            path.unlink(missing_ok=True)
+            log.unlink(missing_ok=True)
+            return None
+        destination = recordings_dir() / stamped_filename("recording", path.suffix.lstrip("."))
+        path.rename(destination)
+        log.unlink(missing_ok=True)
+        return destination

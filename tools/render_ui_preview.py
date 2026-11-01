@@ -6,10 +6,12 @@ from pathlib import Path
 import sys
 import tempfile
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QTimer, QRect
+from time import monotonic
 from PySide6.QtWidgets import QApplication
 
 from clipmint.app import ClipMintWindow
+from clipmint.recording_ui import RecorderWindow, SaveClipDialog
 
 
 def main():
@@ -39,7 +41,28 @@ def main():
                 print("Could not capture ClipMint Qt widget", file=sys.stderr)
                 app.exit(1)
                 return
-            print(f"Screenshot created: {outfile}, {pixelmap.width()} x {pixelmap.height()}", flush=True)
+            print(f"Main screenshot: {outfile}, {pixelmap.width()} x {pixelmap.height()}", flush=True)
+            window.hide()
+            recorder = RecorderWindow(QRect(0, 0, 1280, 720))
+            recorder.show()
+            recorder.recording_started(Path(root) / "sample.mp4", 550_000)
+            recorder.started_at = monotonic() - 27
+            recorder.update_time()
+            app.processEvents()
+            rec_path = outfile.with_name("clipmint-recorder-preview.png")
+            if not recorder.grab().save(str(rec_path), "PNG"):
+                os._exit(2)
+            recorder.hide()
+            sample_file = Path(root) / "sample.mp4"
+            with sample_file.open("wb") as dummy:
+                dummy.truncate(14 * 1024 * 1024)
+            dialog = SaveClipDialog(sample_file, "00:00:27", "High")
+            dialog.show()
+            app.processEvents()
+            save_path = outfile.with_name("clipmint-save-dialog-preview.png")
+            if not dialog.grab().save(str(save_path), "PNG"):
+                os._exit(3)
+            print(f"Recorder: {rec_path}; save dialog: {save_path}", flush=True)
             # A one-shot CI renderer. Avoid Qt's Xvfb teardown path.
             os._exit(0)
 

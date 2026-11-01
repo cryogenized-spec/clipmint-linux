@@ -1,9 +1,21 @@
-"""Local SQLite clipboard history. Contents are not encrypted."""
+"""Local SQLite clipboard history, organised into independent accumulation bins."""
 from __future__ import annotations
+
 from dataclasses import dataclass
 from pathlib import Path
 import os
+import re
 import sqlite3
+
+DEFAULT_BINS = ("Work", "Personal", "Temporary")
+SORTS = {
+    "Latest first": "id DESC",
+    "Oldest first": "id ASC",
+    "A–Z": "preview COLLATE NOCASE ASC, id DESC",
+    "Z–A": "preview COLLATE NOCASE DESC, id DESC",
+    "Numbered list": "id DESC",
+}
+
 
 @dataclass(frozen=True)
 class Clip:
@@ -12,6 +24,24 @@ class Clip:
     preview: str
     pinned: bool
     created_at: str
+    bin: str = "Work"
+
+
+def classify(clip: Clip) -> str:
+    if clip.kind == "image":
+        return "Images"
+    text = clip.preview.strip()
+    if re.search(r"https?://|www\.", text, flags=re.I):
+        return "URLs"
+    if re.fullmatch(r"\+?[\d\s()\-.]{7,22}", text) and sum(ch.isdigit() for ch in text) >= 7:
+        return "Phone numbers"
+    return "Text"
+
+
+def looks_sensitive(text: str) -> bool:
+    """Conservative opt-out for obvious credentials (not a security guarantee)."""
+    return bool(re.search(r"(?i)\b(password|passwd|api[_ -]?key|secret[_ -]?key|access[_ -]?token)\s*[:=]\s*\S+", text))
+
 
 class ClipStore:
     def __init__(self, path: Path | None = None, max_unpinned: int = 250):
@@ -29,40 +59,80 @@ class ClipStore:
             content BLOB NOT NULL,
             preview TEXT NOT NULL,
             pinned INTEGER NOT NULL DEFAULT 0,
-            created_at TEXT NOT NULL DEFAULT
-                (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+            created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+            bin TEXT NOT NULL DEFAULT 'Work'
         )""")
+        # Preserve old ClipMint histories. Existing records are assigned to Work.
+        columns = {row[1] for row in self.conn.execute("PRAGMA table_info(clips)")}
+        if "bin" not in columns:
+            self.conn.execute("ALTER TABLE clips ADD COLUMN bin TEXT NOT NULL DEFAULT 'Work'")
+        self.conn.execute("""CREATE TABLE IF NOT EXISTS bins (
+            name TEXT PRIMARY KEY,
+            position INTEGER NOT NULL
+        )""")
+        for index, name in enumerate(DEFAULT_BINS):
+            self.conn.execute("INSERT OR IGNORE INTO bins(name,position) VALUES(?,?)", (name, index))
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_clips_bin_id ON clips(bin,id)")
         self.conn.commit()
 
-    def add(self, kind: str, content: bytes, preview: str) -> int | None:
+    def bins(self) -> list[str]:
+        return [r[0] for r in self.conn.execute("SELECT name FROM bins ORDER BY position,name")]
+
+    def add_bin(self, name: str) -> None:
+        name = name.strip()
+        if not name or len(name) > 32:
+            raise ValueError("Bin name must have 1–32 characters")
+        self.conn.execute("INSERT INTO bins(name,position) VALUES(?,COALESCE((SELECT MAX(position)+1 FROM bins),0))", (name,))
+        self.conn.commit()
+
+    def add(self, kind: str, content: bytes, preview: str, bin_name: str = "Work") -> int | None:
         if kind not in ("text", "image"):
             raise ValueError("Unsupported clipboard type")
+        if bin_name not in self.bins():
+            raise ValueError("Unknown accumulation bin")
         if not content:
             return None
         newest = self.conn.execute(
-            "SELECT id,kind,content FROM clips ORDER BY id DESC LIMIT 1"
+            "SELECT id,kind,content FROM clips WHERE bin=? ORDER BY id DESC LIMIT 1", (bin_name,)
         ).fetchone()
         if newest and newest[1] == kind and newest[2] == content:
             return newest[0]
         cursor = self.conn.execute(
-            "INSERT INTO clips(kind,content,preview) VALUES(?,?,?)",
-            (kind, sqlite3.Binary(content), preview[:600])
+            "INSERT INTO clips(kind,content,preview,bin) VALUES(?,?,?,?)",
+            (kind, sqlite3.Binary(content), preview[:600], bin_name)
         )
-        self.conn.execute("""DELETE FROM clips WHERE pinned=0 AND id NOT IN
-            (SELECT id FROM clips WHERE pinned=0 ORDER BY id DESC LIMIT ?)""",
-            (self.max_unpinned,)
+        # Each bin retains its own pinned items and most recent unpinned items.
+        self.conn.execute("""DELETE FROM clips WHERE bin=? AND pinned=0 AND id NOT IN
+            (SELECT id FROM clips WHERE bin=? AND pinned=0 ORDER BY id DESC LIMIT ?)""",
+            (bin_name, bin_name, self.max_unpinned)
         )
         self.conn.commit()
         return cursor.lastrowid
 
-    def search(self, query: str = "") -> list[Clip]:
+    def search(
+        self, query: str = "", bin_name: str = "Work",
+        sort: str = "Latest first", category: str = "All",
+    ) -> list[Clip]:
+        order = SORTS.get(sort, SORTS["Latest first"])
         rows = self.conn.execute(
-            """SELECT id,kind,preview,pinned,created_at FROM clips
-               WHERE instr(lower(preview),lower(?)) > 0
-               ORDER BY pinned DESC,id DESC LIMIT 500""",
-            (query,)
+            f"""SELECT id,kind,preview,pinned,created_at,bin FROM clips
+               WHERE bin=? AND instr(lower(preview),lower(?)) > 0
+               ORDER BY {order} LIMIT 1000""",
+            (bin_name, query)
         ).fetchall()
-        return [Clip(r[0], r[1], r[2], bool(r[3]), r[4]) for r in rows]
+        clips = [Clip(r[0], r[1], r[2], bool(r[3]), r[4], r[5]) for r in rows]
+        if category != "All":
+            clips = [clip for clip in clips if classify(clip) == category]
+        return clips
+
+    def count(self, bin_name: str) -> int:
+        return self.conn.execute("SELECT COUNT(*) FROM clips WHERE bin=?", (bin_name,)).fetchone()[0]
+
+    def move(self, clip_id: int, bin_name: str) -> None:
+        if bin_name not in self.bins():
+            raise ValueError("Unknown accumulation bin")
+        self.conn.execute("UPDATE clips SET bin=? WHERE id=?", (bin_name, clip_id))
+        self.conn.commit()
 
     def get(self, clip_id: int) -> tuple[str, bytes] | None:
         row = self.conn.execute("SELECT kind,content FROM clips WHERE id=?", (clip_id,)).fetchone()

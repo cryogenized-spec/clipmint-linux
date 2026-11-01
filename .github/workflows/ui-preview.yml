@@ -4,6 +4,8 @@ on:
     branches: [main]
     paths:
       - "tools/render_ui_preview.py"
+      - "clipmint/app.py"
+      - "clipmint/recording_ui.py"
       - ".github/workflows/ui-preview.yml"
   workflow_dispatch:
 permissions:
@@ -21,25 +23,25 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libegl1 libopengl0 libxcb-cursor0 libxkbcommon-x11-0 libxcb-icccm4 libxcb-shape0 libxcb-keysyms1 xvfb
           python -m pip install -r requirements.txt
-      - name: Render original Qt window with synthetic snippets
+      - name: Render current Qt windows with synthetic snippets
         env:
           XDG_SESSION_TYPE: x11
           QT_QPA_PLATFORM: xcb
         run: |
           mkdir -p docs
           xvfb-run -a -s "-screen 0 1280x850x24" python -m tools.render_ui_preview docs/clipmint-ui-preview.png
-          file docs/clipmint-ui-preview.png
-          base64 -w 0 docs/clipmint-ui-preview.png > docs/clipmint-ui-preview.png.b64
+          file docs/clipmint-*-preview.png
+          for img in docs/clipmint-*-preview.png; do base64 -w 0 "$img" > "$img.b64"; done
       - name: Commit preview image back to repository
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add docs/clipmint-ui-preview.png docs/clipmint-ui-preview.png.b64
-          git commit -m "Capture ClipMint v0.2 UI screenshot with sample clipboard data"
+          git add docs/clipmint-*-preview.png docs/clipmint-*-preview.png.b64
+          git commit -m "Refresh ClipMint Qt UI screenshots after interface changes"
           git push
       - uses: actions/upload-artifact@v4
         with:
           name: clipmint-ui-preview
-          path: docs/clipmint-ui-preview.png
+          path: docs/clipmint-*-preview.png
