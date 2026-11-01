@@ -7,7 +7,7 @@ import subprocess
 import sys
 
 from PySide6.QtCore import Qt, QByteArray, QBuffer, QIODevice, QTimer
-from PySide6.QtGui import QImage
+from PySide6.QtGui import QImage, QFont
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QDialog, QFrame, QHBoxLayout, QInputDialog,
     QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow,
@@ -21,29 +21,39 @@ from .store import ClipStore, classify, looks_sensitive
 
 
 THEME = """
-QMainWindow, QWidget#appRoot {background:#0e1627;color:#e5f2ff;}
-QLabel {color:#e5f2ff;}
-QLabel#brand {color:#50e4ca;font-size:25px;font-weight:750;}
-QLabel#muted {color:#9bb3cd;}
-QLineEdit,QComboBox {background:#14263f;color:#eef8ff;border:1px solid #345572;
+/* These families ship with standard Linux Mint; no third-party font downloads. */
+QMainWindow, QWidget#appRoot {background:#0e1627;color:#e5f2ff;
+    font-family:"DejaVu Sans";font-size:14px;}
+QLabel {color:#e5f2ff;font-family:"DejaVu Sans";font-size:14px;}
+QLabel#brand {color:#50e4ca;font-family:"DejaVu Sans Mono";font-size:29px;font-weight:700;}
+QLabel#edition {color:#ba8bff;font-family:"DejaVu Sans Mono";font-size:18px;font-weight:700;}
+QLabel#muted {color:#9bb3cd;font-size:12px;}
+QLabel#sectionTitle {color:#ebf6ff;font-family:"DejaVu Sans Mono";font-size:17px;font-weight:700;}
+QLabel#previewHeading {color:#bb9bfa;font-family:"DejaVu Sans Mono";font-size:13px;font-weight:700;}
+QLineEdit,QComboBox {font-family:"DejaVu Sans";font-size:14px;
+    background:#14263f;color:#eef8ff;border:1px solid #345572;
     padding:10px;border-radius:9px;selection-background-color:#31688b;}
 QLineEdit:focus,QComboBox:focus {border:1px solid #48e5c4;}
-QListWidget {background:#111f33;color:#ebf4ff;border:1px solid #36516c;
+QListWidget {font-family:"DejaVu Sans";font-size:14px;
+    background:#111f33;color:#ebf4ff;border:1px solid #36516c;
     border-radius:12px;padding:8px;outline:none;}
-QListWidget::item {padding:12px 8px;border-bottom:1px solid #253b51;}
+QListWidget::item {padding:13px 9px;border-bottom:1px solid #253b51;}
 QListWidget::item:selected {background:#23456b;border-radius:8px;}
-QPushButton,QToolButton {background:#1c304c;color:#eaf6ff;border:1px solid #42678f;
-    border-radius:9px;padding:11px 14px;font-weight:600;}
+QPushButton,QToolButton {font-family:"DejaVu Sans";font-size:13px;
+    background:#1c304c;color:#eaf6ff;border:1px solid #42678f;
+    border-radius:9px;padding:11px 12px;font-weight:600;}
 QPushButton:hover,QToolButton:hover {background:#294666;border:1px solid #5debd4;}
 QPushButton:checked {background:#175c72;border:1px solid #4fe3c9;}
-QPushButton#record {background:#114e48;border:2px solid #32d9bf;}
-QPushButton#screenshot {background:#392454;border:2px solid #a26fe1;}
-QTabBar::tab {background:#1c2d4a;color:#d9ecff;border:1px solid #3f597b;
-    padding:13px 25px;border-radius:9px;margin-right:7px;}
+QPushButton#record {background:#114e48;border:2px solid #32d9bf;font-size:14px;}
+QPushButton#screenshot {background:#392454;border:2px solid #a26fe1;font-size:14px;}
+QTabBar::tab {font-family:"DejaVu Sans";font-size:14px;font-weight:650;
+    background:#1c2d4a;color:#d9ecff;border:1px solid #3f597b;
+    padding:13px 18px;border-radius:9px;margin-right:7px;}
 QTabBar::tab:selected {background:#185c73;border:2px solid #45ebce;}
 QFrame#sidebar {background:#101b2d;border:1px solid #273b53;border-radius:12px;}
 QFrame#preview {background:#121e31;border:1px solid #2e4c6b;border-radius:12px;}
-QStatusBar {background:#0b1524;color:#9bb3cd;}
+QStatusBar {font-family:"DejaVu Sans";font-size:12px;
+    background:#0b1524;color:#9bb3cd;}
 """
 
 
@@ -70,9 +80,22 @@ class ClipMintWindow(QMainWindow):
         root.setContentsMargins(18, 16, 18, 14)
         root.setSpacing(14)
         header = QHBoxLayout()
-        heading = QLabel("◈  ClipMint  ve-02")
+        # Distinctive monospaced wordmark; keep clipboard text in readable sans.
+        logo = QLabel("◈")
+        logo.setObjectName("brand")
+        header.addWidget(logo)
+        heading = QLabel("ClipMint")
         heading.setObjectName("brand")
+        display_font = QFont("DejaVu Sans Mono", 23, QFont.Weight.Bold)
+        display_font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 1.4)
+        heading.setFont(display_font)
         header.addWidget(heading)
+        edition = QLabel("ve-02")
+        edition.setObjectName("edition")
+        version_font = QFont("DejaVu Sans Mono", 15, QFont.Weight.Bold)
+        version_font.setItalic(True)
+        edition.setFont(version_font)
+        header.addWidget(edition)
         header.addStretch()
         title = QLabel("Local clipboard hub  •  Cinnamon X11")
         title.setObjectName("muted")
@@ -194,7 +217,7 @@ class ClipMintWindow(QMainWindow):
         sorts.addStretch()
         layout.addLayout(sorts)
         self.count_label = QLabel("Clipboard")
-        self.count_label.setStyleSheet("font-size:15px;font-weight:700;")
+        self.count_label.setObjectName("sectionTitle")
         layout.addWidget(self.count_label)
         middle = QHBoxLayout()
         middle.setSpacing(12)
@@ -209,7 +232,9 @@ class ClipMintWindow(QMainWindow):
         preview_frame.setMinimumWidth(185)
         preview_frame.setMaximumWidth(290)
         right = QVBoxLayout(preview_frame)
-        right.addWidget(QLabel("PREVIEW"))
+        preview_heading = QLabel("PREVIEW")
+        preview_heading.setObjectName("previewHeading")
+        right.addWidget(preview_heading)
         self.preview_label = QLabel("Select an item to preview")
         self.preview_label.setWordWrap(True)
         self.preview_label.setAlignment(Qt.AlignmentFlag.AlignTop)
@@ -226,7 +251,7 @@ class ClipMintWindow(QMainWindow):
         page = QWidget()
         layout = QVBoxLayout(page)
         heading = QLabel(f"{kind} · saved locally")
-        heading.setStyleSheet("font-size:20px;font-weight:700;")
+        heading.setObjectName("sectionTitle")
         layout.addWidget(heading)
         listing = QListWidget()
         listing.itemDoubleClicked.connect(self.open_saved_file)
@@ -249,7 +274,7 @@ class ClipMintWindow(QMainWindow):
         page = QWidget()
         layout = QVBoxLayout(page)
         heading = QLabel(title)
-        heading.setStyleSheet("font-size:22px;font-weight:700;color:#58e6cc;")
+        heading.setObjectName("sectionTitle")
         layout.addWidget(heading)
         label = QLabel(description)
         label.setWordWrap(True)
