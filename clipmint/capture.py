@@ -6,6 +6,7 @@ from pathlib import Path
 import os
 import shutil
 import subprocess
+import sys
 
 from PySide6.QtCore import Qt, QRect, QPoint, Signal
 from PySide6.QtGui import QColor, QPainter, QPen, QPixmap
@@ -103,6 +104,20 @@ class AreaSelector(QWidget):
             super().keyPressEvent(event)
 
 
+def ffmpeg_binary() -> str:
+    """A frozen build uses its bundled FFmpeg and never downloads software."""
+    if getattr(sys, "frozen", False):
+        root = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+        executable = root / "tools" / "ffmpeg"
+        if not executable.is_file():
+            raise RuntimeError("This ClipMint package is incomplete (FFmpeg missing).")
+        return str(executable)
+    executable = shutil.which("ffmpeg")
+    if not executable:
+        raise RuntimeError("Developer mode: FFmpeg is absent. Use the bundled .deb installer.")
+    return executable
+
+
 class RegionRecorder:
     """Own an FFmpeg subprocess and stop it cleanly through its stdin."""
     def __init__(self):
@@ -120,8 +135,7 @@ class RegionRecorder:
             raise RuntimeError("A recording is still running or being finalized")
         if os.environ.get("XDG_SESSION_TYPE", "x11") != "x11":
             raise RuntimeError("Recording currently requires an X11 session")
-        if not shutil.which("ffmpeg"):
-            raise RuntimeError("FFmpeg was not found. Install ffmpeg first")
+        ffmpeg_path = ffmpeg_binary()
         display = os.environ.get("DISPLAY")
         if not display:
             raise RuntimeError("DISPLAY is unset; an X11 desktop is required")
@@ -131,7 +145,7 @@ class RegionRecorder:
         path = recordings_dir() / stamped_filename("recording", "mp4")
         log_path = path.with_suffix(".ffmpeg.log")
         args = [
-            "ffmpeg", "-hide_banner", "-loglevel", "warning", "-y",
+            ffmpeg_path, "-hide_banner", "-loglevel", "warning", "-y",
             "-f", "x11grab", "-framerate", "25",
             "-video_size", f"{width}x{height}",
             "-i", f"{display}+{rect.x()},{rect.y()}",
