@@ -27,7 +27,7 @@ jobs:
           QT_QPA_PLATFORM: xcb
         run: |
           mkdir -p docs
-          xvfb-run -a -s "-screen 0 1280x850x24" python tools/render_ui_preview.py docs/clipmint-ui-preview.png
+          xvfb-run -a -s "-screen 0 1280x850x24" python -m tools.render_ui_preview docs/clipmint-ui-preview.png
           file docs/clipmint-ui-preview.png
           base64 -w 0 docs/clipmint-ui-preview.png > docs/clipmint-ui-preview.png.b64
       - name: Commit preview image back to repository
