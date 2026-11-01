@@ -25,7 +25,7 @@ jobs:
       - name: Install build tools on GitHub runner ONLY
         run: |
           sudo apt-get update
-          sudo apt-get install -y libegl1 libopengl0 libxcb-cursor0 libxkbcommon-x11-0 libxcb-icccm4 libxcb-shape0 libxcb-keysyms1 xvfb
+          sudo apt-get install -y libegl1 libopengl0 libxcb-cursor0 libxkbcommon-x11-0 libxcb-icccm4 libxcb-shape0 libxcb-keysyms1 xvfb desktop-file-utils
           python -m pip install --disable-pip-version-check -r requirements.txt "pyinstaller==6.22.3"
       - name: Python syntax and clipboard database tests
         env:
@@ -70,6 +70,8 @@ jobs:
           if [[ "$code" -ne 124 ]]; then echo "Unexpected app exit status: $code"; exit 1; fi
       - name: Create normal graphical Debian package
         run: bash packaging/build-deb.sh
+      - name: Verify and smoke-test INSTALLED field prototype
+        run: bash packaging/verify-field-package.sh dist-packages/clipmint_0.3.0_amd64.deb
       - uses: actions/upload-artifact@v4
         with:
           name: ClipMint-LinuxMint-0.3.0
@@ -80,4 +82,4 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "clipmint-v0.3.0-build-${GITHUB_RUN_NUMBER}" dist-packages/clipmint_0.3.0_amd64.deb dist-packages/SHA256SUMS --title "ClipMint v0.3.0 — Linux Mint installer (build ${GITHUB_RUN_NUMBER})" --notes "Preview for Linux Mint 22 Cinnamon X11 on x86-64. Download the .deb, double-click it in Nemo, and select Install Package. Bundled Qt/Python and FFmpeg; no other app or terminal is required to run ClipMint. Screen capture still requires real-hardware testing." --prerelease
+          gh release create "clipmint-v0.3.0-build-${GITHUB_RUN_NUMBER}" dist-packages/clipmint_0.3.0_amd64.deb dist-packages/SHA256SUMS --title "ClipMint v0.3.0 — Linux Mint installer (build ${GITHUB_RUN_NUMBER})" --notes "Preview for Linux Mint 22 Cinnamon X11 on x86-64. Download the .deb, double-click it in Nemo, and select Install Package. Bundled Qt/Python and FFmpeg; no other app or terminal is required to run ClipMint. CI validates the installed package and sample MP4/GIF under X11. Actual laptop capture still requires field tests. See docs/FIELD-PROTOTYPE.md." --prerelease
