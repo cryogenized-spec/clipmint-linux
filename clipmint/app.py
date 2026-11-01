@@ -92,7 +92,7 @@ class ClipMintWindow(QMainWindow):
         self.nav_buttons: dict[str, QPushButton] = {}
         for index, name in enumerate(("Clipboard", "Screenshots", "Recordings",
                                        "Secrets & Variables", "Autosort", "Settings")):
-            b = QPushButton(name)
+            b = QPushButton(name.replace("&", "&&"))
             b.setCheckable(True)
             b.clicked.connect(lambda _checked=False, i=index: self.open_section(i))
             self.nav_buttons[name] = b
