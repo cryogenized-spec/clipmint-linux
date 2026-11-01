@@ -39,9 +39,9 @@ def main():
                 print("Could not capture ClipMint Qt widget", file=sys.stderr)
                 app.exit(1)
                 return
-            print(f"Screenshot created: {outfile}, {pixelmap.width()} x {pixelmap.height()}")
-            window.hide()
-            app.quit()
+            print(f"Screenshot created: {outfile}, {pixelmap.width()} x {pixelmap.height()}", flush=True)
+            # A one-shot CI renderer. Avoid Qt's Xvfb teardown path.
+            os._exit(0)
 
         QTimer.singleShot(700, capture)
         code = app.exec()
