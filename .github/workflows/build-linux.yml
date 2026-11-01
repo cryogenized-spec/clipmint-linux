@@ -72,7 +72,7 @@ jobs:
         run: bash packaging/build-deb.sh
       - uses: actions/upload-artifact@v4
         with:
-          name: ClipMint-LinuxMint-0.2.0
+          name: ClipMint-LinuxMint-0.3.0
           path: dist-packages/
           if-no-files-found: error
           retention-days: 30
@@ -80,4 +80,4 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "clipmint-v0.2.0-build-${GITHUB_RUN_NUMBER}" dist-packages/clipmint_0.2.0_amd64.deb dist-packages/SHA256SUMS --title "ClipMint v0.2.0 — Linux Mint installer (build ${GITHUB_RUN_NUMBER})" --notes "Preview for Linux Mint 22 Cinnamon X11 on x86-64. Download the .deb, double-click it in Nemo, and select Install Package. Bundled Qt/Python and FFmpeg; no other app or terminal is required to run ClipMint. Screen capture still requires real-hardware testing." --prerelease
+          gh release create "clipmint-v0.3.0-build-${GITHUB_RUN_NUMBER}" dist-packages/clipmint_0.3.0_amd64.deb dist-packages/SHA256SUMS --title "ClipMint v0.3.0 — Linux Mint installer (build ${GITHUB_RUN_NUMBER})" --notes "Preview for Linux Mint 22 Cinnamon X11 on x86-64. Download the .deb, double-click it in Nemo, and select Install Package. Bundled Qt/Python and FFmpeg; no other app or terminal is required to run ClipMint. Screen capture still requires real-hardware testing." --prerelease
