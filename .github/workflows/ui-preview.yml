@@ -4,6 +4,8 @@ on:
     branches: [main]
     paths:
       - "tools/render_ui_preview.py"
+      - "clipmint/app.py"
+      - "clipmint/recording_ui.py"
       - ".github/workflows/ui-preview.yml"
   workflow_dispatch:
 permissions:
@@ -21,7 +23,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libegl1 libopengl0 libxcb-cursor0 libxkbcommon-x11-0 libxcb-icccm4 libxcb-shape0 libxcb-keysyms1 xvfb
           python -m pip install -r requirements.txt
-      - name: Render original Qt window with synthetic snippets
+      - name: Render current Qt windows with synthetic snippets
         env:
           XDG_SESSION_TYPE: x11
           QT_QPA_PLATFORM: xcb
@@ -37,7 +39,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add docs/clipmint-*-preview.png docs/clipmint-*-preview.png.b64
-          git commit -m "Capture ClipMint v0.2 UI screenshot with sample clipboard data"
+          git commit -m "Refresh ClipMint Qt UI screenshots after interface changes"
           git push
       - uses: actions/upload-artifact@v4
         with:
