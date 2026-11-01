@@ -50,7 +50,12 @@ jobs:
           echo "Bundled video encoder supports X11 area input and H264"
       - name: Freeze Python Qt application
         run: |
-          pyinstaller --noconfirm --clean --windowed --onedir --name ClipMint --add-binary "vendor/ffmpeg:tools" launcher.py
+          test -f /usr/lib/x86_64-linux-gnu/libxcb-cursor.so.0
+          pyinstaller --noconfirm --clean --windowed --onedir --name ClipMint \
+            --add-binary "vendor/ffmpeg:tools" \
+            --add-binary "/usr/lib/x86_64-linux-gnu/libxcb-cursor.so.0:." \
+            launcher.py
+          ldd dist/ClipMint/_internal/PySide6/Qt/plugins/platforms/libqxcb.so || true
           test -x dist/ClipMint/ClipMint
           test -x dist/ClipMint/_internal/tools/ffmpeg
       - name: Test executable starts with virtual X11 display
