@@ -6,6 +6,7 @@ from pathlib import Path
 from time import monotonic
 
 from PySide6.QtCore import Qt, QTimer, QRect, Signal
+from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QComboBox, QDialog, QHBoxLayout, QLabel, QPushButton, QVBoxLayout,
     QWidget, QApplication,
@@ -41,15 +42,15 @@ class RecorderWindow(QWidget):
         )
         self.setMinimumWidth(660)
         self.setStyleSheet("""
-            QWidget {background:#101c30;color:#eaf5ff;font-size:13px;}
+            QWidget {background:#101c30;color:#eaf5ff;font-size:14px;font-family:"DejaVu Sans";}
             QPushButton {background:#162b48;color:#e8f5ff;border:1px solid #3971a2;
-                padding:12px 16px;border-radius:10px;font-weight:600;}
+                padding:12px 15px;border-radius:10px;font-size:14px;font-weight:600;}
             QPushButton:hover {border:1px solid #41e4cc;background:#243d5c;}
-            QPushButton#toggle {background:#145e59;border:2px solid #36dfc0;font-size:17px;}
+            QPushButton#toggle {background:#145e59;border:2px solid #36dfc0;font-size:16px;font-weight:700;}
             QPushButton#toggle:disabled {background:#343c4e;color:#a3b1c0;}
-            QComboBox {background:#152640;border:1px solid #537494;
+            QComboBox {font-family:"DejaVu Sans";font-size:13px;background:#152640;border:1px solid #537494;
                 padding:8px;border-radius:8px;min-width:98px;}
-            QLabel#clock {font-size:25px;font-weight:700;}
+            QLabel#clock {font-family:"DejaVu Sans Mono";font-size:27px;font-weight:700;color:#f1fbff;}
             QLabel#hint {color:#9fb9cc;}
         """)
         root = QVBoxLayout(self)
@@ -57,7 +58,10 @@ class RecorderWindow(QWidget):
         root.setSpacing(10)
         top = QHBoxLayout()
         brand = QLabel("◉  ClipMint  /  Recorder")
-        brand.setStyleSheet("font-size:17px;font-weight:700;color:#50e6ca;")
+        brand.setStyleSheet('font-family:"DejaVu Sans Mono";font-size:18px;font-weight:700;color:#50e6ca;')
+        title_font = QFont("DejaVu Sans Mono", 14, QFont.Weight.Bold)
+        title_font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 0.7)
+        brand.setFont(title_font)
         top.addWidget(brand)
         top.addStretch()
         self.state = QLabel("●  Ready")
@@ -175,8 +179,8 @@ class SaveClipDialog(QDialog):
         self.setModal(True)
         self.setMinimumWidth(410)
         self.setStyleSheet("""
-            QDialog {background:#111e33;color:#eaf5ff;}
-            QLabel {color:#eaf5ff;font-size:14px;}
+            QDialog {background:#111e33;color:#eaf5ff;font-family:"DejaVu Sans";font-size:14px;}
+            QLabel {color:#eaf5ff;font-family:"DejaVu Sans";font-size:14px;}
             QPushButton {padding:13px 24px;border-radius:10px;font-weight:700;
                 border:1px solid #7893b0;background:#273951;color:#f2f7ff;}
             QPushButton:focus {border:2px solid #55efd1;}
@@ -185,7 +189,7 @@ class SaveClipDialog(QDialog):
         root = QVBoxLayout(self)
         root.setContentsMargins(24, 20, 24, 22)
         title = QLabel("Save this clip?")
-        title.setStyleSheet("font-size:24px;font-weight:700;")
+        title.setStyleSheet('font-family:"DejaVu Sans Mono";font-size:22px;font-weight:700;color:#58e6cc;')
         root.addWidget(title)
         size = size_display(path.stat().st_size) if path.exists() else "Unknown size"
         root.addWidget(QLabel(f"{duration}   •   {size}   •   {quality}   •   {path.suffix[1:].upper()}"))
@@ -201,7 +205,7 @@ class SaveClipDialog(QDialog):
         buttons.addWidget(self.no_button)
         root.addLayout(buttons)
         hint = QLabel("Enter = confirm selected option   •   ← / → = switch")
-        hint.setStyleSheet("font-size:11px;color:#a5bacb;")
+        hint.setStyleSheet("font-size:12px;color:#a5bacb;")
         root.addWidget(hint)
         self.yes_button.setFocus()
 
