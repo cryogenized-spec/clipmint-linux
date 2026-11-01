@@ -1,0 +1,78 @@
+name: Build self-contained Linux Mint installer
+on:
+  push:
+    branches: [main]
+    paths:
+      - "clipmint/**"
+      - "tests/**"
+      - "packaging/**"
+      - "launcher.py"
+      - "requirements.txt"
+      - ".github/workflows/build-linux.yml"
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    env:
+      XDG_SESSION_TYPE: x11
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install build tools on GitHub runner ONLY
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxcb-cursor0 libxkbcommon-x11-0 xvfb
+          python -m pip install --disable-pip-version-check -r requirements.txt "pyinstaller==6.22.3"
+      - name: Python syntax and clipboard database tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          python -m compileall -q clipmint tests launcher.py
+          python -m unittest discover -s tests -v
+      - name: Bundle checksum-verified static FFmpeg (GitHub runner only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p vendor /tmp/clipmint-ffmpeg
+          url="https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-10-31-12-59/ffmpeg-N-128227-g4811625b5f-linux64-gpl.tar.xz"
+          curl --fail --location --retry 3 --output /tmp/clipmint-ffmpeg.tar.xz "$url"
+          echo "67929be39bbb696f41d3295686597a439aeac902f61d82be660ccc1453c1fdfb  /tmp/clipmint-ffmpeg.tar.xz" | sha256sum --check
+          tar -xJf /tmp/clipmint-ffmpeg.tar.xz -C /tmp/clipmint-ffmpeg
+          binary="$(find /tmp/clipmint-ffmpeg -path "*/bin/ffmpeg" -type f -print -quit)"
+          test -n "$binary"
+          install -m 755 "$binary" vendor/ffmpeg
+          vendor/ffmpeg -hide_banner -devices 2>&1 | grep -q x11grab
+          vendor/ffmpeg -hide_banner -encoders 2>&1 | grep -q libx264
+          echo "Bundled video encoder supports X11 area input and H264"
+      - name: Freeze Python Qt application
+        run: |
+          pyinstaller --noconfirm --clean --windowed --onedir --name ClipMint --add-binary "vendor/ffmpeg:tools" launcher.py
+          test -x dist/ClipMint/ClipMint
+          test -x dist/ClipMint/_internal/tools/ffmpeg
+      - name: Test executable starts with virtual X11 display
+        shell: bash
+        env:
+          QT_QPA_PLATFORM: xcb
+        run: |
+          set +e
+          xvfb-run -a timeout 12s dist/ClipMint/ClipMint
+          code=$?
+          set -e
+          if [[ "$code" -ne 124 ]]; then echo "Unexpected app exit status: $code"; exit 1; fi
+      - name: Create normal graphical Debian package
+        run: bash packaging/build-deb.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ClipMint-LinuxMint-0.2.0
+          path: dist-packages/
+          if-no-files-found: error
+          retention-days: 30
+      - name: Publish prerelease download
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "clipmint-v0.2.0-build-${GITHUB_RUN_NUMBER}" dist-packages/clipmint_0.2.0_amd64.deb dist-packages/SHA256SUMS --title "ClipMint v0.2.0 — Linux Mint installer (build ${GITHUB_RUN_NUMBER})" --notes "Preview for Linux Mint 22 Cinnamon X11 on x86-64. Download the .deb, double-click it in Nemo, and select Install Package. Bundled Qt/Python and FFmpeg; no other app or terminal is required to run ClipMint. Screen capture still requires real-hardware testing." --prerelease

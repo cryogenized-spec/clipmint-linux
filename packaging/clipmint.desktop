@@ -1,0 +1,12 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=ClipMint
+Comment=Clipboard history, selected-area screenshots and screen recording
+Exec=/opt/clipmint/ClipMint
+TryExec=/opt/clipmint/ClipMint
+Icon=clipmint
+Terminal=false
+Categories=Utility;Graphics;
+StartupNotify=true
+Keywords=clipboard;history;snippets;screenshot;recording;

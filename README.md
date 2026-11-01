@@ -1,41 +1,32 @@
-# ClipMint — native Linux clipboard & screen capture
+# ClipMint — a native Linux Mint app
 
-Early **v0.1 development prototype** for Linux Mint Cinnamon with **X11**. Independent of the Windows application ClipClip.
+ClipMint is a mouse-driven clipboard history, screenshot and area-video recorder for **Linux Mint 22 Cinnamon/X11**. It is independent of ClipClip and does not use Wine.
 
-## Features implemented
+## Install: one file, no terminal
 
-- Persistent local text/image clipboard history, search, pin and delete.
-- Right-click a snippet for **Copy**, **Pin / Unpin**, and **Delete**.
-- Select a screenshot rectangle with the mouse; save PNG and copy image.
-- Select a video rectangle with the mouse; record an MP4 through FFmpeg.
-- Visible Stop recording button and optional tray Stop action.
-- Pause/resume monitoring; open recordings folder.
-- **No Wine or mandatory keyboard shortcuts.** Does not modify CopyQ.
+1. Open [Releases](https://github.com/cryogenized-spec/clipmint-linux/releases) in this private GitHub repository.
+2. Download the newest **clipmint_0.2.0_amd64.deb** from a successful preview build.
+3. Double-click the .deb file in Nemo and choose **Install Package** in Linux Mint's graphical installer.
+4. Find **ClipMint** in your application menu. Open it whenever you want. There is no terminal to keep open.
 
-## Install on Linux Mint
+The package bundles Python, Qt, and FFmpeg into the app. It does not use pip, apt, Wine, or runtime downloads on your laptop. It does not install any development libraries or change CopyQ. Building the downloadable .deb happens only on GitHub's machines. Do not use the old source ZIP or old install.sh as a user installer.
 
-    git clone https://github.com/cryogenized-spec/clipmint-linux.git
-    cd clipmint-linux
-    bash install.sh
-    bash run.sh
+## How to use
 
-Private repositories need GitHub authentication for clone. Alternatively, use Code > Download ZIP on GitHub, extract, then run the scripts inside the extracted directory.
+Copy some text or an image. The history appears in ClipMint. Right-click a snippet to **Copy**, **Pin** or **Delete**. Select **Screenshot area** or **Record area** and drag a rectangle. Click **Stop recording** in the window or tray menu to save your MP4. No global shortcuts.
 
-The installer installs FFmpeg, Python venv, and Qt XCB cursor support, then installs PySide6 into a project-local environment. Review the scripts before running. Run as your normal user, not root.
+- Screenshots: ~/Pictures/ClipMint
+- Videos: ~/Videos/ClipMint
+- Local database: ~/.local/share/clipmint/history.sqlite3
 
-Click **Screenshot area** or **Record area**, drag a rectangle and release. Right-click on the selection overlay to cancel. Click **Stop recording** to save the MP4.
+## What is and is not verified
 
-Files are saved in ~/Pictures/ClipMint and ~/Videos/ClipMint. Clipboard history is in ~/.local/share/clipmint/history.sqlite3 unless XDG_DATA_HOME is set.
+GitHub Actions builds the frozen app and runs Python/SQLite tests plus a launch test under virtual X11. Recording and screenshot capture must still be tested on an actual Linux Mint Cinnamon laptop. This is an **early preview**, not production tested.
 
-## Development and testing
+## Privacy and limitations
 
-    python3 -m unittest discover -s tests -v
-    python3 -m compileall -q clipmint tests
+The SQLite history is unencrypted. Pause monitoring before copying confidential data; delete saved secrets if they were captured. Video is silent (no microphone or system audio). Primary-display-only capture selection; no built-in OCR or annotation, and no Wayland support yet. The main ClipMint window may overlap the recorded area until you minimize or move it.
 
-GitHub Actions runs the Python syntax and database tests. The GUI and actual X11 recording have **not** been tested on this user's Cinnamon machine. This is not a production-tested release.
+## Developers
 
-## Limitations and security
-
-Clipboard history is unencrypted. Pause monitoring before copying secrets and delete sensitive clips already stored. Primary display only; audio recording, annotation, OCR, Wayland, rich-text preservation, packaged .deb and automatic updates are not yet implemented. The ClipMint window may overlap the video capture region; minimize or move it after recording starts, then use the tray or window Stop control.
-
-Licensed under MIT; not affiliated with ClipClip.
+The source tree contains Python and PySide6 code. The GitHub Actions workflow builds a .deb using PyInstaller and bundles a pinned, checksum-verified separate GPL FFmpeg executable downloaded on the **build runner only**. Original ClipMint code is MIT-licensed; FFmpeg follows its own GPL licence. This project is not affiliated with the original ClipClip.
