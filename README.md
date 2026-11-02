@@ -41,9 +41,9 @@ The independent open-licensed DotGothic16 TTF and OFL license are fetched **only
 
 ## Katakana and original manga details (v0.4 draft)
 
-ClipMint's brand header adds `クリップミント` (the Japanese phonetic rendering of ClipMint), the image-preview caption adds `プレビュー` (preview), and an original small sidebar character is labelled `コマ / 01` (Koma, also the word used for a comic panel). Primary actions and settings remain English for usability. These are intentional, limited typographic accents, not random Japanese text on every button.
+ClipMint's brand header adds `クリップミント` (the Japanese phonetic rendering of ClipMint), the image-preview caption adds `プレビュー` (preview), and the sidebar portrait is labelled `メイド / 01` (maid). Main controls and settings remain English for usability.
 
-**Koma** is an original generated manga portrait, cropped directly from the artwork concept rather than reinterpreted as a simple vector. The actual image `clipmint/assets/koma_manga_full.jpg` is a 350-pixel-wide, high-quality detailed portrait (pink-and-black halftone hair, illustrated cat-ear headphones, cheek bandage and lime lollipop). The Qt sidebar widget displays a face-focused crop without modifying the underlying image, and the exact JPEG is bundled into the self-contained installer. It requires no remote image hosting or network requests. The art is decorative, cannot intercept clicks, cannot acquire keyboard focus, and hides on shorter windows to preserve navigation. The old placeholder SVG is retired.
+The sidebar displays the **crimson-haired maid selected by the user**, looking over her shoulder with her hands held behind her back, wearing a dark ruffled dress with white trim and red ornaments. `clipmint/assets/crimson_maid.png` is a 440-pixel-wide optimized PNG derived from the exact user-provided illustration, retaining its transparent background and compositing correctly on the dark Qt interface. The display widget shows a non-distorted upper-body crop. The image is bundled into the offline installer; no network transfer, third-party hosting, image-generation step, or downloaded font is required at runtime. It is decorative, cannot intercept clicks or keyboard focus, and hides when the window is too short. The older Koma mascot, sketches and JPEG assets are retired.
 
 ## Verification and limitations
 
