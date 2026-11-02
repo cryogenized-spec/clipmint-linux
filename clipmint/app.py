@@ -166,7 +166,22 @@ class ClipMintWindow(QMainWindow):
             self.manga_dock.setFixedWidth(
                 336 if self.width() < 1140 else min(390, max(305, int(self.width() * .26)))
             )
-        self.dock_panel.setFixedWidth(56 if self.width() < 1250 else 74)
+        self.dock_panel.setFixedWidth(110 if self.width() >= 1370 else 56)
+        if hasattr(self, "archive_heading"):
+            self.archive_heading.setText(
+                "Clipboard  ·  クリップボード" if self.width() >= 1270 else "Clipboard"
+            )
+        icons = {"Clipboard":"▤", "Screenshots":"▣", "Recordings":"◉",
+                 "Secrets & Variables":"♢", "Autosort":"⇄", "Settings":"⚙"}
+        for label, button in self.nav_buttons.items():
+            if self.width() >= 1370:
+                short = {"Screenshots":"Shots", "Recordings":"Video",
+                         "Secrets & Variables":"Secrets"}.get(label, label)
+                button.setText(icons[label] + "\n" + short.upper())
+                button.setMinimumHeight(73)
+            else:
+                button.setText(icons[label])
+                button.setMinimumHeight(60)
 
     def build_clipboard_page(self):
         page = QWidget()
@@ -446,6 +461,8 @@ class ClipMintWindow(QMainWindow):
                 self.history.setCurrentItem(item)
         self.history.blockSignals(False)
         self.count_label.setText(f"{len(clips):02d} / {self.store.count(bin_name):02d}")
+        if hasattr(self, "footer_status"):
+            self.footer_status.setText(f"● Ready   |   HISTORY {self.store.count(bin_name):02d}")
         if hasattr(self, "footer_status"):
             self.footer_status.setToolTip(f"{self.store.count(bin_name)} clips in {bin_name}")
         if self.history.currentItem() is None:
