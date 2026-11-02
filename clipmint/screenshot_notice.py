@@ -10,7 +10,7 @@ from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLay
 
 
 class ScreenshotNotice(QFrame):
-    def __init__(self, parent, on_edit, on_close):
+    def __init__(self, parent, on_edit, on_close, on_ocr=None):
         super().__init__(parent)
         self.setObjectName("screenshotNotice")
         self.setFixedWidth(374)
@@ -50,6 +50,12 @@ class ScreenshotNotice(QFrame):
         action.clicked.connect(on_edit)
         layout.addWidget(action)
         self.edit_button = action
+        if on_ocr is not None:
+            ocr_button = QPushButton("OCR · Copy text from screenshot")
+            ocr_button.setAccessibleName("Extract text from the saved screenshot")
+            ocr_button.clicked.connect(on_ocr)
+            layout.addWidget(ocr_button)
+            self.ocr_button = ocr_button
         self.setAccessibleName("Screenshot captured — edit screenshot")
         self.hide()
 
