@@ -16,8 +16,8 @@ from PySide6.QtWidgets import QWidget
 def _asset_path() -> Path:
     frozen_root = getattr(sys, "_MEIPASS", None)
     if frozen_root:
-        return Path(frozen_root) / "assets" / "manga" / "koma_manga.jpg"
-    return Path(__file__).resolve().parent / "assets" / "koma_manga.jpg"
+        return Path(frozen_root) / "assets" / "manga" / "koma_manga_full.jpg"
+    return Path(__file__).resolve().parent / "assets" / "koma_manga_full.jpg"
 
 
 class KomaMascot(QWidget):
