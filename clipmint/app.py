@@ -171,6 +171,10 @@ class ClipMintWindow(QMainWindow):
             self.archive_heading.setText(
                 "Clipboard  ·  クリップボード" if self.width() >= 1270 else "Clipboard"
             )
+        if hasattr(self, "preview_heading"):
+            self.preview_heading.setText(
+                "プレビュー / PREVIEW" if self.width() >= 1370 else "プレビュー"
+            )
         icons = {"Clipboard":"▤", "Screenshots":"▣", "Recordings":"◉",
                  "Secrets & Variables":"♢", "Autosort":"⇄", "Settings":"⚙"}
         for label, button in self.nav_buttons.items():
@@ -440,7 +444,7 @@ class ClipMintWindow(QMainWindow):
         self.history.clear()
         bin_name = self.active_bin()
         category = self.category.currentText()
-        sort = self.sort_combo.currentText()
+        sort = self.sort_combo.currentData() or self.sort_combo.currentText()
         clips = self.store.search(self.search.text(), bin_name, sort, category)
         for i, clip in enumerate(clips):
             title = f"{i + 1}. {clip.preview}" if sort == "Numbered list" else clip.preview
