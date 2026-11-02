@@ -1,7 +1,7 @@
-"""Display ClipMint's original generated manga portrait, not a vector redraw.
+"""Render the selected crimson-haired maid illustration as a native, offline Qt asset.
 
-The binary JPEG is an offline app asset. The character illustration is
-decorative and cannot intercept clicks or take keyboard focus.
+The original user-supplied image was resized for the app; no vector recreation,
+external hosting, or runtime file downloads are involved.
 """
 from __future__ import annotations
 
@@ -13,23 +13,28 @@ from PySide6.QtGui import QColor, QPainter, QPixmap
 from PySide6.QtWidgets import QWidget
 
 
+ASSET_NAME = "crimson_maid.png"
+
+
 def _asset_path() -> Path:
     frozen_root = getattr(sys, "_MEIPASS", None)
     if frozen_root:
-        return Path(frozen_root) / "assets" / "manga" / "koma_manga_full.jpg"
-    return Path(__file__).resolve().parent / "assets" / "koma_manga_full.jpg"
+        return Path(frozen_root) / "assets" / "manga" / ASSET_NAME
+    return Path(__file__).resolve().parent / "assets" / ASSET_NAME
 
 
-class KomaMascot(QWidget):
-    """An intentionally unobtrusive crop of the *actual* inked manga asset."""
+class CrimsonMaidPortrait(QWidget):
+    """A decorative crop of the actual character artwork, not a redrawn mascot."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.asset_path = _asset_path()
         self.portrait = QPixmap(str(self.asset_path))
-        self.setObjectName("komaMascot")
-        self.setAccessibleName("Koma — original pink-and-lime manga archivist portrait")
-        self.setToolTip("Koma / コマ — ClipMint's paper archivist")
+        self.setObjectName("crimsonMaidPortrait")
+        self.setAccessibleName(
+            "Crimson-haired maid, looking over her shoulder with her hands held behind her back"
+        )
+        self.setToolTip("ClipMint character artwork / メイド")
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.setFixedSize(self.sizeHint())
@@ -40,19 +45,22 @@ class KomaMascot(QWidget):
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
-        if not self.portrait.isNull():
-            # Show face/headphones and a little jacket at actual sidebar scale.
-            # The full portrait JPEG remains embedded and unmodified in the app.
-            source_width = self.portrait.width()
-            source_height = min(
-                self.portrait.height(),
-                round(source_width * self.height() / max(self.width(), 1)),
-            )
-            source = QRect(0, 0, source_width, source_height)
-            painter.drawPixmap(self.rect(), self.portrait, source)
-        else:
+        if self.portrait.isNull():
             painter.setPen(QColor("#F1F5F9"))
             painter.drawText(
-                self.rect(), Qt.AlignmentFlag.AlignCenter, "KOMA / ART UNAVAILABLE"
+                self.rect(), Qt.AlignmentFlag.AlignCenter, "ART UNAVAILABLE"
+            )
+        else:
+            # Show face, hair, upper dress; crop vertically without stretching
+            # or changing the original asset. PNG alpha blends into the panel.
+            source_w = self.portrait.width()
+            source_h = min(
+                self.portrait.height(),
+                round(source_w * self.height() / max(self.width(), 1)),
+            )
+            painter.drawPixmap(
+                self.rect(),
+                self.portrait,
+                QRect(0, 0, source_w, source_h),
             )
         painter.end()
