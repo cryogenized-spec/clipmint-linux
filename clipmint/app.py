@@ -4,6 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 import json
 import os
+import shlex
 import subprocess
 import sys
 
@@ -33,6 +34,7 @@ from .foreground_privacy import blocked_foreground, DEFAULT_BLOCKED
 from .ocr import OcrWorker
 from .quick_popup import QuickPopup, paste_to_window
 from .single_instance import InstanceServer, send_command
+from .cinnamon_hotkey import install_shortcut, ShortcutSetupError
 from .secure_history import (EncryptedClipStore, HistorySecurityError,
                              key_from_secret_service, secure_path)
 
@@ -954,6 +956,15 @@ class ClipMintWindow(QMainWindow):
         popup_test = QPushButton("Show quick search popup")
         popup_test.clicked.connect(self.toggle_quick_popup)
         popup_controls.addWidget(popup_test)
+        popup_controls.addWidget(QLabel("Cinnamon global shortcut (optional):"))
+        self.global_popup_hotkey = QKeySequenceEdit()
+        self.global_popup_hotkey.setKeySequence(QKeySequence(str(
+            self.settings.value("popup/global_shortcut", "Ctrl+Alt+V")
+        )))
+        popup_controls.addWidget(self.global_popup_hotkey)
+        register_button = QPushButton("Register shortcut in Cinnamon…")
+        register_button.clicked.connect(self.register_cinnamon_hotkey)
+        popup_controls.addWidget(register_button)
         self.popup_paste_choice = QCheckBox(
             "Paste into the previously focused window after pressing Enter"
         )
@@ -1509,6 +1520,26 @@ class ClipMintWindow(QMainWindow):
                             self.store.get_formats(item.data(Qt.ItemDataRole.UserRole)))
         )
         self.inform("Copied", "Saved snippet copied to the system clipboard")
+
+    def register_cinnamon_hotkey(self):
+        sequence = self.global_popup_hotkey.keySequence().toString(
+            QKeySequence.SequenceFormat.PortableText
+        )
+        if not sequence:
+            self.error("Cinnamon shortcut", "Choose a keyboard shortcut first")
+            return
+        executable = (shlex.quote(sys.executable)
+                      if getattr(sys, "frozen", False) else
+                      shlex.quote(sys.executable) + " " +
+                      shlex.quote(str(Path(__file__).resolve().parent.parent / "launcher.py")))
+        command = executable + " --toggle"
+        try:
+            accel = install_shortcut(command, sequence)
+        except ShortcutSetupError as exc:
+            self.error("Cinnamon shortcut", str(exc))
+            return
+        self.settings.setValue("popup/global_shortcut", sequence)
+        self.inform("Cinnamon shortcut", f"Registered {sequence} ({accel})")
 
     def toggle_quick_popup(self):
         self.quick_popup.toggle()
