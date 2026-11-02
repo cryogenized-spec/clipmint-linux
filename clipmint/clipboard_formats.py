@@ -105,7 +105,8 @@ def from_mime(mime, png: bytes | None = None) -> ClipboardEntry | None:
         total += len(value)
         saved[name] = value
     if png:
-        if len(png) > MAX_FORMAT_BYTES or total + len(png) > MAX_BUNDLE_BYTES:
+        previous = saved.get("image/png", b"")
+        if len(png) > MAX_FORMAT_BYTES or (total - len(previous) + len(png)) > MAX_BUNDLE_BYTES:
             return None
         saved["image/png"] = png
     if mime.hasUrls() or "x-special/gnome-copied-files" in saved:
@@ -115,7 +116,10 @@ def from_mime(mime, png: bytes | None = None) -> ClipboardEntry | None:
         if not paths: return None
         return ClipboardEntry("files", uri_raw, f"{len(paths)} file(s): " + paths[0][:450], saved)
     if png:
-        return ClipboardEntry("image", png, "", saved)
+        # The PNG is already stored in the entry's content. Avoid writing a
+        # redundant 16 MB image into its auxiliary MIME bundle as well.
+        return ClipboardEntry("image", png, "",
+                              {key:value for key,value in saved.items() if key != "image/png"})
     text = mime.text() if mime.hasText() else ""
     if not text.strip() and "text/html" in saved:
         # Preserve HTML only when a safe/plain textual representation is present.
