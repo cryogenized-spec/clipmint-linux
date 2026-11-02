@@ -1,7 +1,7 @@
 name: Crimson Archive native visual review
 on:
   push:
-    branches: [feat/crimson-archive-native-ui]
+    branches: [feat/crimson-archive-native-ui, feat/v04-kohaku-gothic-archive]
     paths:
       - "clipmint/**"
       - "tools/render_crimson_review.py"
@@ -45,6 +45,6 @@ jobs:
           file docs/native-review/*.png
       - uses: actions/upload-artifact@v4
         with:
-          name: Crimson-Archive-native-Qt-screenshots
+          name: Kohaku-Gothic-native-Qt-screenshots
           path: docs/native-review/*.png
           retention-days: 14
