@@ -173,7 +173,8 @@ class ClipMintWindow(QMainWindow):
         self.statusBar().showMessage("Ready · Left-click to preview, right-click for Copy / Pin / Move / Delete")
         self.configure_tray()
         self.screenshot_notice = ScreenshotNotice(
-            self, self.edit_last_screenshot, self.dismiss_screenshot_notice
+            self, self.edit_last_screenshot, self.dismiss_screenshot_notice,
+            on_ocr=self.ocr_last_screenshot,
         )
         QApplication.clipboard().dataChanged.connect(self.clipboard_changed)
         self.poller = QTimer(self)
@@ -312,6 +313,9 @@ class ClipMintWindow(QMainWindow):
         layout.addWidget(heading)
         listing = QListWidget()
         listing.itemDoubleClicked.connect(self.open_saved_file)
+        if kind == "Screenshots":
+            listing.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+            listing.customContextMenuRequested.connect(self.screenshot_context_menu)
         layout.addWidget(listing, 1)
         path = screenshots_dir() if kind == "Screenshots" else recordings_dir()
         bottom = QHBoxLayout()
@@ -1371,6 +1375,8 @@ class ClipMintWindow(QMainWindow):
         pinned = self.store.pinned(clip_id)
         menu = QMenu(self)
         copy = menu.addAction("Copy")
+        is_image = (self.store.get(clip_id) or ("", b""))[0] == "image"
+        ocr_action = menu.addAction("OCR · Extract text from image") if is_image else None
         pin = menu.addAction("Unpin" if pinned else "Pin")
         move_menu = menu.addMenu("Move to bin")
         moves = {}
@@ -1381,6 +1387,8 @@ class ClipMintWindow(QMainWindow):
         choice = menu.exec(self.history.viewport().mapToGlobal(position))
         if choice == copy:
             self.copy_clip(item)
+        elif choice is not None and choice == ocr_action:
+            self.ocr_history_clip(clip_id)
         elif choice == pin:
             self.store.pin(clip_id, not pinned)
             self.refresh()
