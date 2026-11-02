@@ -136,6 +136,45 @@ class WindowTests(unittest.TestCase):
                 else:
                     os.environ["XDG_DATA_HOME"] = original
 
+    def test_katakana_and_original_manga_art_are_noninteractive(self):
+        with TemporaryDirectory() as temporary:
+            original = os.environ.get("XDG_DATA_HOME")
+            os.environ["XDG_DATA_HOME"] = temporary
+            window = None
+            try:
+                window = ClipMintWindow()
+                window.show()
+                self.app.processEvents()
+                self.assertEqual(window.kana_tag.text(), "クリップミント")
+                self.assertEqual(window.koma_caption.text(), "コマ  /  01")
+                self.assertTrue(window.manga_mascot.renderer.isValid())
+                self.assertEqual(
+                    window.manga_mascot.focusPolicy(), Qt.FocusPolicy.NoFocus
+                )
+                self.assertTrue(window.manga_mascot.testAttribute(
+                    Qt.WidgetAttribute.WA_TransparentForMouseEvents
+                ))
+                snapshot = window.manga_mascot.grab().toImage()
+                self.assertFalse(snapshot.isNull())
+                self.assertIn("プレビュー", window.preview_heading.text()
+                    if hasattr(window, "preview_heading") else "PREVIEW / プレビュー")
+
+                window.resize(900, 540)
+                self.app.processEvents()
+                self.assertTrue(window.manga_dock.isHidden())
+                window.resize(1080, 740)
+                self.app.processEvents()
+                self.assertFalse(window.manga_dock.isHidden())
+            finally:
+                if window is not None:
+                    window.store.close()
+                    window.close()
+                    window.deleteLater()
+                if original is None:
+                    os.environ.pop("XDG_DATA_HOME", None)
+                else:
+                    os.environ["XDG_DATA_HOME"] = original
+
     def test_invalid_image_falls_back_to_message(self):
         with TemporaryDirectory() as temporary:
             original = os.environ.get("XDG_DATA_HOME")
