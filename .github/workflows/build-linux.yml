@@ -48,16 +48,28 @@ jobs:
           vendor/ffmpeg -hide_banner -devices 2>&1 | grep -q x11grab
           vendor/ffmpeg -hide_banner -encoders 2>&1 | grep -q libx264
           echo "Bundled video encoder supports X11 area input and H264"
+      - name: Fetch OFL DotGothic16 for offline installer (runner only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p vendor/fonts
+          source="https://raw.githubusercontent.com/google/fonts/main/ofl/dotgothic16"
+          curl --fail --location --retry 3 "$source/DotGothic16-Regular.ttf" -o vendor/fonts/DotGothic16-Regular.ttf
+          curl --fail --location --retry 3 "$source/OFL.txt" -o vendor/fonts/OFL.txt
+          test "$(git hash-object vendor/fonts/DotGothic16-Regular.ttf)" = "844fc6373c3d5716eb9bde1d0663d8fffa4f8f06"
+          test "$(git hash-object vendor/fonts/OFL.txt)" = "8a8f6546423f37d1306d76abedaa3c496b933c73"
       - name: Freeze Python Qt application
         run: |
           test -f /usr/lib/x86_64-linux-gnu/libxcb-cursor.so.0
           pyinstaller --noconfirm --clean --windowed --onedir --name ClipMint \
             --add-binary "vendor/ffmpeg:tools" \
+            --add-data "vendor/fonts/DotGothic16-Regular.ttf:assets/fonts" \
             --add-binary "/usr/lib/x86_64-linux-gnu/libxcb-cursor.so.0:." \
             launcher.py
           ldd dist/ClipMint/_internal/PySide6/Qt/plugins/platforms/libqxcb.so || true
           test -x dist/ClipMint/ClipMint
           test -x dist/ClipMint/_internal/tools/ffmpeg
+          test -f dist/ClipMint/_internal/assets/fonts/DotGothic16-Regular.ttf
       - name: Test executable starts with virtual X11 display
         shell: bash
         env:
