@@ -147,7 +147,7 @@ class EncryptedClipStore(ClipStore):
         stage = target.with_name("." + target.name + ".staging")
         if stage.exists():
             raise HistorySecurityError("A previous migration staging file exists")
-        os.umask(0o077)
+        old_umask = os.umask(0o077)
         secure = None
         try:
             secure = cls(stage, key, legacy.max_unpinned)
@@ -179,3 +179,5 @@ class EncryptedClipStore(ClipStore):
             for suffix in ("", "-wal", "-shm"):
                 stage.with_name(stage.name + suffix).unlink(missing_ok=True)
             raise
+        finally:
+            os.umask(old_umask)
