@@ -1482,6 +1482,35 @@ class ClipMintWindow(QMainWindow):
         )
         self.inform("Copied", "Saved snippet copied to the system clipboard")
 
+    def toggle_quick_popup(self):
+        self.quick_popup.toggle()
+
+    def quick_pick(self, clip_id: int, plain: bool, wid: str | None, klass: str):
+        value = self.store.get(clip_id)
+        if value is None:
+            return
+        kind, content = value
+        if plain and kind != "text":
+            self.inform("Quick paste", "Plain paste works with text clips only")
+            return
+        self._ignore_next_clipboard_change = True
+        if plain:
+            QApplication.clipboard().setText(content.decode("utf-8", "replace"))
+        else:
+            QApplication.clipboard().setMimeData(
+                mime_from_entry(kind, content, self.store.get_formats(clip_id))
+            )
+        QTimer.singleShot(400, lambda: setattr(self, "_ignore_next_clipboard_change", False))
+        if wid and self.settings.value("popup/auto_paste", True, type=bool):
+            QTimer.singleShot(150, lambda: self._paste_to_target(wid, klass))
+
+    def _paste_to_target(self, wid: str, klass: str):
+        mode = str(self.settings.value("popup/terminal_mode", "auto"))
+        if not paste_to_window(wid, klass, mode):
+            self.statusBar().showMessage(
+                "Copied; automatic paste unavailable. Paste manually.", 7000
+            )
+
     def toggle_monitoring(self):
         self.monitoring = not self.monitoring
         self.pause_button.setText("Pause monitoring" if self.monitoring else "Resume monitoring")
