@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 
 from .branding import ChromaticWordmark, register_display_font
 from .manga import CrimsonMaidPortrait
+from .crimson_ui import build_crimson_ui, relative_time, label_type
 from .capture import AreaSelector, RegionRecorder, recordings_dir, screenshots_dir, stamped_filename
 from .recording_ui import RecorderWindow, SaveClipDialog
 from .store import ClipStore, classify, looks_sensitive
@@ -110,9 +111,8 @@ class ClipMintWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("ClipMint · Clipboard & Capture")
         self.brand_family = register_display_font()
-        self.resize(1080, 700)
-        self.setMinimumSize(850, 500)
-        self.setStyleSheet(THEME)
+        self.resize(1300, 870)
+        self.setMinimumSize(850, 600)
         self.store = ClipStore()
         self.recorder = RegionRecorder()
         self.monitoring = True
@@ -123,118 +123,25 @@ class ClipMintWindow(QMainWindow):
         self._privacy_skipped = 0
         self._closing = False
 
-        shell = QWidget()
-        shell.setObjectName("appRoot")
-        root = QVBoxLayout(shell)
-        root.setContentsMargins(18, 16, 18, 14)
-        root.setSpacing(14)
-        header = QHBoxLayout()
-        # Uneven, screen-printed chromatic registration is limited to the brand.
+        # Native reconstruction of the approved Crimson Archive v2 prototype.
+        # All content comes from the existing history store and capture methods.
         self.wordmark = ChromaticWordmark(self.brand_family)
-        header.addWidget(self.wordmark)
-        edition = QLabel("VE / 02")
-        edition.setObjectName("edition")
-        header.addWidget(edition)
-        header.addStretch()
-        self.kana_tag = QLabel("クリップミント")
-        self.kana_tag.setObjectName("kanaTag")
-        self.kana_tag.setAccessibleName("ClipMint, written in Japanese Katakana")
-        header.addWidget(self.kana_tag)
-        title = QLabel("  /  CINNAMON X11")
-        title.setObjectName("muted")
-        header.addWidget(title)
-        root.addLayout(header)
-
-        body = QHBoxLayout()
-        body.setSpacing(14)
-        self.pages = QStackedWidget()
-        body.addWidget(self.pages, 1)
-        sidebar = QFrame()
-        sidebar.setObjectName("sidebar")
-        sidebar.setFixedWidth(190)
-        nav_layout = QVBoxLayout(sidebar)
-        nav_layout.setContentsMargins(12, 14, 12, 14)
-        nav_layout.setSpacing(9)
-        self.nav_buttons: dict[str, QPushButton] = {}
-        for index, name in enumerate(("Clipboard", "Screenshots", "Recordings",
-                                       "Secrets & Variables", "Autosort", "Settings")):
-            b = QPushButton(name.replace("&", "&&"))
-            b.setObjectName("nav")
-            b.setCheckable(True)
-            b.clicked.connect(lambda _checked=False, i=index: self.open_section(i))
-            self.nav_buttons[name] = b
-            nav_layout.addWidget(b)
-        nav_layout.addStretch()
-        # A single original character portrait; decorative and never
-        # cover navigation or become a hidden extra button.
-        self.manga_dock = QWidget(sidebar)
-        self.manga_dock.setObjectName("mangaDock")
-        manga_layout = QVBoxLayout(self.manga_dock)
-        manga_layout.setContentsMargins(0, 0, 0, 0)
-        manga_layout.setSpacing(0)
-        self.manga_mascot = CrimsonMaidPortrait(self.manga_dock)
-        manga_layout.addWidget(self.manga_mascot, 0, Qt.AlignmentFlag.AlignHCenter)
-        self.maid_caption = QLabel("メイド  /  01")
-        self.maid_caption.setObjectName("maidTag")
-        self.maid_caption.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        manga_layout.addWidget(self.maid_caption)
-        maid_meta = QLabel("CRIMSON / CHARACTER")
-        maid_meta.setObjectName("maidMeta")
-        maid_meta.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        manga_layout.addWidget(maid_meta)
-        nav_layout.addWidget(self.manga_dock, 0, Qt.AlignmentFlag.AlignHCenter)
-        body.addWidget(sidebar)
-        root.addLayout(body, 1)
-
-        self.build_clipboard_page()
+        build_crimson_ui(self, ImagePreviewLabel)
         self.build_library_page("Screenshots")
         self.build_library_page("Recordings")
         self.build_info_page("Secrets & Variables", (
             "Private by default\n\n"
-            "ClipMint does not offer a secure password vault. Obvious password/token "
-            "assignments are skipped by the clipboard monitor, but automatic detection "
-            "cannot find every secret. Pause monitoring when handling credentials.\n\n"
-            "Saved clipboard history is not encrypted. Do not store passwords or API keys "
-            "in an accumulation bin."
+            "This preview does NOT contain an encrypted vault. Saved clipboard "
+            "history remains unencrypted. Avoid storing passwords or API keys.\n\n"
+            "Credentials are only heuristically excluded from clipboard monitoring."
         ))
         self.build_info_page("Autosort", (
-            "Automatic content classification\n\n"
-            "Use the Type filter in the Clipboard view to show URLs, phone numbers, "
-            "images or text. These built-in categories do not move or erase clips.\n\n"
-            "Custom rules, templates and variable extraction are planned, "
-            "but are not yet enabled in this preview."
+            "Autosort rules are not enabled in this development preview.\n\n"
+            "The live clipboard filter and sort controls remain available under "
+            "Clipboard. A configurable rules engine is planned separately."
         ))
         self.build_settings_page()
-
-        footer = QHBoxLayout()
-        self.record_button = QPushButton("●  Start Recording  MP4 / GIF")
-        self.record_button.setObjectName("record")
-        self.record_button.clicked.connect(lambda: self.choose_recording("MP4"))
-        footer.addWidget(self.record_button, 2)
-        self.record_menu = QToolButton()
-        self.record_menu.setText("▾")
-        self.record_menu.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        formats = QMenu(self.record_menu)
-        formats.addAction("Record MP4").triggered.connect(lambda: self.choose_recording("MP4"))
-        formats.addAction("Record GIF").triggered.connect(lambda: self.choose_recording("GIF"))
-        self.record_menu.setMenu(formats)
-        footer.addWidget(self.record_menu)
-        self.screenshot_button = QPushButton("▣  Screenshot Area")
-        self.screenshot_button.setObjectName("screenshot")
-        self.screenshot_button.clicked.connect(self.choose_screenshot)
-        footer.addWidget(self.screenshot_button, 2)
-        self.screenshot_menu = QToolButton()
-        self.screenshot_menu.setText("▾")
-        self.screenshot_menu.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        captures = QMenu(self.screenshot_menu)
-        captures.addAction("Select area (default)").triggered.connect(self.choose_screenshot)
-        captures.addAction("Full screen").triggered.connect(self.screenshot_full)
-        self.screenshot_menu.setMenu(captures)
-        footer.addWidget(self.screenshot_menu)
-        root.addLayout(footer)
-
-        self.setCentralWidget(shell)
-        self.statusBar().showMessage("Ready · Left-click a clip, right-click for Copy / Pin / Move / Delete")
+        self.statusBar().showMessage("Ready · Left-click to preview, right-click for Copy / Pin / Move / Delete")
         self.configure_tray()
         QApplication.clipboard().dataChanged.connect(self.clipboard_changed)
         self.poller = QTimer(self)
@@ -250,8 +157,15 @@ class ClipMintWindow(QMainWindow):
             self._update_manga_visibility()
 
     def _update_manga_visibility(self):
-        # On short windows the functional dock always takes precedence over art.
-        self.manga_dock.setVisible(self.height() >= 650)
+        # Approved prototype: full portrait above compact threshold; protect
+        # useful clipboard/preview real estate on smaller screens.
+        show = self.width() >= 1000 and self.height() >= 650
+        self.manga_dock.setVisible(show)
+        if show:
+            self.manga_dock.setFixedWidth(
+                336 if self.width() < 1140 else min(390, max(305, int(self.width() * .26)))
+            )
+        self.dock_panel.setFixedWidth(56 if self.width() < 1250 else 74)
 
     def build_clipboard_page(self):
         page = QWidget()
@@ -400,6 +314,7 @@ class ClipMintWindow(QMainWindow):
 
     def open_section(self, index: int):
         self.pages.setCurrentIndex(index)
+        self.preview_panel.setVisible(index == 0)
         for i, button in enumerate(self.nav_buttons.values()):
             button.setChecked(index == i)
         if index == 1:
@@ -498,53 +413,84 @@ class ClipMintWindow(QMainWindow):
         self.refresh()
 
     def refresh(self, *_args):
-        previous = self.selected_id() if hasattr(self, "history") else None
         if not hasattr(self, "history"):
             return
+        previous = self.selected_id()
+        self.history.blockSignals(True)
         self.history.clear()
         bin_name = self.active_bin()
         category = self.category.currentText()
         sort = self.sort_combo.currentText()
         clips = self.store.search(self.search.text(), bin_name, sort, category)
-        numbered = sort == "Numbered list"
         for i, clip in enumerate(clips):
-            icon = "📌" if clip.pinned else ("🖼" if clip.kind == "image" else "📋")
-            text = f"{i+1}.  {icon}  {clip.preview}" if numbered else f"{icon}  {clip.preview}"
-            item = QListWidgetItem(text)
+            title = f"{i + 1}. {clip.preview}" if sort == "Numbered list" else clip.preview
+            item = QListWidgetItem(title)
             item.setData(Qt.ItemDataRole.UserRole, clip.id)
+            kind_tag, _symbol, _color = label_type(clip.kind, clip.preview)
+            item.setData(Qt.ItemDataRole.UserRole + 1, {
+                "kind": clip.kind, "preview": title,
+                "subtitle": "PNG image · clipboard history" if clip.kind == "image"
+                    else f"{kind_tag} · clipboard history",
+                "age": relative_time(clip.created_at),
+                "created": clip.created_at, "pinned": clip.pinned,
+                "bin": clip.bin, "type": kind_tag,
+            })
             item.setToolTip(f"{classify(clip)} · {clip.created_at} · {clip.bin}")
             self.history.addItem(item)
             if clip.id == previous:
                 self.history.setCurrentItem(item)
-        self.count_label.setText(f"Clipboard ({bin_name})  ·  {len(clips)} shown / {self.store.count(bin_name)} total")
+        self.history.blockSignals(False)
+        self.count_label.setText(f"{len(clips):02d} / {self.store.count(bin_name):02d}")
+        if hasattr(self, "footer_status"):
+            self.footer_status.setToolTip(f"{self.store.count(bin_name)} clips in {bin_name}")
         if self.history.currentItem() is None:
             self.clear_preview()
+        else:
+            self.preview_clip(self.history.currentItem(), None)
 
     def clear_preview(self) -> None:
         self.preview_image.clear_image()
         self.preview_label.setText("Select an item to preview")
         self.preview_stack.setCurrentWidget(self.preview_label)
+        self.preview_name.setText("No selection")
+        self.preview_sub.setText("Select a clipboard entry")
+        for field in self.preview_meta.values():
+            field.setText("—")
+        for action in (self.copy_action, self.pin_action, self.delete_action):
+            action.setEnabled(False)
 
     def preview_clip(self, current, _old):
         if current is None:
             self.clear_preview()
             return
-        value = self.store.get(current.data(Qt.ItemDataRole.UserRole))
+        clip_id = current.data(Qt.ItemDataRole.UserRole)
+        value = self.store.get(clip_id)
         if value is None:
             self.clear_preview()
             return
+        for action in (self.copy_action, self.pin_action, self.delete_action):
+            action.setEnabled(True)
+        meta = current.data(Qt.ItemDataRole.UserRole + 1) or {}
         kind, contents = value
+        self.preview_name.setText(meta.get("preview", current.text()))
+        tag = meta.get("type", "IMG" if kind == "image" else "TXT")
+        self.preview_meta["Type"].setText("Image / PNG" if kind == "image" else f"Text / {tag}")
+        self.preview_meta["Saved"].setText(meta.get("age", "—") + " ago" if meta.get("age") not in (None, "now", "—") else meta.get("age", "—"))
+        self.preview_meta["Collection"].setText(meta.get("bin", self.active_bin()))
+        self.preview_meta["Source"].setText("Clipboard image" if kind == "image" else "Clipboard text")
+        self.pin_action.setText("UNPIN" if self.store.pinned(clip_id) else "PIN")
         if kind == "text":
             self.preview_image.clear_image()
             self.preview_label.setText(contents.decode("utf-8", errors="replace")[:5000])
+            self.preview_sub.setText(f"TEXT · {len(contents):,} bytes")
             self.preview_stack.setCurrentWidget(self.preview_label)
             return
+        self.preview_sub.setText("IMAGE FILE · PNG")
         if len(contents) > 16 * 1024 * 1024:
             self.preview_label.setText("Image too large to preview")
             self.preview_stack.setCurrentWidget(self.preview_label)
             return
-        # PNG dimensions are big-endian at bytes 16–23. Limit decompression
-        # before decoding potentially untrusted images from clipboard history.
+        # Prevent hostile oversized PNG dimensions from exhausting Qt memory.
         if contents.startswith(b"\x89PNG\r\n\x1a\n") and len(contents) >= 24:
             width = int.from_bytes(contents[16:20], "big")
             height = int.from_bytes(contents[20:24], "big")
@@ -558,8 +504,30 @@ class ClipMintWindow(QMainWindow):
             self.preview_stack.setCurrentWidget(self.preview_label)
             return
         self.preview_dimensions.setText(f"{image.width()} × {image.height()} pixels")
+        self.preview_sub.setText(f"IMAGE · {image.width()} × {image.height()} · PNG · {len(contents):,} B")
         self.preview_stack.setCurrentWidget(self.preview_image_page)
         self.preview_image.show_image(image)
+
+    def toggle_pin_selected(self):
+        clip_id = self.selected_id()
+        if clip_id is None:
+            return
+        self.store.pin(clip_id, not self.store.pinned(clip_id))
+        self.refresh()
+
+    def delete_selected(self):
+        clip_id = self.selected_id()
+        if clip_id is None:
+            return
+        result = QMessageBox.question(
+            self, "Delete clipboard item",
+            "Permanently delete the selected history item?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if result == QMessageBox.StandardButton.Yes:
+            self.store.delete(clip_id)
+            self.refresh()
 
     def selected_id(self):
         item = self.history.currentItem()
