@@ -28,6 +28,11 @@ from .autosort import RULE_TYPES, NEVER_CAPTURE, validate_rule, route_clip
 from .vault import Vault, VaultError
 from .screenshot_editor import installed_editors, resolve_editor, open_image_editor
 from .screenshot_notice import ScreenshotNotice
+from .clipboard_formats import from_mime, is_concealed, sensitive_text, mime_from_entry
+from .foreground_privacy import blocked_foreground, DEFAULT_BLOCKED
+from .ocr import OcrWorker
+from .quick_popup import QuickPopup, paste_to_window
+from .single_instance import InstanceServer, send_command
 
 
 THEME = """
@@ -149,6 +154,7 @@ class ClipMintWindow(QMainWindow):
         self._closing = False
         self._ignore_next_clipboard_change = False
         self._last_screenshot_path = None
+        self._ocr_workers = set()
         self._last_tray_notification = None
         self._screenshot_notice_token = 0
         self.screenshot_notice = None
@@ -163,6 +169,7 @@ class ClipMintWindow(QMainWindow):
         self.build_autosort_page()
         self.build_settings_page()
         self.install_shortcuts()
+        self.quick_popup = QuickPopup(self.store, self.quick_pick)
         self.statusBar().showMessage("Ready · Left-click to preview, right-click for Copy / Pin / Move / Delete")
         self.configure_tray()
         self.screenshot_notice = ScreenshotNotice(
@@ -244,7 +251,7 @@ class ClipMintWindow(QMainWindow):
         sorts = QHBoxLayout()
         sorts.addWidget(QLabel("View:"))
         self.category = QComboBox()
-        self.category.addItems(["All", "Text", "URLs", "Phone numbers", "Images"])
+        self.category.addItems(["All", "Text", "URLs", "Phone numbers", "Images", "Files"])
         self.category.currentIndexChanged.connect(self.refresh)
         sorts.addWidget(self.category)
         sorts.addWidget(QLabel("Sort:"))
@@ -913,6 +920,55 @@ class ClipMintWindow(QMainWindow):
         open_files.clicked.connect(lambda: self.open_folder(recordings_dir()))
         layout.addWidget(open_files)
 
+        popup_group = QGroupBox("Quick access")
+        popup_controls = QVBoxLayout(popup_group)
+        popup_help = QLabel(
+            "Cinnamon global shortcut: bind /opt/clipmint/ClipMint --toggle "
+            "in System Settings → Keyboard → Shortcuts → Custom Shortcuts. "
+            "The popup searches all bins without opening the main window."
+        )
+        popup_help.setWordWrap(True)
+        popup_controls.addWidget(popup_help)
+        popup_test = QPushButton("Show quick search popup")
+        popup_test.clicked.connect(self.toggle_quick_popup)
+        popup_controls.addWidget(popup_test)
+        self.popup_paste_choice = QCheckBox(
+            "Paste into the previously focused window after pressing Enter"
+        )
+        self.popup_paste_choice.setChecked(
+            self.settings.value("popup/auto_paste", True, type=bool)
+        )
+        self.popup_paste_choice.toggled.connect(
+            lambda value: self.settings.setValue("popup/auto_paste", value)
+        )
+        popup_controls.addWidget(self.popup_paste_choice)
+        layout.addWidget(popup_group)
+
+        privacy_group = QGroupBox("Clipboard privacy")
+        privacy_layout = QVBoxLayout(privacy_group)
+        privacy_message = QLabel(
+            "Concealed clipboard hints and many credential/card patterns are "
+            "excluded. Foreground app matching is only a heuristic on X11 "
+            "and cannot guarantee exclusion of clipboard-owning background apps. "
+            "Ordinary history is NOT encrypted in this preview."
+        )
+        privacy_message.setWordWrap(True)
+        privacy_layout.addWidget(privacy_message)
+        self.foreground_blocklist = QLineEdit()
+        self.foreground_blocklist.setPlaceholderText(
+            "Blocked active-window classes, comma separated"
+        )
+        self.foreground_blocklist.setText(str(self.settings.value(
+            "privacy/blocked_foreground", ", ".join(DEFAULT_BLOCKED)
+        )))
+        self.foreground_blocklist.editingFinished.connect(
+            lambda: self.settings.setValue(
+                "privacy/blocked_foreground", self.foreground_blocklist.text()
+            )
+        )
+        privacy_layout.addWidget(self.foreground_blocklist)
+        layout.addWidget(privacy_group)
+
         screenshot_group = QGroupBox("Screenshot editor")
         screenshot_layout = QVBoxLayout(screenshot_group)
         screenshot_help = QLabel(
@@ -1097,6 +1153,7 @@ class ClipMintWindow(QMainWindow):
         )
         menu = QMenu(self)
         menu.addAction("Show ClipMint").triggered.connect(self.show_window)
+        menu.addAction("Quick search popup").triggered.connect(self.toggle_quick_popup)
         menu.addSeparator()
         menu.addAction("Screenshot full screen").triggered.connect(self.screenshot_full)
         menu.addAction("Screenshot selected area").triggered.connect(self.choose_screenshot)
@@ -1144,39 +1201,42 @@ class ClipMintWindow(QMainWindow):
         data = QApplication.clipboard().mimeData()
         if data is None:
             return
+        if is_concealed(data):
+            self._privacy_skipped += 1
+            self.statusBar().showMessage("Concealed clipboard item excluded")
+            return
         if (data.hasText() and self._vault_clipboard_text is not None
                 and data.text() == self._vault_clipboard_text):
             return
-        active = self.active_bin()
+        if blocked_foreground(str(self.settings.value(
+                "privacy/blocked_foreground", ", ".join(DEFAULT_BLOCKED)
+        ))):
+            self._privacy_skipped += 1
+            return
+        png = None
         if data.hasImage():
             picture = QApplication.clipboard().image()
-            if picture.isNull():
-                return
-            result = QByteArray()
-            buffer = QBuffer(result)
-            buffer.open(QIODevice.OpenModeFlag.WriteOnly)
-            saved = picture.save(buffer, "PNG")
-            buffer.close()
-            if saved and len(result) < 16 * 1024 * 1024:
-                target = self.autosort_destination("image", "", active)
-                if target is None:
-                    self.statusBar().showMessage("Image excluded by Autosort rule", 4000)
-                else:
-                    self.store.add("image", bytes(result), f"Image {picture.width()} × {picture.height()}", target)
-        elif data.hasText():
-            text = data.text()
-            if text.strip():
-                if looks_sensitive(text):
-                    self._privacy_skipped += 1
-                    self.statusBar().showMessage("Potential credential excluded from history")
-                    return
-                payload = text.encode("utf-8")
-                if len(payload) <= 2 * 1024 * 1024:
-                    target = self.autosort_destination("text", text, active)
-                    if target is None:
-                        self.statusBar().showMessage("Text excluded by Autosort rule", 4000)
-                    else:
-                        self.store.add("text", payload, " ".join(text.split())[:550], target)
+            if not picture.isNull():
+                buffer_bytes = QByteArray()
+                buffer = QBuffer(buffer_bytes)
+                if buffer.open(QIODevice.OpenModeFlag.WriteOnly):
+                    saved = picture.save(buffer, "PNG")
+                    buffer.close()
+                    if saved:
+                        png = bytes(buffer_bytes)
+        entry = from_mime(data, png=png)
+        if entry is None:
+            return
+        current_bin = self.active_bin()
+        target = self.autosort_destination(entry.kind, entry.preview, current_bin)
+        if target is None:
+            self.statusBar().showMessage("Clip excluded by Autosort rule", 4000)
+            return
+        title = entry.preview
+        if entry.kind == "image" and png:
+            image = QImage.fromData(png, "PNG")
+            title = f"Image {image.width()} × {image.height()}"
+        self.store.add(entry.kind, entry.content, title, target, formats=entry.formats)
         self.refresh()
 
     def refresh(self, *_args):
@@ -1242,16 +1302,16 @@ class ClipMintWindow(QMainWindow):
         meta = current.data(Qt.ItemDataRole.UserRole + 1) or {}
         kind, contents = value
         self.preview_name.setText(meta.get("preview", current.text()))
-        tag = meta.get("type", "IMG" if kind == "image" else "TXT")
-        self.preview_meta["Type"].setText("Image / PNG" if kind == "image" else f"Text / {tag}")
+        tag = meta.get("type", "IMG" if kind == "image" else "FILE" if kind == "files" else "TXT")
+        self.preview_meta["Type"].setText("Image / PNG" if kind == "image" else "Files / URI" if kind == "files" else f"Text / {tag}")
         self.preview_meta["Saved"].setText(meta.get("age", "—") + " ago" if meta.get("age") not in (None, "now", "—") else meta.get("age", "—"))
         self.preview_meta["Collection"].setText(meta.get("bin", self.active_bin()))
-        self.preview_meta["Source"].setText("Clipboard image" if kind == "image" else "Clipboard text")
+        self.preview_meta["Source"].setText("Clipboard image" if kind == "image" else "Clipboard files" if kind == "files" else "Clipboard text")
         self.pin_action.setText("UNPIN" if self.store.pinned(clip_id) else "PIN")
-        if kind == "text":
+        if kind in ("text", "files"):
             self.preview_image.clear_image()
             self.preview_label.setText(contents.decode("utf-8", errors="replace")[:5000])
-            self.preview_sub.setText(f"TEXT · {len(contents):,} bytes")
+            self.preview_sub.setText(f"{'FILES' if kind == 'files' else 'TEXT'} · {len(contents):,} bytes")
             self.preview_stack.setCurrentWidget(self.preview_label)
             return
         self.preview_sub.setText("IMAGE FILE · PNG")
@@ -1341,19 +1401,12 @@ class ClipMintWindow(QMainWindow):
         if value is None:
             return
         kind, contents = value
-        clipboard = QApplication.clipboard()
-        # A deliberate "Copy" action should not be re-recorded as a new
-        # history entry; Qt emits dataChanged for our own clipboard write.
         self._ignore_next_clipboard_change = True
         QTimer.singleShot(400, lambda: setattr(self, "_ignore_next_clipboard_change", False))
-        if kind == "text":
-            clipboard.setText(contents.decode("utf-8", errors="replace"))
-        else:
-            image = QImage.fromData(contents, "PNG")
-            if image.isNull():
-                self.error("Clipboard", "Image could not be decoded")
-                return
-            clipboard.setImage(image)
+        QApplication.clipboard().setMimeData(
+            mime_from_entry(kind, contents,
+                            self.store.get_formats(item.data(Qt.ItemDataRole.UserRole)))
+        )
         self.inform("Copied", "Saved snippet copied to the system clipboard")
 
     def toggle_monitoring(self):
