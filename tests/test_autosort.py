@@ -27,7 +27,7 @@ class AutosortTests(unittest.TestCase):
 
     def test_image_phone_and_regex(self):
         rules = [rule("Image", "Temporary"), rule("Phone", "Personal"),
-                 rule("Regex", "Work", r"INV\\d{5}")]
+                 rule("Regex", "Work", r"INV\d{5}")]
         self.assertEqual(route_clip(rules, "image", "", "Work", BINS), "Temporary")
         self.assertEqual(route_clip(rules, "text", "+27 82 123 4567",
                                     "Work", BINS), "Personal")
