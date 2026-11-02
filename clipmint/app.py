@@ -969,10 +969,12 @@ class ClipMintWindow(QMainWindow):
         privacy_group = QGroupBox("Clipboard privacy")
         privacy_layout = QVBoxLayout(privacy_group)
         privacy_message = QLabel(
-            "Concealed clipboard hints and many credential/card patterns are "
-            "excluded. Foreground app matching is only a heuristic on X11 "
-            "and cannot guarantee exclusion of clipboard-owning background apps. "
-            "Ordinary history is NOT encrypted in this preview."
+            "Concealed hints and credential/card patterns are excluded. "
+            "X11 foreground blocklists are best-effort, not security boundaries. "
+            + ("Clipboard contents and previews are encrypted at rest; "
+               "collection metadata is visible."
+               if self.history_secure else
+               "Legacy clipboard history is still plaintext until migrated.")
         )
         privacy_message.setWordWrap(True)
         privacy_layout.addWidget(privacy_message)
@@ -989,6 +991,13 @@ class ClipMintWindow(QMainWindow):
             )
         )
         privacy_layout.addWidget(self.foreground_blocklist)
+        self.secure_history_button = QPushButton(
+            "Encrypted history active" if self.history_secure
+            else "Encrypt history with desktop keyring…"
+        )
+        self.secure_history_button.setEnabled(not self.history_secure)
+        self.secure_history_button.clicked.connect(self.enable_encrypted_history)
+        privacy_layout.addWidget(self.secure_history_button)
         layout.addWidget(privacy_group)
 
         screenshot_group = QGroupBox("Screenshot editor")
@@ -1472,7 +1481,8 @@ class ClipMintWindow(QMainWindow):
         self._ignore_next_clipboard_change = True
         QApplication.clipboard().setText(text)
         QTimer.singleShot(400, lambda: setattr(self, "_ignore_next_clipboard_change", False))
-        if not sensitive_text(text) and not looks_sensitive(text):
+        if (not sensitive_text(text) and not looks_sensitive(text)
+                and self.monitoring and not self.history_security_error):
             data = text.encode("utf-8")
             self.store.add("text", data, " ".join(text.split())[:550],
                            self.active_bin(),
@@ -1529,7 +1539,46 @@ class ClipMintWindow(QMainWindow):
                 "Copied; automatic paste unavailable. Paste manually.", 7000
             )
 
+    def enable_encrypted_history(self):
+        if self.history_secure:
+            return
+        confirmation = QMessageBox.question(
+            self, "Encrypt clipboard history",
+            "This creates a separate encrypted SQLite database using your unlocked "
+            "desktop Secret Service keyring. The original plaintext database is "
+            "preserved for recovery, and will still require manual removal. Continue?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if confirmation != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            key = key_from_secret_service(create=True)
+            secure = EncryptedClipStore.migrate_legacy(
+                self.store, secure_path(), key
+            )
+        except (HistorySecurityError, OSError, ValueError) as exc:
+            self.error("Encrypted history", str(exc))
+            return
+        self.store.close()
+        self.store = secure
+        self.quick_popup.store = secure
+        self.history_secure = True
+        self.history_security_error = ""
+        self.monitoring = True
+        self.settings.setValue("privacy/history_secure", True)
+        self.secure_history_button.setText("Encrypted history active")
+        self.secure_history_button.setEnabled(False)
+        self.refresh()
+        self.inform(
+            "History encrypted",
+            "New captures are encrypted. The old plaintext history still exists."
+        )
+
     def toggle_monitoring(self):
+        if self.history_security_error:
+            self.error("Clipboard privacy", "Unlock the desktop keyring and restart ClipMint")
+            return
         self.monitoring = not self.monitoring
         self.pause_button.setText("Pause monitoring" if self.monitoring else "Resume monitoring")
         self.inform("Clipboard monitoring", "Enabled" if self.monitoring else "Paused")
