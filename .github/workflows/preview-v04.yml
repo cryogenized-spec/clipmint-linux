@@ -3,7 +3,7 @@ on:
   push:
     branches: [feat/v04-image-preview-capture-ux, feat/v04-encrypted-vault-review]
   pull_request:
-    branches: [feat/v04-image-preview-capture-ux, feat/v04-encrypted-vault-review]
+    branches: [feat/v04-image-preview-capture-ux, feat/v04-configurable-autosort]
   workflow_dispatch:
 permissions:
   contents: read
