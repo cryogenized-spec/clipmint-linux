@@ -185,7 +185,7 @@ class ClipMintWindow(QMainWindow):
                 min(390, max(310, int(self.width() * .265)))
             )
         wide = self.width() >= 1180
-        self.dock_panel.setFixedWidth(142 if wide else 112)
+        self.dock_panel.setFixedWidth(142 if wide else 134)
         if hasattr(self, "archive_heading"):
             self.archive_heading.setText(
                 "Clipboard  ·  クリップボード"
