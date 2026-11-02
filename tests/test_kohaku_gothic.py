@@ -40,6 +40,39 @@ class KohakuGothicTests(unittest.TestCase):
                 else:
                     os.environ["XDG_DATA_HOME"] = old
 
+    def test_supplied_card_replaces_vector_frame_and_overlaid_captions(self):
+        with TemporaryDirectory() as root:
+            old = os.environ.get("XDG_DATA_HOME")
+            os.environ["XDG_DATA_HOME"] = root
+            window = None
+            try:
+                folder = Path(root) / "clipmint"
+                folder.mkdir()
+                card = folder / "kohaku_card.png"
+                picture = QImage(269, 514, QImage.Format.Format_RGB32)
+                picture.fill(QColor("#522331"))
+                self.assertTrue(picture.save(str(card), "PNG"))
+                window = ClipMintWindow()
+                window.show()
+                self.app.processEvents()
+                self.assertTrue(window.manga_dock.has_card_art)
+                self.assertEqual(window.manga_dock.asset_path, card)
+                self.assertTrue(window.manga_mascot.isHidden())
+                self.assertTrue(window.maid_caption.isHidden())
+                self.assertIn("Kohaku", window.manga_dock.accessibleName())
+                rendered = window.manga_dock.grab().toImage()
+                self.assertFalse(rendered.isNull())
+            finally:
+                if window is not None:
+                    window.poller.stop()
+                    window._vault_lock_timer.stop()
+                    window.store.close()
+                    window.hide()
+                if old is None:
+                    os.environ.pop("XDG_DATA_HOME", None)
+                else:
+                    os.environ["XDG_DATA_HOME"] = old
+
     def test_gothic_frame_and_descriptive_navigation(self):
         with TemporaryDirectory() as root:
             old = os.environ.get("XDG_DATA_HOME")
