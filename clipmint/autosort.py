@@ -51,10 +51,10 @@ def rule_matches(rule: dict, kind: str, text: str) -> bool:
     if mode == "Text":
         return True
     if mode == "URL":
-        return bool(re.search(r"https?://|www\\.", text, re.IGNORECASE))
+        return bool(re.search(r"https?://|www\.", text, re.IGNORECASE))
     if mode == "Phone":
         normalized = text.strip()
-        return bool(re.fullmatch(r"\\+?[\\d\\s().-]{7,22}", normalized)
+        return bool(re.fullmatch(r"\+?[\d\s().-]{7,22}", normalized)
                     and sum(ch.isdigit() for ch in normalized) >= 7)
     if mode == "Keyword":
         return rule["pattern"].casefold() in text.casefold()
