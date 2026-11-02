@@ -304,7 +304,7 @@ class ClipMintWindow(QMainWindow):
         preview_frame.setMinimumWidth(185)
         preview_frame.setMaximumWidth(290)
         right = QVBoxLayout(preview_frame)
-        preview_heading = QLabel("PREVIEW")
+        preview_heading = QLabel("PREVIEW  /  プレビュー")
         preview_heading.setObjectName("previewHeading")
         right.addWidget(preview_heading)
         self.preview_stack = QStackedWidget()
