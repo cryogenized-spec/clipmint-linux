@@ -122,6 +122,7 @@ class ClipMintWindow(QMainWindow):
         self.capture_format = "MP4"
         self._privacy_skipped = 0
         self._closing = False
+        self._ignore_next_clipboard_change = False
 
         # Native reconstruction of the approved Crimson Archive v2 prototype.
         # All content comes from the existing history store and capture methods.
@@ -383,7 +384,11 @@ class ClipMintWindow(QMainWindow):
         QMessageBox.warning(self.recorder_window or self, title, message)
 
     def clipboard_changed(self):
-        if not self.monitoring:
+        if (not self.monitoring or self._closing
+                or getattr(self.store, "closed", False)):
+            return
+        if self._ignore_next_clipboard_change:
+            self._ignore_next_clipboard_change = False
             return
         data = QApplication.clipboard().mimeData()
         if data is None:
@@ -573,6 +578,10 @@ class ClipMintWindow(QMainWindow):
             return
         kind, contents = value
         clipboard = QApplication.clipboard()
+        # A deliberate "Copy" action should not be re-recorded as a new
+        # history entry; Qt emits dataChanged for our own clipboard write.
+        self._ignore_next_clipboard_change = True
+        QTimer.singleShot(400, lambda: setattr(self, "_ignore_next_clipboard_change", False))
         if kind == "text":
             clipboard.setText(contents.decode("utf-8", errors="replace"))
         else:
