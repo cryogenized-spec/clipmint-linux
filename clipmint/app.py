@@ -173,34 +173,40 @@ class ClipMintWindow(QMainWindow):
             self._update_manga_visibility()
 
     def _update_manga_visibility(self):
-        # Approved prototype: full portrait above compact threshold; protect
-        # useful clipboard/preview real estate on smaller screens.
-        show = self.width() >= 1000 and self.height() >= 650
+        """Keep dock labels readable; never regress to an icons-only rail.
+
+        The character card hides on compact displays so real editing and the
+        selected-item preview retain useful width.
+        """
+        show = self.width() >= 1120 and self.height() >= 700
         self.manga_dock.setVisible(show)
         if show:
             self.manga_dock.setFixedWidth(
-                336 if self.width() < 1140 else min(390, max(305, int(self.width() * .26)))
+                min(390, max(310, int(self.width() * .265)))
             )
-        self.dock_panel.setFixedWidth(110 if self.width() >= 1370 else 56)
+        wide = self.width() >= 1180
+        self.dock_panel.setFixedWidth(142 if wide else 112)
         if hasattr(self, "archive_heading"):
             self.archive_heading.setText(
-                "Clipboard  ·  クリップボード" if self.width() >= 1270 else "Clipboard"
+                "Clipboard  ·  クリップボード"
+                if self.width() >= 1150 else "Clipboard"
             )
         if hasattr(self, "preview_heading"):
             self.preview_heading.setText(
-                "プレビュー / PREVIEW" if self.width() >= 1370 else "プレビュー"
+                "プレビュー  Preview"
+                if self.width() >= 1190 else "プレビュー"
             )
-        icons = {"Clipboard":"▤", "Screenshots":"▣", "Recordings":"◉",
-                 "Secrets & Variables":"♢", "Autosort":"⇄", "Settings":"⚙"}
         for label, button in self.nav_buttons.items():
-            if self.width() >= 1370:
-                short = {"Screenshots":"Shots", "Recordings":"Video",
-                         "Secrets & Variables":"Secrets"}.get(label, label)
-                button.setText(icons[label] + "\n" + short.upper())
-                button.setMinimumHeight(73)
-            else:
-                button.setText(icons[label])
-                button.setMinimumHeight(60)
+            display = button.property("dockDisplay") or label
+            subtitle = button.property("dockSubtitle") or ""
+            icon = button.property("dockIcon") or "◇"
+            # Even in the compact layout titles remain visible.
+            button.setText(
+                f"{icon}  {display}\n   {subtitle}"
+                if wide else f"{icon}  {display}"
+            )
+            button.setMinimumHeight(67 if wide else 49)
+            button.setToolTip(f"{display}: {label}")
 
     def build_clipboard_page(self):
         page = QWidget()
