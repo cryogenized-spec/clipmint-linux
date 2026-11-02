@@ -193,21 +193,24 @@ class CrimsonClipDelegate(QStyledItemDelegate):
 
     def paint(self, painter, option, index):
         painter.save()
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         r = option.rect.adjusted(0, 0, -1, -1)
         active = bool(option.state & QStyle.StateFlag.State_Selected)
         hover = bool(option.state & QStyle.StateFlag.State_MouseOver)
-        painter.fillRect(r, QColor("#432330" if active else "#30202B" if hover else "#111017"))
-        painter.setPen(QPen(QColor("#FF6780" if active else "#372A34"), 1))
-        painter.drawLine(r.bottomLeft(), r.bottomRight())
+        # Restrained card-like rows from the approved Gothic Archive design.
+        # The soft enclosure defines a selection without a SaaS-grid appearance.
+        bg = QColor("#4C2939" if active else "#32232E" if hover else "#241B26")
+        painter.setBrush(bg)
+        painter.setPen(QPen(QColor("#C87883" if active else "#5A3748"), 1))
+        painter.drawRoundedRect(r.adjusted(4, 3, -4, -3), 7, 7)
         if active:
-            painter.fillRect(QRect(r.left(), r.top(), 3, r.height()), QColor(ROSE))
+            painter.fillRect(QRect(r.left()+4, r.top()+9, 3, r.height()-18), QColor("#F1A0AC"))
         meta = index.data(int(Qt.ItemDataRole.UserRole) + 1) or {}
         name = meta.get("preview", index.data(Qt.ItemDataRole.DisplayRole) or "")
         tag, icon, colour = label_type(meta.get("kind", "text"), name)
         x = r.left() + 12
         y = r.top() + (r.height() - 34)//2
-        painter.setPen(QPen(QColor("#694957"),1))
+        painter.setPen(QPen(QColor("#9A5A67"),1))
         painter.drawRect(x, y, 34, 34)
         painter.setPen(QColor(PORCELAIN))
         painter.setFont(QFont("DejaVu Sans Mono", 12, QFont.Weight.Bold))
@@ -221,15 +224,15 @@ class CrimsonClipDelegate(QStyledItemDelegate):
         textx=tagx+tagw+8
         available=max(30, r.right()-textx-40)
         painter.setPen(QColor("#F4EEEB"))
-        painter.setFont(QFont("DejaVu Sans", 11))
+        painter.setFont(QFont("Georgia", 12))
         font=QFontMetrics(painter.font())
         painter.drawText(textx, r.top()+29, font.elidedText(name,Qt.TextElideMode.ElideRight,available))
         painter.setFont(QFont("DejaVu Sans Mono", 9))
-        painter.setPen(QColor("#A99BA2"))
+        painter.setPen(QColor("#CCAFB5"))
         subtitle = meta.get("subtitle", "Image clipboard" if tag=="IMG" else "Text clipboard")
         painter.drawText(textx, r.top()+50,
             QFontMetrics(painter.font()).elidedText(subtitle,Qt.TextElideMode.ElideRight,available+17))
-        painter.setPen(QColor("#B7A6AD"))
+        painter.setPen(QColor("#E3C8C4"))
         painter.drawText(QRect(r.right()-38,r.top()+7,31,17),Qt.AlignmentFlag.AlignRight,meta.get("age",""))
         painter.setPen(QColor("#EFBB8E" if meta.get("pinned") else "#7E6573"))
         painter.drawText(QRect(r.right()-28,r.bottom()-29,19,18),Qt.AlignmentFlag.AlignCenter,"★" if meta.get("pinned") else "☆")
