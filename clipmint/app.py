@@ -7,12 +7,12 @@ import subprocess
 import sys
 
 from PySide6.QtCore import Qt, QByteArray, QBuffer, QIODevice, QTimer
-from PySide6.QtGui import QImage, QFont
+from PySide6.QtGui import QImage, QFont, QPixmap
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QDialog, QFrame, QHBoxLayout, QInputDialog,
     QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow,
     QMenu, QMessageBox, QPushButton, QStyle, QSystemTrayIcon,
-    QTabBar, QToolButton, QVBoxLayout, QWidget, QStackedWidget,
+    QTabBar, QToolButton, QVBoxLayout, QWidget, QStackedWidget, QSizePolicy,
 )
 
 from .capture import AreaSelector, RegionRecorder, recordings_dir, screenshots_dir, stamped_filename
@@ -21,40 +21,84 @@ from .store import ClipStore, classify, looks_sensitive
 
 
 THEME = """
-/* These families ship with standard Linux Mint; no third-party font downloads. */
-QMainWindow, QWidget#appRoot {background:#0e1627;color:#e5f2ff;
+/* Native Qt style: tonal elevation, clear hierarchy, restrained accent strokes. */
+QMainWindow, QWidget#appRoot {background:#080B10;color:#F1F5F9;
     font-family:"DejaVu Sans";font-size:14px;}
-QLabel {color:#e5f2ff;font-family:"DejaVu Sans";font-size:14px;}
-QLabel#brand {color:#50e4ca;font-family:"DejaVu Sans Mono";font-size:29px;font-weight:700;}
-QLabel#edition {color:#ba8bff;font-family:"DejaVu Sans Mono";font-size:18px;font-weight:700;}
-QLabel#muted {color:#9bb3cd;font-size:12px;}
-QLabel#sectionTitle {color:#ebf6ff;font-family:"DejaVu Sans Mono";font-size:17px;font-weight:700;}
-QLabel#previewHeading {color:#bb9bfa;font-family:"DejaVu Sans Mono";font-size:13px;font-weight:700;}
+QLabel {color:#F1F5F9;font-family:"DejaVu Sans";font-size:14px;}
+QLabel#brand {color:#00FF9D;font-family:"DejaVu Sans Mono";font-size:29px;font-weight:700;}
+QLabel#edition {color:#9D4EDD;font-family:"DejaVu Sans Mono";font-size:18px;font-weight:700;}
+QLabel#muted {color:#94A3B8;font-size:12px;}
+QLabel#sectionTitle {color:#F1F5F9;font-family:"DejaVu Sans Mono";font-size:17px;font-weight:700;}
+QLabel#previewHeading {color:#B794F4;font-family:"DejaVu Sans Mono";font-size:13px;font-weight:700;}
+QLabel#previewDimensions {color:#94A3B8;font-size:12px;}
 QLineEdit,QComboBox {font-family:"DejaVu Sans";font-size:14px;
-    background:#14263f;color:#eef8ff;border:1px solid #345572;
-    padding:10px;border-radius:9px;selection-background-color:#31688b;}
-QLineEdit:focus,QComboBox:focus {border:1px solid #48e5c4;}
+    background:#131C2D;color:#F1F5F9;border:1px solid #253346;
+    padding:10px;border-radius:8px;selection-background-color:#226E59;}
+QLineEdit:focus,QComboBox:focus {border:1px solid #00FF9D;}
 QListWidget {font-family:"DejaVu Sans";font-size:14px;
-    background:#111f33;color:#ebf4ff;border:1px solid #36516c;
-    border-radius:12px;padding:8px;outline:none;}
-QListWidget::item {padding:13px 9px;border-bottom:1px solid #253b51;}
-QListWidget::item:selected {background:#23456b;border-radius:8px;}
+    background:#131C2D;color:#F1F5F9;border:0px;
+    border-radius:10px;padding:8px;outline:none;}
+QListWidget::item {padding:11px 9px;border:0px;}
+QListWidget::item:hover {background:#1A263C;border-radius:7px;}
+QListWidget::item:selected {background:#164435;border-radius:7px;}
 QPushButton,QToolButton {font-family:"DejaVu Sans";font-size:13px;
-    background:#1c304c;color:#eaf6ff;border:1px solid #42678f;
-    border-radius:9px;padding:11px 12px;font-weight:600;}
-QPushButton:hover,QToolButton:hover {background:#294666;border:1px solid #5debd4;}
-QPushButton:checked {background:#175c72;border:1px solid #4fe3c9;}
-QPushButton#record {background:#114e48;border:2px solid #32d9bf;font-size:14px;}
-QPushButton#screenshot {background:#392454;border:2px solid #a26fe1;font-size:14px;}
-QTabBar::tab {font-family:"DejaVu Sans";font-size:14px;font-weight:650;
-    background:#1c2d4a;color:#d9ecff;border:1px solid #3f597b;
-    padding:13px 18px;border-radius:9px;margin-right:7px;}
-QTabBar::tab:selected {background:#185c73;border:2px solid #45ebce;}
-QFrame#sidebar {background:#101b2d;border:1px solid #273b53;border-radius:12px;}
-QFrame#preview {background:#121e31;border:1px solid #2e4c6b;border-radius:12px;}
+    background:#131C2D;color:#F1F5F9;border:0px;
+    border-radius:8px;padding:11px 12px;font-weight:600;}
+QPushButton:hover,QToolButton:hover {background:#1A263C;}
+QPushButton:focus,QToolButton:focus {border:1px solid #00FF9D;}
+QPushButton:checked {background:#164435;}
+QPushButton#nav {text-align:left;background:transparent;border:0px;
+    border-left:3px solid transparent;border-radius:0px;padding:12px 13px;}
+QPushButton#nav:hover {background:#1A263C;}
+QPushButton#nav:checked {background:#112B24;border-left:3px solid #00FF9D;color:#F1F5F9;}
+QPushButton#record {background:#105341;color:#F1F5F9;font-size:14px;}
+QPushButton#record:hover {background:#156B53;}
+QPushButton#screenshot {background:#35214C;color:#F1F5F9;font-size:14px;}
+QPushButton#screenshot:hover {background:#492D66;}
+QTabBar::tab {font-family:"DejaVu Sans";font-size:14px;font-weight:600;
+    background:transparent;color:#94A3B8;border:0px;
+    border-bottom:2px solid transparent;
+    padding:12px 17px;border-radius:0px;margin-right:6px;}
+QTabBar::tab:hover {color:#F1F5F9;}
+QTabBar::tab:selected {color:#F1F5F9;border-bottom:2px solid #00FF9D;}
+QFrame#sidebar {background:#0D131F;border:0px;border-radius:10px;}
+QFrame#preview {background:#0D131F;border:0px;border-radius:10px;}
 QStatusBar {font-family:"DejaVu Sans";font-size:12px;
-    background:#0b1524;color:#9bb3cd;}
+    background:#0D131F;color:#94A3B8;border:0px;}
 """
+
+
+class ImagePreviewLabel(QLabel):
+    """Fit an in-memory thumbnail to the pane without altering the saved clip."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._original: QPixmap | None = None
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setMinimumHeight(150)
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding)
+
+    def show_image(self, image: QImage) -> None:
+        self._original = QPixmap.fromImage(image)
+        self._update_size()
+
+    def clear_image(self) -> None:
+        self._original = None
+        self.clear()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._update_size()
+
+    def _update_size(self) -> None:
+        if self._original is not None and not self._original.isNull():
+            if self.width() > 0 and self.height() > 0:
+                preview = self._original.scaled(
+                    self.size(),
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+                self.setPixmap(preview)
 
 
 class ClipMintWindow(QMainWindow):
@@ -116,6 +160,7 @@ class ClipMintWindow(QMainWindow):
         for index, name in enumerate(("Clipboard", "Screenshots", "Recordings",
                                        "Secrets & Variables", "Autosort", "Settings")):
             b = QPushButton(name.replace("&", "&&"))
+            b.setObjectName("nav")
             b.setCheckable(True)
             b.clicked.connect(lambda _checked=False, i=index: self.open_section(i))
             self.nav_buttons[name] = b
@@ -157,16 +202,16 @@ class ClipMintWindow(QMainWindow):
         formats.addAction("Record GIF").triggered.connect(lambda: self.choose_recording("GIF"))
         self.record_menu.setMenu(formats)
         footer.addWidget(self.record_menu)
-        self.screenshot_button = QPushButton("▣  Screenshot")
+        self.screenshot_button = QPushButton("▣  Screenshot Area")
         self.screenshot_button.setObjectName("screenshot")
-        self.screenshot_button.clicked.connect(self.screenshot_full)
+        self.screenshot_button.clicked.connect(self.choose_screenshot)
         footer.addWidget(self.screenshot_button, 2)
         self.screenshot_menu = QToolButton()
         self.screenshot_menu.setText("▾")
         self.screenshot_menu.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         captures = QMenu(self.screenshot_menu)
-        captures.addAction("Full screen (default)").triggered.connect(self.screenshot_full)
-        captures.addAction("Select area").triggered.connect(self.choose_screenshot)
+        captures.addAction("Select area (default)").triggered.connect(self.choose_screenshot)
+        captures.addAction("Full screen").triggered.connect(self.screenshot_full)
         self.screenshot_menu.setMenu(captures)
         footer.addWidget(self.screenshot_menu)
         root.addLayout(footer)
@@ -235,11 +280,23 @@ class ClipMintWindow(QMainWindow):
         preview_heading = QLabel("PREVIEW")
         preview_heading.setObjectName("previewHeading")
         right.addWidget(preview_heading)
+        self.preview_stack = QStackedWidget()
         self.preview_label = QLabel("Select an item to preview")
         self.preview_label.setWordWrap(True)
         self.preview_label.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.preview_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        right.addWidget(self.preview_label, 1)
+        self.preview_stack.addWidget(self.preview_label)
+        self.preview_image_page = QWidget()
+        image_layout = QVBoxLayout(self.preview_image_page)
+        image_layout.setContentsMargins(0, 0, 0, 0)
+        self.preview_image = ImagePreviewLabel()
+        image_layout.addWidget(self.preview_image, 1)
+        self.preview_dimensions = QLabel("")
+        self.preview_dimensions.setObjectName("previewDimensions")
+        self.preview_dimensions.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        image_layout.addWidget(self.preview_dimensions)
+        self.preview_stack.addWidget(self.preview_image_page)
+        right.addWidget(self.preview_stack, 1)
         copy = QPushButton("Copy selected")
         copy.clicked.connect(self.copy_selected)
         right.addWidget(copy)
@@ -434,21 +491,48 @@ class ClipMintWindow(QMainWindow):
                 self.history.setCurrentItem(item)
         self.count_label.setText(f"Clipboard ({bin_name})  ·  {len(clips)} shown / {self.store.count(bin_name)} total")
         if self.history.currentItem() is None:
-            self.preview_label.setText("Select an item to preview")
+            self.clear_preview()
+
+    def clear_preview(self) -> None:
+        self.preview_image.clear_image()
+        self.preview_label.setText("Select an item to preview")
+        self.preview_stack.setCurrentWidget(self.preview_label)
 
     def preview_clip(self, current, _old):
         if current is None:
-            self.preview_label.setText("Select an item to preview")
+            self.clear_preview()
             return
         value = self.store.get(current.data(Qt.ItemDataRole.UserRole))
         if value is None:
+            self.clear_preview()
             return
         kind, contents = value
         if kind == "text":
+            self.preview_image.clear_image()
             self.preview_label.setText(contents.decode("utf-8", errors="replace")[:5000])
-        else:
-            image = QImage.fromData(contents, "PNG")
-            self.preview_label.setText(f"Image · {image.width()} × {image.height()} pixels")
+            self.preview_stack.setCurrentWidget(self.preview_label)
+            return
+        if len(contents) > 16 * 1024 * 1024:
+            self.preview_label.setText("Image too large to preview")
+            self.preview_stack.setCurrentWidget(self.preview_label)
+            return
+        # PNG dimensions are big-endian at bytes 16–23. Limit decompression
+        # before decoding potentially untrusted images from clipboard history.
+        if contents.startswith(b"\x89PNG\r\n\x1a\n") and len(contents) >= 24:
+            width = int.from_bytes(contents[16:20], "big")
+            height = int.from_bytes(contents[20:24], "big")
+            if not width or not height or width * height > 32_000_000:
+                self.preview_label.setText("Image dimensions exceed safe preview limits")
+                self.preview_stack.setCurrentWidget(self.preview_label)
+                return
+        image = QImage.fromData(contents, "PNG")
+        if image.isNull():
+            self.preview_label.setText("Unable to preview this image")
+            self.preview_stack.setCurrentWidget(self.preview_label)
+            return
+        self.preview_dimensions.setText(f"{image.width()} × {image.height()} pixels")
+        self.preview_stack.setCurrentWidget(self.preview_image_page)
+        self.preview_image.show_image(image)
 
     def selected_id(self):
         item = self.history.currentItem()
@@ -520,7 +604,7 @@ class ClipMintWindow(QMainWindow):
 
     def begin_selection(self, purpose):
         try:
-            self.selector = AreaSelector()
+            self.selector = AreaSelector(purpose)
         except Exception as exc:
             self.show_window()
             self.error("Screen capture", str(exc))
