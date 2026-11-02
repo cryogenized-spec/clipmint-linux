@@ -1,7 +1,9 @@
 name: Preview ClipMint v0.4 Qt installer (artifact only)
 on:
   push:
-    branches: [feat/v04-image-preview-capture-ux, feat/crimson-archive-native-ui]
+    branches: [feat/v04-image-preview-capture-ux]
+  pull_request:
+    branches: [feat/v04-image-preview-capture-ux]
   workflow_dispatch:
 permissions:
   contents: read
