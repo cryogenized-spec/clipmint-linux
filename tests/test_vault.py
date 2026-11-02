@@ -27,6 +27,11 @@ class VaultTests(unittest.TestCase):
             vault.encrypted_backup(exported)
             self.assertEqual(exported.read_bytes(), path.read_bytes())
             self.assertEqual(os.stat(exported).st_mode & 0o777, 0o600)
+            restored = Vault(Path(root) / "restored.vault")
+            restored.restore_backup(exported)
+            restored.unlock("fake-passphrase-123")
+            self.assertEqual(restored.get_value(entry_id), "not-a-real-api-key-xyz")
+            restored.lock()
             vault.lock()
             with self.assertRaises(VaultError):
                 vault.get_value(entry_id)
