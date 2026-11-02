@@ -7,6 +7,12 @@ on:
       - "tools/render_crimson_review.py"
       - "tests/**"
       - ".github/workflows/crimson-native-review.yml"
+  pull_request:
+    paths:
+      - "clipmint/**"
+      - "tools/render_crimson_review.py"
+      - "tests/**"
+      - ".github/workflows/crimson-native-review.yml"
   workflow_dispatch:
 permissions:
   contents: write
