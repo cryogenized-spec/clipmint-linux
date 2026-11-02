@@ -52,3 +52,66 @@ Automated tests cover SQLite bins/migration, UI launch and screen-recorder state
 ## Licences
 
 Original ClipMint code: MIT. Bundled FFmpeg: separate GPL executable, licence/source details inside the package. The included original DotGothic16 font is under SIL OFL 1.1; its licence is packaged as `OFL-DotGothic16.txt`.
+
+
+## v0.4 development preview — NOT YET RELEASED
+
+The Crimson Archive visual redesign, selected-image preview, region-selection
+instructions, keyboard shortcut editing, Autosort and encrypted vault are in
+stacked **draft** pull requests #4–#7. They are **not part of the installed
+v0.3 release** and must not be used to assume existing clipboard history is
+encrypted. The working v0.3 remains the fallback until full Linux Mint X11
+acceptance and security review.
+
+### Keyboard shortcuts
+
+Settings contains Qt-native editable **window-local** keybindings (search,
+screenshot area, video region, copy selected, and pause monitoring). Reset
+restores the default; Disable clears one binding. Duplicate sequences are
+rejected. Keys are not grabbed system-wide from other programs, and every
+action remains available with the mouse.
+
+### Autosort
+
+Enable Autosort explicitly (it is OFF by default). Add, edit, disable, delete,
+or reorder top-to-bottom rules to route new clips by type, URL, phone, keyword
+or regex. The first enabled match wins; unmatched clips still go to the active
+bin. You can set a matching rule to **Never capture**. Existing clips are not
+retroactively moved or deleted. Regular expressions have a short execution
+timeout; inputs longer than 8,192 characters are not matched by regex rules.
+Clipboard source-application attribution is not reliably supported by this
+version. Test a currently selected history clip before enabling complex rules.
+
+### Secrets & Variables — experimental, needs independent security review
+
+The vault is opt-in and stored at
+\`$XDG_DATA_HOME/clipmint/secrets.vault\` or
+\`~/.local/share/clipmint/secrets.vault\` when XDG_DATA_HOME is not set.
+It stores encrypted entry names, types and values with libsodium SecretBox
+(XSalsa20-Poly1305 authenticated encryption) and an Argon2id password-derived
+key. The key is not stored on disk. Vault files and encrypted backups are
+written with file permissions \`0600\`; the vault is locked at startup and on
+window close, or after five minutes without a vault action.
+
+To use it, create a vault with a unique passphrase of at least 12 characters,
+then unlock it when you need a value. Add named Secret or Variable entries,
+Reveal an entry only when needed, or Copy with an automatic 30-second
+**conditional** clipboard clearing action (it only clears when the value is
+still the copied secret). Create an encrypted backup from the vault screen
+and keep it separately. You may restore a backup only when no vault already
+exists, using the original passphrase. Changing the passphrase re-encrypts
+the data with a new salt; create a new backup afterwards.
+
+**No passphrase recovery exists**. Losing your passphrase means losing access
+to the entries, even when you retain an encrypted backup. Deleting the vault
+file does not erase external backups or guarantee SSD forensic erasure.
+
+**Threat limitations:** ordinary clipboard history remains unencrypted.
+Clipboard contents may be read by other processes on X11 while copied.
+Python-managed memory cannot be promised to be securely wiped on locking.
+The clipboard sensitivity detector is only a heuristic, not a guarantee.
+Never assume this experiment is a production-grade credential manager until
+security review, real laptop acceptance and frozen-package tests pass.
+
+All vault tests use fake data. The app does not upload vault data or collect
+secrets automatically from clipboard history.
