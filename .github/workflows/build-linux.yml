@@ -64,14 +64,14 @@ jobs:
           pyinstaller --noconfirm --clean --windowed --onedir --name ClipMint \
             --add-binary "vendor/ffmpeg:tools" \
             --add-data "vendor/fonts/DotGothic16-Regular.ttf:assets/fonts" \
-            --add-data "clipmint/assets/koma.svg:assets/manga" \
+            --add-data "clipmint/assets/koma_manga.jpg:assets/manga" \
             --add-binary "/usr/lib/x86_64-linux-gnu/libxcb-cursor.so.0:." \
             launcher.py
           ldd dist/ClipMint/_internal/PySide6/Qt/plugins/platforms/libqxcb.so || true
           test -x dist/ClipMint/ClipMint
           test -x dist/ClipMint/_internal/tools/ffmpeg
           test -f dist/ClipMint/_internal/assets/fonts/DotGothic16-Regular.ttf
-          test -f dist/ClipMint/_internal/assets/manga/koma.svg
+          test -f dist/ClipMint/_internal/assets/manga/koma_manga.jpg
       - name: Test executable starts with virtual X11 display
         shell: bash
         env:
