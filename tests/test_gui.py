@@ -147,7 +147,9 @@ class WindowTests(unittest.TestCase):
                 self.app.processEvents()
                 self.assertEqual(window.kana_tag.text(), "クリップミント")
                 self.assertEqual(window.koma_caption.text(), "コマ  /  01")
-                self.assertTrue(window.manga_mascot.renderer.isValid())
+                self.assertTrue(window.manga_mascot.asset_path.is_file())
+                self.assertFalse(window.manga_mascot.portrait.isNull())
+                self.assertGreaterEqual(window.manga_mascot.portrait.width(), 150)
                 self.assertEqual(
                     window.manga_mascot.focusPolicy(), Qt.FocusPolicy.NoFocus
                 )
