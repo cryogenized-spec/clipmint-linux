@@ -36,19 +36,19 @@ def secure_path() -> Path:
 def key_from_secret_service(create=False) -> bytes:
     """Never accept backends that silently store passwords in plaintext files."""
     try:
-        import keyring
         from keyring.backends.SecretService import Keyring as SecretServiceKeyring
     except ImportError as exc:
         raise HistorySecurityError("Secret Service keyring is not installed") from exc
-    if not isinstance(keyring.get_keyring(), SecretServiceKeyring):
-        raise HistorySecurityError("Unlock a Secret Service keyring to enable encryption")
     try:
-        encoded = keyring.get_password(KEY_SERVICE, KEY_NAME)
+        backend = SecretServiceKeyring()
+        if backend.priority <= 0:
+            raise HistorySecurityError("Desktop Secret Service keyring is unavailable")
+        encoded = backend.get_password(KEY_SERVICE, KEY_NAME)
         if encoded is None and create:
             if secure_path().exists():
                 raise HistorySecurityError("Existing encrypted history key is unavailable")
             encoded = base64.b64encode(secrets.token_bytes(32)).decode("ascii")
-            keyring.set_password(KEY_SERVICE, KEY_NAME, encoded)
+            backend.set_password(KEY_SERVICE, KEY_NAME, encoded)
         if not encoded:
             raise HistorySecurityError("Secure history key is missing or keyring is locked")
         result = base64.b64decode(encoded, validate=True)
