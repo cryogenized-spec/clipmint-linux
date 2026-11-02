@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
     QMenu, QMessageBox, QPushButton, QStyle, QSystemTrayIcon,
     QTabBar, QToolButton, QVBoxLayout, QWidget, QStackedWidget, QSizePolicy,
     QKeySequenceEdit, QGroupBox, QCheckBox, QDialogButtonBox,
-    QFormLayout, QAbstractItemView, QFileDialog,
+    QFormLayout, QAbstractItemView, QFileDialog, QScrollArea,
 )
 
 from .branding import ChromaticWordmark, register_display_font
@@ -1083,9 +1083,16 @@ class ClipMintWindow(QMainWindow):
             row.addWidget(disable)
             shortcut_layout.addLayout(row)
         layout.addWidget(shortcut_group)
-        layout.addWidget(QLabel("History is stored locally and is not encrypted."))
+        layout.addWidget(QLabel(
+            "Vault entries are separately encrypted. Clipboard history needs "
+            "the optional secure-history migration above."
+        ))
         layout.addStretch()
-        self.pages.addWidget(page)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(page)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.pages.addWidget(scroll)
 
     def install_shortcuts(self):
         callbacks = {
