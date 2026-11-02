@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 import os
 import subprocess
 import sys
@@ -13,7 +14,8 @@ from PySide6.QtWidgets import (
     QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow,
     QMenu, QMessageBox, QPushButton, QStyle, QSystemTrayIcon,
     QTabBar, QToolButton, QVBoxLayout, QWidget, QStackedWidget, QSizePolicy,
-    QKeySequenceEdit, QGroupBox,
+    QKeySequenceEdit, QGroupBox, QCheckBox, QDialogButtonBox,
+    QFormLayout, QAbstractItemView,
 )
 
 from .branding import ChromaticWordmark, register_display_font
@@ -22,6 +24,7 @@ from .crimson_ui import build_crimson_ui, relative_time, label_type
 from .capture import AreaSelector, RegionRecorder, recordings_dir, screenshots_dir, stamped_filename
 from .recording_ui import RecorderWindow, SaveClipDialog
 from .store import ClipStore, classify, looks_sensitive
+from .autosort import RULE_TYPES, NEVER_CAPTURE, validate_rule, route_clip
 
 
 THEME = """
@@ -126,6 +129,7 @@ class ClipMintWindow(QMainWindow):
         self.resize(1300, 870)
         self.setMinimumSize(850, 600)
         self.store = ClipStore()
+        self.settings = QSettings("ClipMint", "ClipMint")
         self.recorder = RegionRecorder()
         self.monitoring = True
         self.selector: AreaSelector | None = None
@@ -148,11 +152,7 @@ class ClipMintWindow(QMainWindow):
             "history remains unencrypted. Avoid storing passwords or API keys.\n\n"
             "Credentials are only heuristically excluded from clipboard monitoring."
         ))
-        self.build_info_page("Autosort", (
-            "Autosort rules are not enabled in this development preview.\n\n"
-            "The live clipboard filter and sort controls remain available under "
-            "Clipboard. A configurable rules engine is planned separately."
-        ))
+        self.build_autosort_page()
         self.build_settings_page()
         self.install_shortcuts()
         self.statusBar().showMessage("Ready · Left-click to preview, right-click for Copy / Pin / Move / Delete")
@@ -315,6 +315,238 @@ class ClipMintWindow(QMainWindow):
         layout.addStretch()
         self.pages.addWidget(page)
 
+    def build_autosort_page(self):
+        """Native Qt rule editor. Autosort is OFF unless explicitly enabled."""
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        title = QLabel("Autosort · routing rules")
+        title.setObjectName("sectionTitle")
+        layout.addWidget(title)
+        summary = QLabel(
+            "Rules are checked top-to-bottom. The first matching enabled rule "
+            "wins; without a match, clips stay in your selected bin. "
+            "This does not replace manual sorting or delete saved history."
+        )
+        summary.setWordWrap(True)
+        layout.addWidget(summary)
+        self.autosort_enabled = self.settings.value(
+            "autosort/enabled", False, type=bool
+        )
+        self.autosort_rules = []
+        try:
+            saved = json.loads(str(self.settings.value("autosort/rules", "[]")))
+            if isinstance(saved, list):
+                for candidate in saved[:100]:
+                    try:
+                        self.autosort_rules.append(
+                            validate_rule(candidate, self.store.bins())
+                        )
+                    except (ValueError, TypeError):
+                        pass  # Stale destinations and invalid patterns fail closed.
+        except (ValueError, TypeError):
+            pass
+        self.autosort_switch = QCheckBox("Enable automatic routing for new clips")
+        self.autosort_switch.setChecked(self.autosort_enabled)
+        self.autosort_switch.toggled.connect(self.toggle_autosort)
+        layout.addWidget(self.autosort_switch)
+        self.autosort_list = QListWidget()
+        self.autosort_list.setDragDropMode(
+            QAbstractItemView.DragDropMode.InternalMove
+        )
+        self.autosort_list.setDefaultDropAction(Qt.DropAction.MoveAction)
+        self.autosort_list.setToolTip(
+            "Drag rows to reorder priority. Uncheck a row to disable that rule."
+        )
+        self.autosort_list.itemChanged.connect(self.toggle_autosort_rule)
+        self.autosort_list.model().rowsMoved.connect(self.autosort_reordered)
+        layout.addWidget(self.autosort_list, 1)
+        controls = QHBoxLayout()
+        for name, callback in (
+            ("Add", self.add_autosort_rule),
+            ("Edit", self.edit_autosort_rule),
+            ("Remove", self.remove_autosort_rule),
+            ("Move up", lambda: self.move_autosort_rule(-1)),
+            ("Move down", lambda: self.move_autosort_rule(1)),
+        ):
+            button = QPushButton(name)
+            button.clicked.connect(callback)
+            controls.addWidget(button)
+        layout.addLayout(controls)
+        test_button = QPushButton("Test selected history clip against these rules")
+        test_button.clicked.connect(self.test_autosort)
+        layout.addWidget(test_button)
+        self.autosort_test_result = QLabel(
+            "Pattern matching is local. Credentials detected by the privacy "
+            "filter are excluded before any Autosort rule runs."
+        )
+        self.autosort_test_result.setWordWrap(True)
+        layout.addWidget(self.autosort_test_result)
+        self.pages.addWidget(page)
+        self.refresh_autosort_list()
+
+    def toggle_autosort(self, enabled: bool):
+        self.autosort_enabled = enabled
+        self.settings.setValue("autosort/enabled", enabled)
+        self.statusBar().showMessage(
+            "Autosort enabled" if enabled else "Autosort disabled", 3000
+        )
+
+    def persist_autosort(self):
+        self.settings.setValue("autosort/rules", json.dumps(self.autosort_rules))
+
+    def refresh_autosort_list(self, selected: int = -1):
+        self.autosort_list.blockSignals(True)
+        self.autosort_list.clear()
+        for i, rule in enumerate(self.autosort_rules):
+            descriptor = (
+                f"{rule['mode']}: {rule['pattern']}" if rule["mode"] in
+                ("Keyword", "Regex") else rule["mode"]
+            )
+            item = QListWidgetItem(
+                f"{i + 1:02d}   {descriptor}   →   {rule['target']}"
+            )
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable
+                          | Qt.ItemFlag.ItemIsDragEnabled)
+            item.setCheckState(
+                Qt.CheckState.Checked if rule["enabled"]
+                else Qt.CheckState.Unchecked
+            )
+            item.setData(Qt.ItemDataRole.UserRole, i)
+            self.autosort_list.addItem(item)
+        if 0 <= selected < self.autosort_list.count():
+            self.autosort_list.setCurrentRow(selected)
+        self.autosort_list.blockSignals(False)
+
+    def toggle_autosort_rule(self, item: QListWidgetItem):
+        index = item.data(Qt.ItemDataRole.UserRole)
+        if isinstance(index, int) and 0 <= index < len(self.autosort_rules):
+            self.autosort_rules[index]["enabled"] = (
+                item.checkState() == Qt.CheckState.Checked
+            )
+            self.persist_autosort()
+
+    def autosort_reordered(self, *_args):
+        positions = [
+            self.autosort_list.item(row).data(Qt.ItemDataRole.UserRole)
+            for row in range(self.autosort_list.count())
+        ]
+        if sorted(positions) == list(range(len(self.autosort_rules))):
+            self.autosort_rules = [self.autosort_rules[i] for i in positions]
+            self.persist_autosort()
+            self.refresh_autosort_list()
+
+    def edit_autosort_dialog(self, original: dict | None = None) -> dict | None:
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Edit Autosort rule" if original else "Add Autosort rule")
+        form = QFormLayout(dialog)
+        mode = QComboBox()
+        mode.addItems(RULE_TYPES)
+        pattern = QLineEdit()
+        pattern.setMaxLength(200)
+        pattern.setPlaceholderText("Keyword or regular expression")
+        destination = QComboBox()
+        destination.addItems([*self.store.bins(), NEVER_CAPTURE])
+        enabled = QCheckBox("Rule enabled")
+        enabled.setChecked(original.get("enabled", True) if original else True)
+        form.addRow("Match", mode)
+        form.addRow("Keyword / regex", pattern)
+        form.addRow("Then", destination)
+        form.addRow("", enabled)
+        if original:
+            mode.setCurrentText(original["mode"])
+            pattern.setText(original["pattern"])
+            destination.setCurrentText(original["target"])
+        mode.currentTextChanged.connect(
+            lambda text: pattern.setEnabled(text in ("Keyword", "Regex"))
+        )
+        pattern.setEnabled(mode.currentText() in ("Keyword", "Regex"))
+        actions = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok |
+            QDialogButtonBox.StandardButton.Cancel
+        )
+        actions.accepted.connect(dialog.accept)
+        actions.rejected.connect(dialog.reject)
+        form.addRow(actions)
+        while dialog.exec() == QDialog.DialogCode.Accepted:
+            try:
+                return validate_rule({
+                    "mode": mode.currentText(),
+                    "pattern": pattern.text(),
+                    "target": destination.currentText(),
+                    "enabled": enabled.isChecked(),
+                }, self.store.bins())
+            except ValueError as exc:
+                QMessageBox.warning(dialog, "Invalid Autosort rule", str(exc))
+        return None
+
+    def add_autosort_rule(self):
+        rule = self.edit_autosort_dialog()
+        if rule is not None:
+            self.autosort_rules.append(rule)
+            self.persist_autosort()
+            self.refresh_autosort_list(len(self.autosort_rules) - 1)
+
+    def edit_autosort_rule(self):
+        i = self.autosort_list.currentRow()
+        if i < 0:
+            return
+        replacement = self.edit_autosort_dialog(self.autosort_rules[i])
+        if replacement is not None:
+            self.autosort_rules[i] = replacement
+            self.persist_autosort()
+            self.refresh_autosort_list(i)
+
+    def remove_autosort_rule(self):
+        i = self.autosort_list.currentRow()
+        if i >= 0:
+            self.autosort_rules.pop(i)
+            self.persist_autosort()
+            self.refresh_autosort_list(min(i, len(self.autosort_rules) - 1))
+
+    def move_autosort_rule(self, direction: int):
+        i = self.autosort_list.currentRow()
+        j = i + direction
+        if 0 <= i < len(self.autosort_rules) and 0 <= j < len(self.autosort_rules):
+            self.autosort_rules[i], self.autosort_rules[j] = (
+                self.autosort_rules[j], self.autosort_rules[i]
+            )
+            self.persist_autosort()
+            self.refresh_autosort_list(j)
+
+    def autosort_destination(self, kind: str, text: str, current_bin: str):
+        if not self.autosort_enabled:
+            return current_bin
+        return route_clip(
+            self.autosort_rules, kind, text, current_bin, self.store.bins()
+        )
+
+    def test_autosort(self):
+        item = self.history.currentItem()
+        if item is None:
+            self.autosort_test_result.setText(
+                "Select a saved clip in Clipboard, then return here to test."
+            )
+            return
+        payload = self.store.get(item.data(Qt.ItemDataRole.UserRole))
+        if payload is None:
+            return
+        kind, data = payload
+        text = data.decode("utf-8", errors="replace") if kind == "text" else ""
+        if kind == "text" and looks_sensitive(text):
+            message = "The privacy filter would exclude this text from history."
+        else:
+            choice = route_clip(
+                self.autosort_rules, kind, text, self.active_bin(),
+                self.store.bins(),
+            )
+            message = (
+                "This new clip would be excluded from history."
+                if choice is None else f"This new clip would go to: {choice}"
+            )
+            if not self.autosort_enabled:
+                message += " (Autosort currently disabled)"
+        self.autosort_test_result.setText(message)
+
     def build_settings_page(self):
         page = QWidget()
         layout = QVBoxLayout(page)
@@ -326,8 +558,7 @@ class ClipMintWindow(QMainWindow):
         open_files.clicked.connect(lambda: self.open_folder(recordings_dir()))
         layout.addWidget(open_files)
 
-        # QSettings holds keyboard preferences ONLY; never vault credentials.
-        self.settings = QSettings("ClipMint", "ClipMint")
+        # QSettings holds nonsensitive preferences ONLY; never vault credentials.
         self.shortcut_editors = {}
         self.shortcut_values = {}
         self.shortcut_objects = {}
@@ -535,7 +766,11 @@ class ClipMintWindow(QMainWindow):
             saved = picture.save(buffer, "PNG")
             buffer.close()
             if saved and len(result) < 16 * 1024 * 1024:
-                self.store.add("image", bytes(result), f"Image {picture.width()} × {picture.height()}", active)
+                target = self.autosort_destination("image", "", active)
+                if target is None:
+                    self.statusBar().showMessage("Image excluded by Autosort rule", 4000)
+                else:
+                    self.store.add("image", bytes(result), f"Image {picture.width()} × {picture.height()}", target)
         elif data.hasText():
             text = data.text()
             if text.strip():
@@ -545,7 +780,11 @@ class ClipMintWindow(QMainWindow):
                     return
                 payload = text.encode("utf-8")
                 if len(payload) <= 2 * 1024 * 1024:
-                    self.store.add("text", payload, " ".join(text.split())[:550], active)
+                    target = self.autosort_destination("text", text, active)
+                    if target is None:
+                        self.statusBar().showMessage("Text excluded by Autosort rule", 4000)
+                    else:
+                        self.store.add("text", payload, " ".join(text.split())[:550], target)
         self.refresh()
 
     def refresh(self, *_args):
