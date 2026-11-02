@@ -108,6 +108,34 @@ class WindowTests(unittest.TestCase):
                 else:
                     os.environ["XDG_DATA_HOME"] = original
 
+    def test_dotgothic16_wordmark_renders_without_network(self):
+        with TemporaryDirectory() as temporary:
+            original = os.environ.get("XDG_DATA_HOME")
+            os.environ["XDG_DATA_HOME"] = temporary
+            window = None
+            try:
+                window = ClipMintWindow()
+                window.show()
+                self.app.processEvents()
+                self.assertEqual(window.wordmark.accessibleName(), "ClipMint")
+                self.assertEqual(window.wordmark.word, "CLIPMINT")
+                picture = window.wordmark.grab().toImage()
+                self.assertFalse(picture.isNull())
+                self.assertGreater(picture.width(), 100)
+                self.assertGreater(picture.height(), 35)
+                if (Path(__file__).resolve().parents[1] / "vendor/fonts/DotGothic16-Regular.ttf").exists():
+                    self.assertEqual(window.brand_family, "DotGothic16")
+                    self.assertEqual(window.wordmark.display_font.family(), "DotGothic16")
+            finally:
+                if window is not None:
+                    window.store.close()
+                    window.close()
+                    window.deleteLater()
+                if original is None:
+                    os.environ.pop("XDG_DATA_HOME", None)
+                else:
+                    os.environ["XDG_DATA_HOME"] = original
+
     def test_invalid_image_falls_back_to_message(self):
         with TemporaryDirectory() as temporary:
             original = os.environ.get("XDG_DATA_HOME")
