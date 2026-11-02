@@ -418,7 +418,7 @@ def build_crimson_ui(w, image_preview_class):
         ("Clipboard","▤","Clipboard","クリップボード"),
         ("Screenshots","▣","Archive","SCREENSHOTS"),
         ("Recordings","◉","Capture","RECORDINGS"),
-        ("Secrets & Variables","♢","Collections","ENCRYPTED VAULT"),
+        ("Secrets & Variables","♢","Collections","VAULT"),
         ("Autosort","⇄","Tools","AUTOSORT"),
         ("Settings","⚙","Settings","設定"),
     )):
