@@ -8,7 +8,10 @@ trap 'rm -rf "$tmp"' EXIT
 test "$(dpkg-deb -f "$pkg" Package)" = "clipmint"
 test "$(dpkg-deb -f "$pkg" Version)" = "$version"
 test "$(dpkg-deb -f "$pkg" Architecture)" = "amd64"
-test "$(dpkg-deb -f "$pkg" Depends)" = "libc6 (>= 2.39)"
+depends="$(dpkg-deb -f "$pkg" Depends)"
+for package in 'libc6 (>= 2.39)' 'tesseract-ocr' 'tesseract-ocr-eng' 'xdotool'; do
+  [[ ", $depends," == *"$package"* ]] || { echo "Missing dependency $package"; exit 1; }
+done
 dpkg-deb --extract "$pkg" "$tmp/unpacked"
 dpkg-deb --control "$pkg" "$tmp/control"
 test -x "$tmp/unpacked/opt/clipmint/ClipMint"
