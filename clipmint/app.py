@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
 )
 
 from .branding import ChromaticWordmark, register_display_font
+from .manga import KomaMascot
 from .capture import AreaSelector, RegionRecorder, recordings_dir, screenshots_dir, stamped_filename
 from .recording_ui import RecorderWindow, SaveClipDialog
 from .store import ClipStore, classify, looks_sensitive
@@ -27,6 +28,9 @@ QMainWindow, QWidget#appRoot {background:#080B10;color:#F1F5F9;
     font-family:"DejaVu Sans";font-size:14px;}
 QLabel {color:#F1F5F9;font-family:"DejaVu Sans";font-size:14px;}
 QLabel#edition {color:#FF5AB3;font-family:"DotGothic16";font-size:14px;}
+QLabel#kanaTag {color:#B9FF45;font-family:"DotGothic16";font-size:16px;}
+QLabel#komaTag {color:#FF5AB3;font-family:"DotGothic16";font-size:14px;}
+QLabel#komaMeta {color:#94A3B8;font-family:"DejaVu Sans Mono";font-size:9px;}
 QLabel#muted {color:#94A3B8;font-size:12px;}
 QLabel#sectionTitle {color:#F1F5F9;font-family:"DotGothic16";font-size:19px;}
 QLabel#previewHeading {color:#FF5AB3;font-family:"DotGothic16";font-size:15px;}
@@ -132,7 +136,11 @@ class ClipMintWindow(QMainWindow):
         edition.setObjectName("edition")
         header.addWidget(edition)
         header.addStretch()
-        title = QLabel("Local clipboard hub  •  Cinnamon X11")
+        self.kana_tag = QLabel("クリップミント")
+        self.kana_tag.setObjectName("kanaTag")
+        self.kana_tag.setAccessibleName("ClipMint, written in Japanese Katakana")
+        header.addWidget(self.kana_tag)
+        title = QLabel("  /  CINNAMON X11")
         title.setObjectName("muted")
         header.addWidget(title)
         root.addLayout(header)
@@ -157,6 +165,24 @@ class ClipMintWindow(QMainWindow):
             self.nav_buttons[name] = b
             nav_layout.addWidget(b)
         nav_layout.addStretch()
+        # A single offset inked manga panel; it is decorative and must never
+        # cover navigation or become a hidden extra button.
+        self.manga_dock = QWidget(sidebar)
+        self.manga_dock.setObjectName("mangaDock")
+        manga_layout = QVBoxLayout(self.manga_dock)
+        manga_layout.setContentsMargins(0, 0, 0, 0)
+        manga_layout.setSpacing(0)
+        self.manga_mascot = KomaMascot(self.manga_dock)
+        manga_layout.addWidget(self.manga_mascot, 0, Qt.AlignmentFlag.AlignHCenter)
+        self.koma_caption = QLabel("コマ  /  01")
+        self.koma_caption.setObjectName("komaTag")
+        self.koma_caption.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        manga_layout.addWidget(self.koma_caption)
+        koma_meta = QLabel("PAPER ARCHIVIST")
+        koma_meta.setObjectName("komaMeta")
+        koma_meta.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        manga_layout.addWidget(koma_meta)
+        nav_layout.addWidget(self.manga_dock, 0, Qt.AlignmentFlag.AlignHCenter)
         body.addWidget(sidebar)
         root.addLayout(body, 1)
 
@@ -215,7 +241,17 @@ class ClipMintWindow(QMainWindow):
         self.poller.timeout.connect(self.poll_recording)
         self.poller.start(300)
         self.open_section(0)
+        self._update_manga_visibility()
         QTimer.singleShot(400, self.clipboard_changed)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, "manga_dock"):
+            self._update_manga_visibility()
+
+    def _update_manga_visibility(self):
+        # On short windows the functional dock always takes precedence over art.
+        self.manga_dock.setVisible(self.height() >= 650)
 
     def build_clipboard_page(self):
         page = QWidget()
