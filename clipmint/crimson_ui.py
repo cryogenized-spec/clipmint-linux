@@ -318,6 +318,7 @@ def build_crimson_ui(w, image_preview_class):
     heading.addWidget(make_label("Selected item","previewTitle"))
     heading.addStretch()
     w.preview_heading=make_label("プレビュー / PREVIEW","previewHeading")
+    w.preview_heading.setToolTip("Preview / プレビュー")
     heading.addWidget(w.preview_heading)
     preview.addLayout(heading)
     border=QFrame()
@@ -507,7 +508,10 @@ def build_archive_page(w):
     controls.addWidget(make_label("SHOW","filterLabel"))
     controls.addWidget(w.category,1)
     w.sort_combo=QComboBox()
-    w.sort_combo.addItems(["Latest first","Oldest first","A–Z","Z–A","Numbered list"])
+    for display, key in (("Newest", "Latest first"), ("Oldest", "Oldest first"),
+                         ("A–Z", "A–Z"), ("Z–A", "Z–A"), ("Numbered", "Numbered list")):
+        w.sort_combo.addItem(display, key)
+    w.sort_combo.setToolTip("Sorting: latest, oldest, alphabetical or numbered")
     w.sort_combo.currentIndexChanged.connect(w.refresh)
     controls.addWidget(w.sort_combo,1)
     w.count_label=make_label("00 / 00","counter")
