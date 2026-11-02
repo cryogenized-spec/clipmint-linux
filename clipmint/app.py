@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QTabBar, QToolButton, QVBoxLayout, QWidget, QStackedWidget, QSizePolicy,
 )
 
+from .branding import ChromaticWordmark, register_display_font
 from .capture import AreaSelector, RegionRecorder, recordings_dir, screenshots_dir, stamped_filename
 from .recording_ui import RecorderWindow, SaveClipDialog
 from .store import ClipStore, classify, looks_sensitive
@@ -25,11 +26,10 @@ THEME = """
 QMainWindow, QWidget#appRoot {background:#080B10;color:#F1F5F9;
     font-family:"DejaVu Sans";font-size:14px;}
 QLabel {color:#F1F5F9;font-family:"DejaVu Sans";font-size:14px;}
-QLabel#brand {color:#00FF9D;font-family:"DejaVu Sans Mono";font-size:29px;font-weight:700;}
-QLabel#edition {color:#9D4EDD;font-family:"DejaVu Sans Mono";font-size:18px;font-weight:700;}
+QLabel#edition {color:#FF5AB3;font-family:"DotGothic16";font-size:14px;}
 QLabel#muted {color:#94A3B8;font-size:12px;}
-QLabel#sectionTitle {color:#F1F5F9;font-family:"DejaVu Sans Mono";font-size:17px;font-weight:700;}
-QLabel#previewHeading {color:#B794F4;font-family:"DejaVu Sans Mono";font-size:13px;font-weight:700;}
+QLabel#sectionTitle {color:#F1F5F9;font-family:"DotGothic16";font-size:19px;}
+QLabel#previewHeading {color:#FF5AB3;font-family:"DotGothic16";font-size:15px;}
 QLabel#previewDimensions {color:#94A3B8;font-size:12px;}
 QLineEdit,QComboBox {font-family:"DejaVu Sans";font-size:14px;
     background:#131C2D;color:#F1F5F9;border:1px solid #253346;
@@ -47,7 +47,7 @@ QPushButton,QToolButton {font-family:"DejaVu Sans";font-size:13px;
 QPushButton:hover,QToolButton:hover {background:#1A263C;}
 QPushButton:focus,QToolButton:focus {border:1px solid #00FF9D;}
 QPushButton:checked {background:#164435;}
-QPushButton#nav {text-align:left;background:transparent;border:0px;
+QPushButton#nav {font-family:"DotGothic16";font-size:14px;text-align:left;background:transparent;border:0px;
     border-left:3px solid transparent;border-radius:0px;padding:12px 13px;}
 QPushButton#nav:hover {background:#1A263C;}
 QPushButton#nav:checked {background:#112B24;border-left:3px solid #00FF9D;color:#F1F5F9;}
@@ -55,7 +55,7 @@ QPushButton#record {background:#105341;color:#F1F5F9;font-size:14px;}
 QPushButton#record:hover {background:#156B53;}
 QPushButton#screenshot {background:#35214C;color:#F1F5F9;font-size:14px;}
 QPushButton#screenshot:hover {background:#492D66;}
-QTabBar::tab {font-family:"DejaVu Sans";font-size:14px;font-weight:600;
+QTabBar::tab {font-family:"DotGothic16";font-size:15px;
     background:transparent;color:#94A3B8;border:0px;
     border-bottom:2px solid transparent;
     padding:12px 17px;border-radius:0px;margin-right:6px;}
@@ -105,6 +105,7 @@ class ClipMintWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("ClipMint · Clipboard & Capture")
+        self.brand_family = register_display_font()
         self.resize(1080, 700)
         self.setMinimumSize(850, 500)
         self.setStyleSheet(THEME)
@@ -124,21 +125,11 @@ class ClipMintWindow(QMainWindow):
         root.setContentsMargins(18, 16, 18, 14)
         root.setSpacing(14)
         header = QHBoxLayout()
-        # Distinctive monospaced wordmark; keep clipboard text in readable sans.
-        logo = QLabel("◈")
-        logo.setObjectName("brand")
-        header.addWidget(logo)
-        heading = QLabel("ClipMint")
-        heading.setObjectName("brand")
-        display_font = QFont("DejaVu Sans Mono", 23, QFont.Weight.Bold)
-        display_font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 1.4)
-        heading.setFont(display_font)
-        header.addWidget(heading)
-        edition = QLabel("ve-02")
+        # Uneven, screen-printed chromatic registration is limited to the brand.
+        self.wordmark = ChromaticWordmark(self.brand_family)
+        header.addWidget(self.wordmark)
+        edition = QLabel("VE / 02")
         edition.setObjectName("edition")
-        version_font = QFont("DejaVu Sans Mono", 15, QFont.Weight.Bold)
-        version_font.setItalic(True)
-        edition.setFont(version_font)
         header.addWidget(edition)
         header.addStretch()
         title = QLabel("Local clipboard hub  •  Cinnamon X11")
