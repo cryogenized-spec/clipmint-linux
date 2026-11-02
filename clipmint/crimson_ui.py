@@ -9,8 +9,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QRect, QSize
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen
+from PySide6.QtCore import Qt, QRect, QSize, QPoint
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen, QPolygon
 from PySide6.QtWidgets import (
     QAbstractItemView, QComboBox, QFrame, QHBoxLayout, QLabel, QLineEdit,
     QListWidget, QPushButton, QSizePolicy, QStackedWidget, QStyledItemDelegate, QStyle,
@@ -84,11 +84,73 @@ QPushButton#record {background:#A62443;color:#F4EEEB;border:1px solid #B6304C;pa
 QPushButton#screenshot {background:#DFD3D2;color:#25151C;border:1px solid #EEE8E7;padding:12px 18px;text-align:left;font-size:13px;font-weight:600;}
 QToolButton#recordArrow {background:#A62443;color:#F4EEEB;border:1px solid #B6304C;padding:12px;}
 QToolButton#shotArrow {background:#DFD3D2;color:#25151C;border:1px solid #EEE8E7;padding:12px;}
+QToolButton::menu-indicator {image:none;}
 QPushButton#record:hover, QToolButton#recordArrow:hover {background:#C02C50;}
 QPushButton#screenshot:hover, QToolButton#shotArrow:hover {background:#F1E4E1;}
 QPushButton:focus, QToolButton:focus, QComboBox:focus {border:1px solid #C9F473;}
 QPushButton {min-height:24px;}
 """
+
+
+class CrimsonFooterButton(QPushButton):
+    """Real clickable action with the angled outline of the approved v2 design."""
+
+    def __init__(self, text: str, primary: bool, parent=None):
+        super().__init__(text, parent)
+        self.primary = primary
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def paintEvent(self, event):
+        painter=QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        w,h=self.width(),self.height()
+        shape=QPolygon([
+            QPoint(13,0),QPoint(w-1,0),QPoint(w-1,h-1),
+            QPoint(0,h-1),QPoint(0,13)
+        ])
+        fill=QColor("#C02C50" if self.underMouse() else "#A62443") if self.primary else QColor("#F1E4E1" if self.underMouse() else "#DFD3D2")
+        painter.setBrush(fill)
+        painter.setPen(QPen(QColor("#B6304C" if self.primary else "#EEE8E7"),1))
+        painter.drawPolygon(shape)
+        painter.setPen(QColor("#F4EEEB" if self.primary else "#25151C"))
+        lines=self.text().split("\n",1)
+        font=QFont("DejaVu Sans",12,QFont.Weight.Bold)
+        painter.setFont(font)
+        painter.drawText(QRect(23,7,max(10,w-26),24), Qt.AlignmentFlag.AlignVCenter, lines[0])
+        if len(lines)>1:
+            font=QFont("DejaVu Sans Mono",9)
+            painter.setFont(font)
+            painter.drawText(QRect(23,29,max(10,w-26),17),Qt.AlignmentFlag.AlignVCenter,lines[1])
+        if self.hasFocus():
+            painter.setPen(QPen(QColor("#C9F473"),2))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawPolygon(shape)
+        painter.end()
+
+
+class CrimsonFooterArrow(QToolButton):
+    """Separate dropdown with a clipped outer corner; retains a native QMenu."""
+
+    def __init__(self, primary: bool, parent=None):
+        super().__init__(parent)
+        self.primary = primary
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def paintEvent(self, event):
+        painter=QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        w,h=self.width(),self.height()
+        polygon=QPolygon([
+            QPoint(0,0),QPoint(w-1,0),QPoint(w-1,h-13),
+            QPoint(w-13,h-1),QPoint(0,h-1)
+        ])
+        painter.setBrush(QColor("#C02C50" if self.underMouse() else "#A62443") if self.primary else QColor("#F1E4E1" if self.underMouse() else "#DFD3D2"))
+        painter.setPen(QPen(QColor("#B6304C" if self.primary else "#EEE8E7"),1))
+        painter.drawPolygon(polygon)
+        painter.setPen(QColor("#F4EEEB" if self.primary else "#25151C"))
+        painter.drawText(self.rect(),Qt.AlignmentFlag.AlignCenter,"▾")
+        painter.end()
+
 
 def relative_time(created_at: str) -> str:
     """Datetime-aware elapsed time, without implying the clip's origin."""
@@ -356,18 +418,19 @@ def build_crimson_ui(w, image_preview_class):
     fl=QHBoxLayout(footer)
     fl.setContentsMargins(0,11,0,0)
     fl.setSpacing(0)
-    w.footer_status=make_label("● Ready     |     HISTORY 0","footerStatus")
+    w.footer_status=make_label("● Ready   |   HISTORY 00","footerStatus")
     w.footer_status.setMinimumWidth(160)
     fl.addWidget(w.footer_status,1)
-    w.record_button=QPushButton("●  Record Video\nREC / MP4 · GIF")
+    w.record_button=CrimsonFooterButton("●  Record Video\nREC / MP4 · GIF", primary=True)
     w.record_button.setObjectName("record")
     w.record_button.setMinimumHeight(55)
     w.record_button.clicked.connect(lambda: w.choose_recording("MP4"))
     fl.addWidget(w.record_button,2)
-    w.record_menu=QToolButton()
+    w.record_menu=CrimsonFooterArrow(primary=True)
     w.record_menu.setObjectName("recordArrow")
     w.record_menu.setText("▾")
     w.record_menu.setMinimumHeight(55)
+    w.record_menu.setFixedWidth(44)
     w.record_menu.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
     formats=QMenu(w.record_menu)
     formats.addAction("Record MP4").triggered.connect(lambda: w.choose_recording("MP4"))
@@ -375,15 +438,16 @@ def build_crimson_ui(w, image_preview_class):
     w.record_menu.setMenu(formats)
     fl.addWidget(w.record_menu)
     fl.addSpacing(11)
-    w.screenshot_button=QPushButton("▣  Screenshot Area\nCAPTURE / REGION")
+    w.screenshot_button=CrimsonFooterButton("▣  Screenshot Area\nCAPTURE / REGION", primary=False)
     w.screenshot_button.setObjectName("screenshot")
     w.screenshot_button.setMinimumHeight(55)
     w.screenshot_button.clicked.connect(w.choose_screenshot)
     fl.addWidget(w.screenshot_button,2)
-    w.screenshot_menu=QToolButton()
+    w.screenshot_menu=CrimsonFooterArrow(primary=False)
     w.screenshot_menu.setObjectName("shotArrow")
     w.screenshot_menu.setText("▾")
     w.screenshot_menu.setMinimumHeight(55)
+    w.screenshot_menu.setFixedWidth(44)
     w.screenshot_menu.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
     capture=QMenu(w.screenshot_menu)
     capture.addAction("Select area (default)").triggered.connect(w.choose_screenshot)
@@ -393,7 +457,7 @@ def build_crimson_ui(w, image_preview_class):
     fl.addStretch(1)
     root.addWidget(footer)
     w.setCentralWidget(shell)
-    w.statusBar().messageChanged.connect(lambda s: w.footer_status.setText("● "+s[:76]))
+    w.statusBar().messageChanged.connect(lambda s: w.footer_status.setText("● "+s.split(" · ")[0][:24]))
     w.statusBar().hide()
     return shell
 
@@ -408,7 +472,8 @@ def build_archive_page(w):
     header_text=QVBoxLayout()
     header_text.setSpacing(5)
     header_text.addWidget(make_label("01 / YOUR COLLECTION","eyebrow"))
-    header_text.addWidget(make_label("Clipboard  ·  クリップボード","sectionTitle"))
+    w.archive_heading=make_label("Clipboard  ·  クリップボード","sectionTitle")
+    header_text.addWidget(w.archive_heading)
     header.addLayout(header_text)
     header.addStretch()
     w.archive_date=make_label(datetime.now().strftime("%d %b %Y").upper(),"archiveDate")
@@ -451,6 +516,7 @@ def build_archive_page(w):
     w.history=QListWidget()
     w.history.setObjectName("clipHistory")
     w.history.setUniformItemSizes(True)
+    w.history.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
     w.history.setMouseTracking(True)
     w.history.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
     w.history.setItemDelegate(CrimsonClipDelegate(w.history))
