@@ -173,6 +173,8 @@ def relative_time(created_at: str) -> str:
 
 
 def label_type(kind: str, preview: str) -> tuple[str, str, str]:
+    if kind == "files":
+        return "FILE", "▣", "#DEC3A7"
     if kind == "image":
         return "IMG", "▧", "#D34D70"
     source = preview.strip()
@@ -545,7 +547,7 @@ def build_archive_page(w):
     controls=QHBoxLayout()
     controls.setSpacing(9)
     w.category=QComboBox()
-    w.category.addItems(["All", "Text", "URLs", "Phone numbers", "Images"])
+    w.category.addItems(["All", "Text", "URLs", "Phone numbers", "Images", "Files"])
     w.category.currentIndexChanged.connect(w.refresh)
     controls.addWidget(make_label("SHOW","filterLabel"))
     controls.addWidget(w.category,1)
