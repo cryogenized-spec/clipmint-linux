@@ -8,6 +8,7 @@ X11 still exposes a secret to other local processes while it is copied.
 from __future__ import annotations
 
 import base64
+import binascii
 import json
 import os
 from pathlib import Path
@@ -111,7 +112,7 @@ class Vault:
             if not isinstance(value["ciphertext"], str):
                 raise VaultError("Invalid vault ciphertext")
             return value
-        except (OSError, KeyError, ValueError, TypeError) as exc:
+        except (OSError, KeyError, ValueError, TypeError, binascii.Error) as exc:
             raise VaultError("Vault file is unreadable or corrupted") from exc
 
     def _encrypt_document(self, key: bytes, metadata: dict, entries: list[dict]) -> bytes:
@@ -252,6 +253,15 @@ class Vault:
         if target.resolve() == self.path.resolve():
             raise VaultError("Backup must use a different file")
         _atomic_private_write(target, self.path.read_bytes())
+
+    def restore_backup(self, source: Path) -> None:
+        """Restore only when no vault exists; old passphrase is still required."""
+        if self.configured:
+            raise VaultError("Delete or back up the existing vault before restoring")
+        candidate = Vault(Path(source))
+        candidate._read()  # Validate envelope before copying ciphertext.
+        _atomic_private_write(self.path, candidate.path.read_bytes())
+        self.lock()
 
     def wipe(self) -> None:
         self.lock()
