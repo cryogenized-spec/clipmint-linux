@@ -39,6 +39,12 @@ ClipMint uses **DotGothic16** for the brand masthead and selected navigation/hea
 
 The independent open-licensed DotGothic16 TTF and OFL license are fetched **only on GitHub's build/test runners** and integrity-checked against the original Google Fonts git blobs. The packaged application loads its local copy with `QFontDatabase`; it **never downloads fonts at launch**. A system-font fallback is used for unbundled developer checkouts. The packaged `.deb` includes the SIL OFL 1.1 licence. DotGothic16 is © 2020 The DotGothic16 Project Authors; [source and licence](https://github.com/google/fonts/tree/main/ofl/dotgothic16).
 
+## Katakana and original manga details (v0.4 draft)
+
+ClipMint's brand header adds `クリップミント` (the Japanese phonetic rendering of ClipMint), the image-preview caption adds `プレビュー` (preview), and an original small sidebar character is labelled `コマ / 01` (Koma, also the word used for a comic panel). Primary actions and settings remain English for usability. These are intentional, limited typographic accents, not random Japanese text on every button.
+
+**Koma** is an original paperclip-wearing, asymmetrical ink-drawn archivist: rough black outlines, intentional imperfections, tiny hand-drawn speech balloon, and pink/lime halftone accents. The SVG asset is installed with the packaged app and rendered with native QtSvg, with no external image-hosting or runtime network requests. The panel is purely decorative, cannot intercept clicks, has no keyboard focus, and hides on shorter windows to protect navigation space. Its source SVG is `clipmint/assets/koma.svg`.
+
 ## Verification and limitations
 
 Automated tests cover SQLite bins/migration, UI launch and screen-recorder state where possible. GitHub Actions performs a frozen Qt/X11 start test and verifies the included FFmpeg has X11 capture and H264 encoders. **Actual capture on the HP OMEN / Mint Cinnamon has not yet been field-tested.** X11, single-primary-screen selector only; not Wayland. This is a preview, not a security-hardened release.
