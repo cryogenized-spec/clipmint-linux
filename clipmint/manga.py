@@ -56,7 +56,7 @@ class CrimsonMaidPortrait(QWidget):
                 content.size(), Qt.AspectRatioMode.KeepAspectRatio
             )
             x = content.center().x() - image_size.width() // 2
-            y = content.bottom() - image_size.height() + 1
+            y = content.top() + (content.height() - image_size.height()) // 2
             destination = QRect(x, y, image_size.width(), image_size.height())
             painter.drawPixmap(destination, self.portrait, self.portrait.rect())
         painter.end()
