@@ -58,7 +58,7 @@ class KohakuGothicTests(unittest.TestCase):
                 self.assertTrue(window.manga_dock.has_card_art)
                 self.assertEqual(window.manga_dock.asset_path, card)
                 self.assertTrue(window.manga_mascot.isHidden())
-                self.assertTrue(window.maid_caption.isHidden())
+                self.assertFalse(window.maid_caption.isVisible())
                 self.assertIn("Kohaku", window.manga_dock.accessibleName())
                 rendered = window.manga_dock.grab().toImage()
                 self.assertFalse(rendered.isNull())
