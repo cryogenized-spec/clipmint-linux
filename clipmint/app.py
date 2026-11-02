@@ -33,6 +33,8 @@ from .foreground_privacy import blocked_foreground, DEFAULT_BLOCKED
 from .ocr import OcrWorker
 from .quick_popup import QuickPopup, paste_to_window
 from .single_instance import InstanceServer, send_command
+from .secure_history import (EncryptedClipStore, HistorySecurityError,
+                             key_from_secret_service, secure_path)
 
 
 THEME = """
@@ -138,6 +140,19 @@ class ClipMintWindow(QMainWindow):
         self.setMinimumSize(850, 600)
         self.store = ClipStore()
         self.settings = QSettings("ClipMint", "ClipMint")
+        self.history_secure = False
+        self.history_security_error = ""
+        if self.settings.value("privacy/history_secure", False, type=bool):
+            try:
+                if not secure_path().is_file():
+                    raise HistorySecurityError("Encrypted history file not found")
+                key = key_from_secret_service(create=False)
+                encrypted = EncryptedClipStore(secure_path(), key)
+                self.store.close()
+                self.store = encrypted
+                self.history_secure = True
+            except (HistorySecurityError, OSError) as exc:
+                self.history_security_error = str(exc)
         self.vault = Vault()
         self._vault_clipboard_text = None
         self._vault_clipboard_token = 0
@@ -145,7 +160,7 @@ class ClipMintWindow(QMainWindow):
         self._vault_lock_timer.setSingleShot(True)
         self._vault_lock_timer.timeout.connect(self.lock_vault)
         self.recorder = RegionRecorder()
-        self.monitoring = True
+        self.monitoring = not bool(self.history_security_error)
         self.selector: AreaSelector | None = None
         self.recorder_window: RecorderWindow | None = None
         self.capture_rect = None
@@ -170,7 +185,10 @@ class ClipMintWindow(QMainWindow):
         self.build_settings_page()
         self.install_shortcuts()
         self.quick_popup = QuickPopup(self.store, self.quick_pick)
-        self.statusBar().showMessage("Ready · Left-click to preview, right-click for Copy / Pin / Move / Delete")
+        self.statusBar().showMessage(
+            self.history_security_error or
+            "Ready · Left-click to preview, right-click for Copy / Pin / Move / Delete"
+        )
         self.configure_tray()
         self.screenshot_notice = ScreenshotNotice(
             self, self.edit_last_screenshot, self.dismiss_screenshot_notice,
