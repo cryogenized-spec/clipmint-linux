@@ -136,7 +136,7 @@ class WindowTests(unittest.TestCase):
                 else:
                     os.environ["XDG_DATA_HOME"] = original
 
-    def test_katakana_and_original_manga_art_are_noninteractive(self):
+    def test_selected_crimson_maid_art_loads_and_is_noninteractive(self):
         with TemporaryDirectory() as temporary:
             original = os.environ.get("XDG_DATA_HOME")
             os.environ["XDG_DATA_HOME"] = temporary
@@ -146,10 +146,12 @@ class WindowTests(unittest.TestCase):
                 window.show()
                 self.app.processEvents()
                 self.assertEqual(window.kana_tag.text(), "クリップミント")
-                self.assertEqual(window.koma_caption.text(), "コマ  /  01")
+                self.assertEqual(window.maid_caption.text(), "メイド  /  01")
                 self.assertTrue(window.manga_mascot.asset_path.is_file())
+                self.assertEqual(window.manga_mascot.asset_path.name, "crimson_maid.png")
                 self.assertFalse(window.manga_mascot.portrait.isNull())
-                self.assertGreaterEqual(window.manga_mascot.portrait.width(), 150)
+                self.assertGreaterEqual(window.manga_mascot.portrait.width(), 400)
+                self.assertTrue(window.manga_mascot.portrait.hasAlphaChannel())
                 self.assertEqual(
                     window.manga_mascot.focusPolicy(), Qt.FocusPolicy.NoFocus
                 )
