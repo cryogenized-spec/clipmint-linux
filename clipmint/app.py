@@ -1432,7 +1432,7 @@ class ClipMintWindow(QMainWindow):
             )
 
     def dismiss_screenshot_notice(self, token=None):
-        if isinstance(token, int) and token != self._screenshot_notice_token:
+        if type(token) is int and token != self._screenshot_notice_token:
             return
         if self.screenshot_notice is not None:
             self.screenshot_notice.hide()
