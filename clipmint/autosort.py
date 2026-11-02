@@ -59,8 +59,12 @@ def rule_matches(rule: dict, kind: str, text: str) -> bool:
     if mode == "Keyword":
         return rule["pattern"].casefold() in text.casefold()
     if mode == "Regex":
+        # Do not silently truncate; anchored patterns could match only because
+        # the missing tail makes the truncated string appear to end early.
+        if len(text) > REGEX_TEXT_LIMIT:
+            return False
         try:
-            return bool(regex.search(rule["pattern"], text[:REGEX_TEXT_LIMIT],
+            return bool(regex.search(rule["pattern"], text,
                                      regex.IGNORECASE, timeout=0.02))
         except (regex.error, TimeoutError):
             return False
