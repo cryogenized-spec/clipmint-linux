@@ -79,6 +79,36 @@ class ClipStore:
         )""")
         for index, name in enumerate(DEFAULT_BINS):
             self.conn.execute("INSERT OR IGNORE INTO bins(name,position) VALUES(?,?)", (name, index))
+        original_schema = self.conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='clips'"
+        ).fetchone()[0]
+        if "'files'" not in original_schema:
+            # Original v0.3 database CHECK only permitted text/images. Rebuild
+            # transactionally, retaining row IDs, timestamps, pins and bins.
+            # Any failure rolls the whole migration back rather than dropping
+            # or silently rewriting user history.
+            self.conn.execute("SAVEPOINT clipmint_mime_upgrade")
+            try:
+                self.conn.execute("""CREATE TABLE clips_mime_upgrade (
+                    id INTEGER PRIMARY KEY,
+                    kind TEXT NOT NULL CHECK(kind IN ('text','image','files')),
+                    content BLOB NOT NULL, formats BLOB, preview TEXT NOT NULL,
+                    pinned INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL DEFAULT
+                      (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                    bin TEXT NOT NULL DEFAULT 'Work'
+                )""")
+                self.conn.execute("""INSERT INTO clips_mime_upgrade
+                    (id,kind,content,formats,preview,pinned,created_at,bin)
+                    SELECT id,kind,content,formats,preview,pinned,created_at,bin
+                    FROM clips""")
+                self.conn.execute("DROP TABLE clips")
+                self.conn.execute("ALTER TABLE clips_mime_upgrade RENAME TO clips")
+                self.conn.execute("RELEASE SAVEPOINT clipmint_mime_upgrade")
+            except Exception:
+                self.conn.execute("ROLLBACK TO SAVEPOINT clipmint_mime_upgrade")
+                self.conn.execute("RELEASE SAVEPOINT clipmint_mime_upgrade")
+                raise
         self.conn.execute("CREATE INDEX IF NOT EXISTS idx_clips_bin_id ON clips(bin,id)")
         self.conn.commit()
 
