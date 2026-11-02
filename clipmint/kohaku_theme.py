@@ -15,6 +15,8 @@ QLabel#systemReady {color:#D6ECA9;background:#211A21;
     border:1px solid #AD755A;border-radius:10px;padding:9px 12px;
     font:10px "DejaVu Sans Mono";}
 QFrame#maidAlcove {border:0;background:transparent;}
+QFrame#maidDossier {border:0;background:transparent;}
+QLabel#dossierSub,QLabel#dossierStatus {background:transparent;}
 QLabel#ledger {color:#E8AAA7;font:10px "DejaVu Sans Mono";}
 QLabel#dossierName {font:italic 24px Georgia;color:#F2D5BB;}
 QLabel#dossierJp {color:#F0C9AE;font-family:"DotGothic16";font-size:12px;}
