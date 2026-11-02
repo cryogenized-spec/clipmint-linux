@@ -1745,12 +1745,36 @@ class ClipMintWindow(QMainWindow):
 def main():
     if sys.platform != "linux":
         raise SystemExit("ClipMint currently supports Linux only")
-    app = QApplication(sys.argv)
+    command = "toggle" if "--toggle" in sys.argv[1:] else (
+        "quit" if "--quit" in sys.argv[1:] else "show"
+    )
+    # Every invocation first signals an existing instance. The running daemon
+    # owns the clipboard; --toggle never starts a second clipboard watcher.
+    app = QApplication([sys.argv[0]])
     app.setApplicationName("ClipMint")
+    if send_command(command):
+        return
+    if command == "quit":
+        return
     if os.environ.get("XDG_SESSION_TYPE", "x11").lower() != "x11":
         QMessageBox.warning(None, "X11 required",
                             "ClipMint currently requires an X11 session (e.g. Cinnamon X11).")
         raise SystemExit(1)
     window = ClipMintWindow()
-    window.show()
+    def on_command(action):
+        if action == "toggle":
+            window.toggle_quick_popup()
+        elif action == "show":
+            window.show_window()
+        elif action == "quit":
+            window.quit_app()
+    try:
+        window._instance_server = InstanceServer(on_command, window)
+    except RuntimeError as exc:
+        QMessageBox.warning(None, "ClipMint", str(exc))
+        return
+    if command == "toggle":
+        QTimer.singleShot(150, window.toggle_quick_popup)
+    else:
+        window.show()
     raise SystemExit(app.exec())
