@@ -48,12 +48,3 @@ jobs:
           name: Crimson-Archive-native-Qt-screenshots
           path: docs/native-review/*.png
           retention-days: 14
-      - name: Add visual QA reference images to this review branch
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add docs/native-review/*.png
-          if ! git diff --staged --quiet; then
-            git commit -m "Record native Crimson Archive UI visual QA screenshots"
-            git push origin HEAD:feat/crimson-archive-native-ui
-          fi
