@@ -321,6 +321,17 @@ def build_crimson_ui(w, image_preview_class):
     w.kohaku_roman=roman
     w.kohaku_english=english
     alcove.addWidget(dossier)
+    if w.manga_dock.has_card_art:
+        # The supplied card already contains its own frame, character, title,
+        # Japanese verse and translation. Do not paint or overlay them again.
+        # Keep semantic labels attached for accessibility without rendering
+        # duplicate copy over the original print artwork.
+        alcove.setContentsMargins(0, 0, 0, 0)
+        for element in (w.manga_mascot, dossier):
+            element.hide()
+        header_item = alcove.itemAt(0)
+        if header_item and header_item.widget():
+            header_item.widget().hide()
     workspace.addWidget(w.manga_dock)
 
     w.pages=QStackedWidget()
