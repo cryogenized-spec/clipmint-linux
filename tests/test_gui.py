@@ -156,8 +156,7 @@ class WindowTests(unittest.TestCase):
                 ))
                 snapshot = window.manga_mascot.grab().toImage()
                 self.assertFalse(snapshot.isNull())
-                self.assertIn("プレビュー", window.preview_heading.text()
-                    if hasattr(window, "preview_heading") else "PREVIEW / プレビュー")
+                self.assertIn("プレビュー", window.preview_heading.text())
 
                 window.resize(900, 540)
                 self.app.processEvents()
