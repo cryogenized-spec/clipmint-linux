@@ -120,8 +120,11 @@ class QuickPopup(QWidget):
                 return True
             if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
                 if self.items.count():
-                    plain = bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier
-                                 or event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
+                    mods = event.modifiers()
+                    plain = bool(
+                        (mods & Qt.KeyboardModifier.ControlModifier)
+                        and (mods & Qt.KeyboardModifier.ShiftModifier)
+                    )
                     self.pick(plain)
                 return True
             if watched == self.search and key in (Qt.Key.Key_Up, Qt.Key.Key_Down):
@@ -167,6 +170,8 @@ class QuickPopup(QWidget):
             self.hide()
             return
         self.target_window, self.target_class = active_window()
+        if "clipmint" in self.target_class:
+            self.target_window = None  # Avoid pasting into our own app.
         self.search.clear()
         self.refresh()
         cursor = QCursor.pos()
