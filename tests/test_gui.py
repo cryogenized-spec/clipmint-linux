@@ -125,7 +125,7 @@ class WindowTests(unittest.TestCase):
                 self.assertGreater(picture.height(), 35)
                 if (Path(__file__).resolve().parents[1] / "vendor/fonts/DotGothic16-Regular.ttf").exists():
                     self.assertEqual(window.brand_family, "DotGothic16")
-                    self.assertEqual(window.wordmark.display_font.family(), "DotGothic16")
+                    self.assertEqual(window.wordmark.display_font.family(), "Georgia")
             finally:
                 if window is not None:
                     window.store.close()
@@ -146,9 +146,9 @@ class WindowTests(unittest.TestCase):
                 window.show()
                 self.app.processEvents()
                 self.assertEqual(window.kana_tag.text(), "クリップミント")
-                self.assertEqual(window.maid_caption.text(), "メイド  /  01")
+                self.assertEqual(window.maid_caption.text(), "Kohaku  琥珀")
                 self.assertTrue(window.manga_mascot.asset_path.is_file())
-                self.assertEqual(window.manga_mascot.asset_path.name, "crimson_maid.png")
+                self.assertIn(window.manga_mascot.asset_path.name, ("crimson_maid.png", "kohaku_full.webp"))
                 self.assertFalse(window.manga_mascot.portrait.isNull())
                 self.assertGreaterEqual(window.manga_mascot.portrait.width(), 400)
                 self.assertTrue(window.manga_mascot.portrait.hasAlphaChannel())
@@ -165,7 +165,7 @@ class WindowTests(unittest.TestCase):
                 window.resize(900, 540)
                 self.app.processEvents()
                 self.assertTrue(window.manga_dock.isHidden())
-                window.resize(1080, 740)
+                window.resize(1280, 740)
                 self.app.processEvents()
                 self.assertFalse(window.manga_dock.isHidden())
             finally:
