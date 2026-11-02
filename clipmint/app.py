@@ -1399,6 +1399,71 @@ class ClipMintWindow(QMainWindow):
             self.store.delete(clip_id)
             self.refresh()
 
+    def screenshot_context_menu(self, position):
+        listing = self.libraries.get("Screenshots")
+        if listing is None:
+            return
+        item = listing.itemAt(position)
+        if item is None:
+            return
+        target = Path(item.data(Qt.ItemDataRole.UserRole))
+        menu = QMenu(self)
+        ocr = menu.addAction("OCR · Extract text")
+        edit = menu.addAction("Open in image editor")
+        choice = menu.exec(listing.viewport().mapToGlobal(position))
+        if choice == ocr:
+            self.start_ocr_file(target)
+        elif choice == edit:
+            self._last_screenshot_path = target
+            self.edit_last_screenshot()
+
+    def ocr_history_clip(self, clip_id: int):
+        value = self.store.get(clip_id)
+        if value is not None and value[0] == "image":
+            self.start_ocr(value[1])
+
+    def ocr_last_screenshot(self):
+        if self._last_screenshot_path is not None:
+            self.start_ocr_file(self._last_screenshot_path)
+
+    def start_ocr_file(self, path: Path):
+        try:
+            if (not path.is_file() or path.suffix.lower() != ".png"
+                    or path.stat().st_size > 16 * 1024 * 1024):
+                raise ValueError("Choose a PNG screenshot smaller than 16 MB")
+            self.start_ocr(path.read_bytes())
+        except (OSError, ValueError) as exc:
+            self.error("OCR", str(exc))
+
+    def start_ocr(self, png: bytes):
+        if not png or len(png) > 16 * 1024 * 1024:
+            self.error("OCR", "Choose a PNG image smaller than 16 MB")
+            return
+        worker = OcrWorker(png, self)
+        self._ocr_workers.add(worker)
+        worker.recognized.connect(self.ocr_recognized)
+        worker.failed.connect(lambda message: self.error("OCR", message))
+        worker.finished.connect(lambda: self._ocr_workers.discard(worker))
+        self.statusBar().showMessage("OCR: extracting text locally…", 6000)
+        worker.start()
+
+    def ocr_recognized(self, text: str):
+        if not text.strip():
+            self.inform("OCR", "No readable text detected")
+            return
+        self._ignore_next_clipboard_change = True
+        QApplication.clipboard().setText(text)
+        QTimer.singleShot(400, lambda: setattr(self, "_ignore_next_clipboard_change", False))
+        if not sensitive_text(text) and not looks_sensitive(text):
+            data = text.encode("utf-8")
+            self.store.add("text", data, " ".join(text.split())[:550],
+                           self.active_bin(),
+                           formats={"text/plain;charset=utf-8": data})
+            self.refresh()
+            self.inform("OCR complete", "Text copied and saved to clipboard history")
+        else:
+            self.inform("OCR complete", "Text copied; potential secrets excluded from history")
+
     def copy_selected(self):
         item = self.history.currentItem()
         if item is not None:
