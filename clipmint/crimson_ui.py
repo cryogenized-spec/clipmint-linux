@@ -13,7 +13,7 @@ from PySide6.QtCore import Qt, QRect, QSize
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen
 from PySide6.QtWidgets import (
     QAbstractItemView, QComboBox, QFrame, QHBoxLayout, QLabel, QLineEdit,
-    QListWidget, QPushButton, QSizePolicy, QStackedWidget, QStyledItemDelegate,
+    QListWidget, QPushButton, QSizePolicy, QStackedWidget, QStyledItemDelegate, QStyle,
     QTabBar, QToolButton, QVBoxLayout, QWidget, QMenu,
 )
 
@@ -131,14 +131,14 @@ class CrimsonClipDelegate(QStyledItemDelegate):
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
         r = option.rect.adjusted(0, 0, -1, -1)
-        active = bool(option.state & option.state.State_Selected)
-        hover = bool(option.state & option.state.State_MouseOver)
+        active = bool(option.state & QStyle.StateFlag.State_Selected)
+        hover = bool(option.state & QStyle.StateFlag.State_MouseOver)
         painter.fillRect(r, QColor("#432330" if active else "#30202B" if hover else "#111017"))
         painter.setPen(QPen(QColor("#FF6780" if active else "#372A34"), 1))
         painter.drawLine(r.bottomLeft(), r.bottomRight())
         if active:
             painter.fillRect(QRect(r.left(), r.top(), 3, r.height()), QColor(ROSE))
-        meta = index.data(Qt.ItemDataRole.UserRole + 1) or {}
+        meta = index.data(int(Qt.ItemDataRole.UserRole) + 1) or {}
         name = meta.get("preview", index.data(Qt.ItemDataRole.DisplayRole) or "")
         tag, icon, colour = label_type(meta.get("kind", "text"), name)
         x = r.left() + 12
