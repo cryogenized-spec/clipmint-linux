@@ -149,6 +149,7 @@ class ClipMintWindow(QMainWindow):
         self._closing = False
         self._ignore_next_clipboard_change = False
         self._last_screenshot_path = None
+        self._last_tray_notification = None
         self._screenshot_notice_token = 0
         self.screenshot_notice = None
 
@@ -1107,7 +1108,7 @@ class ClipMintWindow(QMainWindow):
         menu.addAction("Quit ClipMint").triggered.connect(self.quit_app)
         self.tray.setContextMenu(menu)
         self.tray.activated.connect(self.tray_activated)
-        self.tray.messageClicked.connect(self.edit_last_screenshot)
+        self.tray.messageClicked.connect(self.tray_notification_clicked)
         self.tray.show()
 
     def tray_activated(self, reason):
@@ -1119,7 +1120,12 @@ class ClipMintWindow(QMainWindow):
         self.raise_()
         self.activateWindow()
 
+    def tray_notification_clicked(self):
+        if self._last_tray_notification == "screenshot":
+            self.edit_last_screenshot()
+
     def inform(self, title: str, message: str):
+        self._last_tray_notification = None
         self.statusBar().showMessage(f"{title}: {message}", 7000)
         if self.tray is not None:
             self.tray.showMessage(title, message, QSystemTrayIcon.MessageIcon.Information, 3000)
@@ -1425,6 +1431,7 @@ class ClipMintWindow(QMainWindow):
                 12000, lambda: self.dismiss_screenshot_notice(token)
             )
         if self.tray is not None:
+            self._last_tray_notification = "screenshot"
             self.tray.showMessage(
                 "Screenshot captured",
                 "Click here to edit your screenshot.",
