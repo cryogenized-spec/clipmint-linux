@@ -1,9 +1,9 @@
 name: Preview ClipMint v0.4 Qt installer (artifact only)
 on:
   push:
-    branches: [feat/v04-image-preview-capture-ux]
+    branches: [feat/v04-image-preview-capture-ux, feat/v04-encrypted-vault-review]
   pull_request:
-    branches: [feat/v04-image-preview-capture-ux]
+    branches: [feat/v04-image-preview-capture-ux, feat/v04-encrypted-vault-review]
   workflow_dispatch:
 permissions:
   contents: read
@@ -79,15 +79,15 @@ jobs:
           if [[ "$code" -ne 124 ]]; then echo "Unexpected app exit status: $code"; exit 1; fi
       - name: Create isolated v0.4 preview Debian package
         env:
-          CLIPMINT_VERSION: 0.4.0~preview2
+          CLIPMINT_VERSION: 0.4.0~preview3
         run: bash packaging/build-deb.sh
       - name: Verify and smoke-test draft installer (CI runner only)
         env:
-          CLIPMINT_VERSION: 0.4.0~preview2
-        run: bash packaging/verify-field-package.sh dist-packages/clipmint_0.4.0~preview2_amd64.deb
+          CLIPMINT_VERSION: 0.4.0~preview3
+        run: bash packaging/verify-field-package.sh dist-packages/clipmint_0.4.0~preview3_amd64.deb
       - uses: actions/upload-artifact@v4
         with:
-          name: ClipMint-v0.4-Crimson-Archive-native-review
+          name: ClipMint-v0.4-Crimson-Archive-vault-review
           path: dist-packages/
           if-no-files-found: error
           retention-days: 14
