@@ -33,10 +33,16 @@ The recorder tries to place the floating controls outside the captured rectangle
 
 On the isolated v0.4 development branch (not the v0.3 release), selecting an image in Clipboard shows an in-memory, aspect-ratio-preserving thumbnail in the PREVIEW pane with its dimensions. Text snippets still show text, with no automatic copy on click. The QSS style is being simplified using tonal dark surfaces, a distinct mint selected-state accent, and flat bin tabs; the UI remains native PySide6/Qt, not Electron. These changes require the project's GUI/CI tests and physical review on Linux Mint before a release. The **Secrets & Variables** feature is **not encrypted or enabled yet**. Do not store credentials in clipboard history.
 
+## DotGothic16 display identity (v0.4 development branch)
+
+ClipMint uses **DotGothic16** for the brand masthead and selected navigation/header elements. A custom native Qt `QPainter` wordmark draws three intentionally misregistered ink passes: **pink `#FF5AB3`**, **lime `#B9FF45`**, and **off-white `#F1F5F9`**. This effect is deliberately restricted to the heading; ordinary clipboard text stays in an accessible, single-colour font. Qt stylesheets (QSS) set the rest of the palette and spacing, rather than browser CSS or an Electron frontend.
+
+The independent open-licensed DotGothic16 TTF and OFL license are fetched **only on GitHub's build/test runners** and integrity-checked against the original Google Fonts git blobs. The packaged application loads its local copy with `QFontDatabase`; it **never downloads fonts at launch**. A system-font fallback is used for unbundled developer checkouts. The packaged `.deb` includes the SIL OFL 1.1 licence. DotGothic16 is © 2020 The DotGothic16 Project Authors; [source and licence](https://github.com/google/fonts/tree/main/ofl/dotgothic16).
+
 ## Verification and limitations
 
 Automated tests cover SQLite bins/migration, UI launch and screen-recorder state where possible. GitHub Actions performs a frozen Qt/X11 start test and verifies the included FFmpeg has X11 capture and H264 encoders. **Actual capture on the HP OMEN / Mint Cinnamon has not yet been field-tested.** X11, single-primary-screen selector only; not Wayland. This is a preview, not a security-hardened release.
 
 ## Licences
 
-Original ClipMint code: MIT. Bundled FFmpeg: separate GPL executable, licence/source details inside the package.
+Original ClipMint code: MIT. Bundled FFmpeg: separate GPL executable, licence/source details inside the package. The included original DotGothic16 font is under SIL OFL 1.1; its licence is packaged as `OFL-DotGothic16.txt`.
