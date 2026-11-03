@@ -158,4 +158,27 @@ QGroupBox::title {subcontrol-origin:margin;left:12px;}
 QScrollBar:vertical {background:#1D1520;width:11px;margin:2px;}
 QScrollBar::handle:vertical {background:#754257;border:1px solid #9B6276;border-radius:5px;min-height:28px;}
 QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical {height:0;}
+QComboBox#tagFilter {
+    background:#291D29;color:#F3D6CA;border:1px solid #865365;
+    border-radius:5px;padding:5px 7px;font:12px "Cormorant Garamond";
+}
+QCheckBox#favoriteFilter {
+    color:#EBC3C6;background:transparent;font:13px "Cormorant Garamond";
+    spacing:4px;
+}
+QCheckBox#favoriteFilter::indicator {
+    width:14px;height:14px;border:1px solid #B6768C;
+    background:#281C2A;border-radius:3px;
+}
+QCheckBox#favoriteFilter::indicator:checked {
+    background:#B95170;border:1px solid #F1B9A4;
+}
+QPushButton#organizerAction {
+    color:#F8E3D5;background:#412734;border:1px solid #945769;
+    border-radius:5px;padding:6px 7px;font:13px "Cormorant Garamond";
+}
+QPushButton#organizerAction:hover {background:#66384C;}
+QPushButton#organizerAction:disabled {
+    color:#8F7783;background:#2A202A;border:1px solid #5F4651;
+}
 """
