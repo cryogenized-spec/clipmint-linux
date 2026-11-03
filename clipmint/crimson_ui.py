@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QRect, QSize, QPoint
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen, QPolygon, QLinearGradient, QBrush, QPainterPath
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen, QPolygon, QLinearGradient, QBrush, QPainterPath, QFontDatabase
 from PySide6.QtWidgets import (
     QAbstractItemView, QComboBox, QFrame, QHBoxLayout, QLabel, QLineEdit,
     QListWidget, QPushButton, QSizePolicy, QStackedWidget, QStyledItemDelegate, QStyle,
@@ -172,7 +172,7 @@ class CrimsonFooterButton(QPushButton):
         p.setPen(fg)
         lines=self.text().split("\n",1)
         display_title = lines[0].replace("●", "").replace("▣", "").strip()
-        title_font = QFont("Cormorant Garamond" if "Cormorant Garamond" in __import__("PySide6.QtGui", fromlist=["QFontDatabase"]).QFontDatabase.families() else "Georgia")
+        title_font = QFont("Cormorant Garamond" if "Cormorant Garamond" in QFontDatabase.families() else "Georgia")
         title_font.setPixelSize(23)
         p.setFont(title_font)
         p.drawText(QRect(56,7,max(5,w-64),26),Qt.AlignmentFlag.AlignVCenter,display_title)
