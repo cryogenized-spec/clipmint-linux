@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
-pkg="${1:-dist-packages/clipmint_0.3.0_amd64.deb}"
+version="${CLIPMINT_VERSION:-0.3.0}"
+pkg="${1:-dist-packages/clipmint_${version}_amd64.deb}"
 test -s "$pkg"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 test "$(dpkg-deb -f "$pkg" Package)" = "clipmint"
-test "$(dpkg-deb -f "$pkg" Version)" = "0.3.0"
+test "$(dpkg-deb -f "$pkg" Version)" = "$version"
 test "$(dpkg-deb -f "$pkg" Architecture)" = "amd64"
 test "$(dpkg-deb -f "$pkg" Depends)" = "libc6 (>= 2.39)"
 dpkg-deb --extract "$pkg" "$tmp/unpacked"

@@ -30,12 +30,13 @@ def stamped_filename(prefix: str, suffix: str) -> str:
 
 
 class AreaSelector(QWidget):
-    """Draw a rectangle on a screenshot of the primary X11 display."""
+    """Interactive region selection with a visible noncaptured instruction banner."""
     selected = Signal(QRect, QPixmap)
     cancelled = Signal()
 
-    def __init__(self):
+    def __init__(self, purpose: str = "image"):
         super().__init__(None)
+        self.purpose = purpose
         screen = QApplication.primaryScreen()
         if screen is None:
             raise RuntimeError("No desktop display was detected")
@@ -63,8 +64,31 @@ class AreaSelector(QWidget):
         if self.box.isValid() and not self.box.isEmpty():
             area = self.box.intersected(self.rect())
             painter.drawPixmap(area, self.background, area)
-            painter.setPen(QPen(QColor("#63b6ff"), 2))
+            painter.setPen(QPen(QColor("#00FF9D"), 2))
             painter.drawRect(area)
+            painter.setPen(QColor("#F1F5F9"))
+            size_label = f"{area.width()} × {area.height()} px"
+            size_box = QRect(area.left() + 5, max(65, area.top() - 32), 160, 26)
+            painter.fillRect(size_box, QColor("#0D131F"))
+            painter.drawText(size_box, Qt.AlignmentFlag.AlignCenter, size_label)
+        # This is painted over the pre-captured desktop image and is not part of
+        # the screenshot/recording source. Instructions remain visible while dragging.
+        hint = ("SCREENSHOT" if self.purpose == "image" else "VIDEO")
+        message = (
+            f"{hint}  •  Click and drag to select the capture area.  "
+            "Release to confirm.  Esc / right-click to cancel."
+        )
+        painter.setPen(Qt.PenStyle.NoPen)
+        guide = QRect(16, 14, min(max(0, self.width() - 32), 740), 45)
+        if guide.width() > 0:
+            painter.setBrush(QColor("#0D131F"))
+            painter.drawRoundedRect(guide, 9, 9)
+            painter.setPen(QColor("#F1F5F9"))
+            painter.drawText(
+                guide.adjusted(12, 0, -12, 0),
+                Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+                message,
+            )
         painter.end()
 
     def mousePressEvent(self, event):
