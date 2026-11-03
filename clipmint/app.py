@@ -6,13 +6,14 @@ import os
 import subprocess
 import sys
 
-from PySide6.QtCore import Qt, QByteArray, QBuffer, QIODevice, QTimer
-from PySide6.QtGui import QImage, QFont, QPixmap
+from PySide6.QtCore import Qt, QByteArray, QBuffer, QIODevice, QTimer, QSettings
+from PySide6.QtGui import QImage, QFont, QPixmap, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QDialog, QFrame, QHBoxLayout, QInputDialog,
     QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow,
     QMenu, QMessageBox, QPushButton, QStyle, QSystemTrayIcon,
     QTabBar, QToolButton, QVBoxLayout, QWidget, QStackedWidget, QSizePolicy,
+    QKeySequenceEdit, QGroupBox,
 )
 
 from .branding import ChromaticWordmark, register_display_font
@@ -106,6 +107,17 @@ class ImagePreviewLabel(QLabel):
                 self.setPixmap(preview)
 
 
+# These are WINDOW shortcuts: they never grab keys from other applications.
+# A blank saved sequence means the individual action is disabled.
+SHORTCUT_SPECS = (
+    ("search", "Focus clipboard search", "Ctrl+F"),
+    ("screenshot", "Select screenshot area", "Ctrl+Shift+S"),
+    ("record", "Select video recording area", "Ctrl+Shift+R"),
+    ("copy", "Copy selected history item", "Ctrl+Shift+C"),
+    ("monitor", "Pause / resume clipboard monitoring", "Ctrl+Shift+M"),
+)
+
+
 class ClipMintWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -142,6 +154,7 @@ class ClipMintWindow(QMainWindow):
             "Clipboard. A configurable rules engine is planned separately."
         ))
         self.build_settings_page()
+        self.install_shortcuts()
         self.statusBar().showMessage("Ready · Left-click to preview, right-click for Copy / Pin / Move / Delete")
         self.configure_tray()
         QApplication.clipboard().dataChanged.connect(self.clipboard_changed)
@@ -312,10 +325,109 @@ class ClipMintWindow(QMainWindow):
         open_files = QPushButton("Open recordings folder")
         open_files.clicked.connect(lambda: self.open_folder(recordings_dir()))
         layout.addWidget(open_files)
-        layout.addWidget(QLabel("No network access or global keyboard shortcuts are required."))
+
+        # QSettings holds keyboard preferences ONLY; never vault credentials.
+        self.settings = QSettings("ClipMint", "ClipMint")
+        self.shortcut_editors = {}
+        self.shortcut_values = {}
+        self.shortcut_objects = {}
+        shortcut_group = QGroupBox("Keyboard shortcuts")
+        shortcut_layout = QVBoxLayout(shortcut_group)
+        shortcut_note = QLabel(
+            "These shortcuts work when ClipMint is focused. No system-wide "
+            "keys are registered, and every action remains mouse-accessible."
+        )
+        shortcut_note.setWordWrap(True)
+        shortcut_layout.addWidget(shortcut_note)
+        for key, title, default in SHORTCUT_SPECS:
+            row = QHBoxLayout()
+            label = QLabel(title)
+            label.setMinimumWidth(190)
+            row.addWidget(label, 1)
+            edit = QKeySequenceEdit()
+            edit.setToolTip("Click here and press the desired keyboard combination")
+            raw = self.settings.value(f"shortcuts/{key}", default)
+            sequence = QKeySequence(str(raw) if raw is not None else "")
+            canonical = sequence.toString(QKeySequence.SequenceFormat.PortableText)
+            self.shortcut_values[key] = canonical
+            edit.setKeySequence(sequence)
+            edit.keySequenceChanged.connect(
+                lambda sequence, action=key: self.change_shortcut(action, sequence)
+            )
+            self.shortcut_editors[key] = edit
+            row.addWidget(edit, 2)
+            reset = QPushButton("Reset")
+            reset.setToolTip(f"Restore {default}")
+            reset.clicked.connect(
+                lambda _checked=False, action=key, original=default:
+                    self.change_shortcut(action, QKeySequence(original))
+            )
+            row.addWidget(reset)
+            disable = QPushButton("Disable")
+            disable.clicked.connect(
+                lambda _checked=False, action=key:
+                    self.change_shortcut(action, QKeySequence())
+            )
+            row.addWidget(disable)
+            shortcut_layout.addLayout(row)
+        layout.addWidget(shortcut_group)
         layout.addWidget(QLabel("History is stored locally and is not encrypted."))
         layout.addStretch()
         self.pages.addWidget(page)
+
+    def install_shortcuts(self):
+        callbacks = {
+            "search": lambda: (self.open_section(0), self.search.setFocus()),
+            "screenshot": self.choose_screenshot,
+            "record": self.choose_recording,
+            "copy": self.copy_selected,
+            "monitor": self.toggle_monitoring,
+        }
+        occupied = set()
+        for key, _title, default in SHORTCUT_SPECS:
+            value = self.shortcut_values[key]
+            if value and value in occupied:
+                # Invalid duplicate values may have been manually written to
+                # QSettings. Fail closed rather than running two actions.
+                value = default if default not in occupied else ""
+                self.shortcut_values[key] = value
+                self.settings.setValue(f"shortcuts/{key}", value)
+                self._show_shortcut_value(key)
+            occupied.add(value) if value else None
+            shortcut = QShortcut(QKeySequence(value), self)
+            shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
+            shortcut.setEnabled(bool(value))
+            shortcut.activated.connect(callbacks[key])
+            self.shortcut_objects[key] = shortcut
+
+    def _show_shortcut_value(self, key: str):
+        editor = self.shortcut_editors[key]
+        editor.blockSignals(True)
+        editor.setKeySequence(QKeySequence(self.shortcut_values[key]))
+        editor.blockSignals(False)
+
+    def change_shortcut(self, key: str, sequence: QKeySequence) -> bool:
+        """Save a user-selected shortcut, or reject a collision atomically."""
+        if key not in self.shortcut_values:
+            return False
+        new_value = sequence.toString(QKeySequence.SequenceFormat.PortableText)
+        for other_key, other_value in self.shortcut_values.items():
+            if other_key != key and new_value and other_value == new_value:
+                self._show_shortcut_value(key)
+                self.statusBar().showMessage(
+                    f"Shortcut already used by {other_key}. Choose a different key.",
+                    5000,
+                )
+                return False
+        self.shortcut_values[key] = new_value
+        self.shortcut_objects[key].setKey(QKeySequence(new_value))
+        self.shortcut_objects[key].setEnabled(bool(new_value))
+        self.settings.setValue(f"shortcuts/{key}", new_value)
+        self._show_shortcut_value(key)
+        self.statusBar().showMessage(
+            f"Shortcut {'disabled' if not new_value else 'saved'}: {key}", 2500
+        )
+        return True
 
     def active_bin(self) -> str:
         return self.tabs.tabText(self.tabs.currentIndex()) if self.tabs.currentIndex() >= 0 else "Work"
