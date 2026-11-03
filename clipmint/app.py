@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
     QMenu, QMessageBox, QPushButton, QStyle, QSystemTrayIcon,
     QTabBar, QToolButton, QVBoxLayout, QWidget, QStackedWidget, QSizePolicy,
     QKeySequenceEdit, QGroupBox, QCheckBox, QDialogButtonBox,
-    QFormLayout, QAbstractItemView,
+    QFormLayout, QAbstractItemView, QFileDialog,
 )
 
 from .branding import ChromaticWordmark, register_display_font
@@ -25,6 +25,7 @@ from .capture import AreaSelector, RegionRecorder, recordings_dir, screenshots_d
 from .recording_ui import RecorderWindow, SaveClipDialog
 from .store import ClipStore, classify, looks_sensitive
 from .autosort import RULE_TYPES, NEVER_CAPTURE, validate_rule, route_clip
+from .vault import Vault, VaultError
 
 
 THEME = """
@@ -130,6 +131,12 @@ class ClipMintWindow(QMainWindow):
         self.setMinimumSize(850, 600)
         self.store = ClipStore()
         self.settings = QSettings("ClipMint", "ClipMint")
+        self.vault = Vault()
+        self._vault_clipboard_text = None
+        self._vault_clipboard_token = 0
+        self._vault_lock_timer = QTimer(self)
+        self._vault_lock_timer.setSingleShot(True)
+        self._vault_lock_timer.timeout.connect(self.lock_vault)
         self.recorder = RegionRecorder()
         self.monitoring = True
         self.selector: AreaSelector | None = None
@@ -146,12 +153,7 @@ class ClipMintWindow(QMainWindow):
         build_crimson_ui(self, ImagePreviewLabel)
         self.build_library_page("Screenshots")
         self.build_library_page("Recordings")
-        self.build_info_page("Secrets & Variables", (
-            "Private by default\n\n"
-            "This preview does NOT contain an encrypted vault. Saved clipboard "
-            "history remains unencrypted. Avoid storing passwords or API keys.\n\n"
-            "Credentials are only heuristically excluded from clipboard monitoring."
-        ))
+        self.build_vault_page()
         self.build_autosort_page()
         self.build_settings_page()
         self.install_shortcuts()
@@ -314,6 +316,342 @@ class ClipMintWindow(QMainWindow):
         layout.addWidget(label)
         layout.addStretch()
         self.pages.addWidget(page)
+
+    def build_vault_page(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        heading = QLabel("Secrets & Variables · encrypted local vault")
+        heading.setObjectName("sectionTitle")
+        layout.addWidget(heading)
+        warning = QLabel(
+            "Vault entries, including names, are encrypted on disk with "
+            "libsodium SecretBox and an Argon2id-derived key. Ordinary "
+            "clipboard history is NOT encrypted. X11 makes copied values "
+            "visible to other local applications until the clipboard clears."
+        )
+        warning.setWordWrap(True)
+        layout.addWidget(warning)
+        self.vault_status = QLabel("")
+        layout.addWidget(self.vault_status)
+        self.vault_items = QListWidget()
+        self.vault_items.itemDoubleClicked.connect(
+            lambda _item: self.reveal_vault_value()
+        )
+        layout.addWidget(self.vault_items, 1)
+        auth = QHBoxLayout()
+        self.vault_actions = {}
+        for name, label, callback in (
+            ("create", "Create vault", self.create_vault),
+            ("unlock", "Unlock", self.unlock_vault),
+            ("lock", "Lock", self.lock_vault),
+            ("backup", "Encrypted backup", self.backup_vault),
+            ("restore", "Restore backup", self.restore_vault),
+        ):
+            btn = QPushButton(label)
+            btn.clicked.connect(callback)
+            auth.addWidget(btn)
+            self.vault_actions[name] = btn
+        layout.addLayout(auth)
+        commands = QHBoxLayout()
+        for name, label, callback in (
+            ("add", "New entry", self.add_vault_entry),
+            ("reveal", "Reveal", self.reveal_vault_value),
+            ("copy", "Copy", self.copy_vault_value),
+            ("remove", "Delete entry", self.remove_vault_entry),
+        ):
+            btn = QPushButton(label)
+            btn.clicked.connect(callback)
+            commands.addWidget(btn)
+            self.vault_actions[name] = btn
+        layout.addLayout(commands)
+        maintenance = QHBoxLayout()
+        for name, label, callback in (
+            ("rotate", "Change passphrase", self.change_vault_passphrase),
+            ("wipe", "Delete vault", self.wipe_vault),
+        ):
+            btn = QPushButton(label)
+            btn.clicked.connect(callback)
+            maintenance.addWidget(btn)
+            self.vault_actions[name] = btn
+        layout.addLayout(maintenance)
+        note = QLabel(
+            "There is no password reset: retain your passphrase and an "
+            "encrypted backup. The vault locks automatically after five "
+            "minutes without a vault action. It also locks when ClipMint closes."
+        )
+        note.setWordWrap(True)
+        layout.addWidget(note)
+        self.pages.addWidget(page)
+        self.refresh_vault()
+
+    def refresh_vault(self):
+        configured, unlocked = self.vault.configured, self.vault.unlocked
+        self.vault_status.setText(
+            "● UNLOCKED · decrypted in memory temporarily" if unlocked
+            else "● LOCKED · passphrase required" if configured
+            else "● NOT CONFIGURED · create a private vault"
+        )
+        self.vault_items.clear()
+        if unlocked:
+            for entry in self.vault.list_entries():
+                item = QListWidgetItem(
+                    f"{entry['kind'].upper()}  ·  {entry['name']}"
+                )
+                item.setData(Qt.ItemDataRole.UserRole, entry["id"])
+                self.vault_items.addItem(item)
+        for name, button in self.vault_actions.items():
+            button.setEnabled({
+                "create": not configured,
+                "restore": not configured,
+                "unlock": configured and not unlocked,
+                "lock": unlocked,
+                "backup": configured,
+                "wipe": configured,
+                "add": unlocked, "reveal": unlocked,
+                "copy": unlocked, "remove": unlocked,
+                "rotate": unlocked,
+            }[name])
+
+    def touch_vault(self):
+        if self.vault.unlocked:
+            self._vault_lock_timer.start(5 * 60 * 1000)
+
+    def vault_password_prompt(self, title: str, message: str) -> str | None:
+        value, ok = QInputDialog.getText(
+            self, title, message, QLineEdit.EchoMode.Password
+        )
+        return value if ok else None
+
+    def create_vault(self):
+        password = self.vault_password_prompt(
+            "Create encrypted vault", "Choose a passphrase (at least 12 characters):"
+        )
+        if password is None:
+            return
+        again = self.vault_password_prompt(
+            "Confirm passphrase", "Enter the same passphrase again:"
+        )
+        if again is None:
+            return
+        if password != again:
+            self.error("Vault", "Passphrases do not match")
+            return
+        try:
+            self.vault.create(password)
+            self.refresh_vault()
+            self.touch_vault()
+            self.inform(
+                "Vault created",
+                "Keep your passphrase safe. There is no recovery without it."
+            )
+        except VaultError as exc:
+            self.error("Vault", str(exc))
+
+    def unlock_vault(self):
+        password = self.vault_password_prompt("Unlock vault", "Vault passphrase:")
+        if password is None:
+            return
+        try:
+            self.vault.unlock(password)
+            self.refresh_vault()
+            self.touch_vault()
+        except VaultError as exc:
+            self.error("Vault", str(exc))
+
+    def lock_vault(self):
+        self._vault_lock_timer.stop()
+        self.vault.lock()
+        self.refresh_vault()
+
+    def selected_vault_id(self) -> str | None:
+        item = self.vault_items.currentItem()
+        return item.data(Qt.ItemDataRole.UserRole) if item else None
+
+    def add_vault_entry(self):
+        if not self.vault.unlocked:
+            return
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Save encrypted entry")
+        fields = QFormLayout(dialog)
+        kind = QComboBox()
+        kind.addItems(["Secret", "Variable"])
+        name = QLineEdit()
+        value = QLineEdit()
+        value.setEchoMode(QLineEdit.EchoMode.Password)
+        value.setPlaceholderText("Stored encrypted; never captured as history")
+        kind.currentTextChanged.connect(
+            lambda text: value.setEchoMode(
+                QLineEdit.EchoMode.Password if text == "Secret"
+                else QLineEdit.EchoMode.Normal
+            )
+        )
+        fields.addRow("Type", kind)
+        fields.addRow("Name", name)
+        fields.addRow("Value", value)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Save |
+            QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        fields.addRow(buttons)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        try:
+            self.vault.add(name.text(), value.text(), kind.currentText())
+            value.clear()
+            self.touch_vault()
+            self.refresh_vault()
+        except VaultError as exc:
+            self.error("Vault", str(exc))
+
+    def reveal_vault_value(self):
+        entry_id = self.selected_vault_id()
+        if entry_id is None or not self.vault.unlocked:
+            return
+        try:
+            value = self.vault.get_value(entry_id)
+        except VaultError as exc:
+            self.error("Vault", str(exc))
+            return
+        self.touch_vault()
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Reveal saved entry")
+        form = QFormLayout(dialog)
+        field = QLineEdit(value)
+        field.setReadOnly(True)
+        field.setEchoMode(QLineEdit.EchoMode.Password)
+        reveal = QCheckBox("Show value while this dialog is open")
+        reveal.toggled.connect(
+            lambda checked: field.setEchoMode(
+                QLineEdit.EchoMode.Normal if checked else QLineEdit.EchoMode.Password
+            )
+        )
+        close = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        close.rejected.connect(dialog.reject)
+        form.addRow("Value", field)
+        form.addRow("", reveal)
+        form.addRow(close)
+        dialog.exec()
+        field.clear()
+
+    def copy_vault_value(self):
+        entry_id = self.selected_vault_id()
+        if entry_id is None or not self.vault.unlocked:
+            return
+        try:
+            value = self.vault.get_value(entry_id)
+        except VaultError as exc:
+            self.error("Vault", str(exc))
+            return
+        self.touch_vault()
+        # Never route a deliberate secret copy through clipboard history.
+        self._vault_clipboard_text = value
+        self._vault_clipboard_token += 1
+        token = self._vault_clipboard_token
+        self._ignore_next_clipboard_change = True
+        QApplication.clipboard().setText(value)
+        QTimer.singleShot(30000, lambda: self.expire_vault_clipboard(token))
+        self.statusBar().showMessage(
+            "Value copied · clipboard will clear after 30 seconds if unchanged",
+            5000,
+        )
+
+    def expire_vault_clipboard(self, token: int):
+        if token != self._vault_clipboard_token:
+            return
+        value = self._vault_clipboard_text
+        if value is not None and QApplication.clipboard().text() == value:
+            self._ignore_next_clipboard_change = True
+            QApplication.clipboard().clear()
+        self._vault_clipboard_text = None
+
+    def remove_vault_entry(self):
+        entry_id = self.selected_vault_id()
+        if entry_id is None:
+            return
+        if QMessageBox.question(
+            self, "Delete entry",
+            "Permanently delete this vault entry?",
+        ) != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            self.vault.remove(entry_id)
+            self.touch_vault()
+            self.refresh_vault()
+        except VaultError as exc:
+            self.error("Vault", str(exc))
+
+    def change_vault_passphrase(self):
+        if not self.vault.unlocked:
+            return
+        old = self.vault_password_prompt("Change passphrase", "Current passphrase:")
+        if old is None:
+            return
+        new = self.vault_password_prompt("Change passphrase", "New passphrase:")
+        if new is None:
+            return
+        confirm = self.vault_password_prompt("Confirm passphrase", "Repeat new passphrase:")
+        if confirm is None:
+            return
+        if new != confirm:
+            self.error("Vault", "Passphrases do not match")
+            return
+        try:
+            self.vault.change_passphrase(old, new)
+            self.touch_vault()
+            self.inform("Vault", "Passphrase updated. Create a fresh encrypted backup.")
+        except VaultError as exc:
+            self.error("Vault", str(exc))
+
+    def backup_vault(self):
+        if not self.vault.configured:
+            return
+        filename, _ = QFileDialog.getSaveFileName(
+            self, "Save encrypted vault backup", "clipmint-vault-backup.json",
+            "Encrypted vault (*.json *.vault)"
+        )
+        if not filename:
+            return
+        try:
+            self.vault.encrypted_backup(Path(filename))
+            self.inform("Vault backup", "Encrypted backup saved. Retain its passphrase.")
+        except VaultError as exc:
+            self.error("Vault", str(exc))
+
+    def restore_vault(self):
+        if self.vault.configured:
+            return
+        filename, _ = QFileDialog.getOpenFileName(
+            self, "Restore encrypted vault backup", "",
+            "Encrypted vault (*.json *.vault)"
+        )
+        if not filename:
+            return
+        try:
+            self.vault.restore_backup(Path(filename))
+            self.refresh_vault()
+            self.inform("Vault", "Encrypted backup restored. Unlock with its original passphrase.")
+        except VaultError as exc:
+            self.error("Vault", str(exc))
+
+    def wipe_vault(self):
+        if not self.vault.configured:
+            return
+        response, ok = QInputDialog.getText(
+            self, "Delete encrypted vault",
+            "This deletes the local encrypted file. Backups are not deleted. "
+            "Type DELETE to confirm:",
+        )
+        if not ok or response != "DELETE":
+            return
+        try:
+            self._vault_lock_timer.stop()
+            self.vault.wipe()
+            self.refresh_vault()
+            self.inform("Vault deleted", "Local encrypted vault removed.")
+        except VaultError as exc:
+            self.error("Vault", str(exc))
 
     def build_autosort_page(self):
         """Native Qt rule editor. Autosort is OFF unless explicitly enabled."""
@@ -755,6 +1093,9 @@ class ClipMintWindow(QMainWindow):
         data = QApplication.clipboard().mimeData()
         if data is None:
             return
+        if (data.hasText() and self._vault_clipboard_text is not None
+                and data.text() == self._vault_clipboard_text):
+            return
         active = self.active_bin()
         if data.hasImage():
             picture = QApplication.clipboard().image()
@@ -1115,6 +1456,7 @@ class ClipMintWindow(QMainWindow):
         self.open_path(folder)
 
     def closeEvent(self, event):
+        self.lock_vault()
         if self._closing:
             event.accept()
         elif self.tray is not None:
@@ -1136,6 +1478,7 @@ class ClipMintWindow(QMainWindow):
             self.recorder_window.deleteLater()
             self.recorder_window = None
         self._closing = True
+        self.lock_vault()
         self.store.close()
         if self.tray is not None:
             self.tray.hide()
