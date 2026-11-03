@@ -183,3 +183,80 @@ The preview .deb requires \`tesseract-ocr\`, English trained data and
 \`xdotool\` in addition to ClipMint's built-in Qt libraries. Language support
 is English for this first version. Test with captured receipts and screenshot
 text on the actual Mint/Cinnamon X11 desktop before relying on it.
+
+
+## v0.6 development preview — Indexed search and productivity
+
+This source-only preview builds on v0.5. **There is no production v0.6
+release yet.** The approved full-size Kohaku card is tracked separately by
+PR #11; this branch does not replace or fabricate that artwork.
+
+### Search the content, not just the filename
+
+The archive search now uses local SQLite **FTS5** to index the full text of
+normal text clipboard items (up to 128 KiB per item), as well as saved
+previews. Search for words occurring deep inside a previously copied
+document, or several words at once. Choose **Best match** in the sort selector
+to rank matches using SQLite relevance. Existing latest/oldest/alphabetical
+sorts remain available. Punctuation and partial-preview searches still
+receive the literal search fallback. The keyboard quick popup combines these
+indexed results with typo-tolerant fuzzy matching.
+
+On first run, ClipMint adds the FTS index to the **ordinary plaintext**
+SQLite history database. The index is local, but it is also **plaintext**
+because the existing history is plaintext. It never leaves your machine.
+**Encrypted history does not create FTS tables**; that mode searches
+decrypted previews only, in process memory, without indexing protected
+clip bodies to disk. ClipMint will use literal preview search if SQLite lacks
+FTS5. Back up the existing history folder before upgrading.
+
+### Tags and favourites
+
+Right-click a clipboard item to **Edit tags** or **Add to favourites**.
+Tags are comma-separated letters, numbers, underscores and hyphens.
+Use the tag dropdown and the **♥ Favourites** checkbox to narrow the archive.
+Favourites are separate from pins: only **pinned** clips are protected from
+automatic pruning by the existing retention policy. Tag labels and favourite
+states are normal metadata, **not secret values**, even when encrypted history
+is active. Avoid confidential words in tag names.
+
+### Reusable snippets
+
+Select **✧ Snippets** to create or edit plain-text templates, or right-click
+a text clip and choose **Save as snippet template**. The literal placeholder
+`{{customer}}` will prompt you for a value when you click **Fill & copy**.
+No Python, shell expressions, scripting or network substitution is executed.
+
+Templates are stored on this device. In ordinary history, template bodies
+are plaintext; in optional encrypted history, their bodies are individually
+authenticated-encrypted using the existing encrypted-history key. Template
+**names** remain metadata. Avoid storing passwords in ordinary snippets.
+
+### Preview-first text workshop
+
+Right-click a text clip and choose **Text workshop**. Local operations include
+trim/strip, remove or deduplicate blank/repeated lines, alphabetic sorting,
+case conversion, JSON pretty printing/minification and URL encode/decode.
+Check the preview, choose **Copy preview** or explicitly **Save as new clip**,
+or use **Revert**. The original history entry is never modified.
+
+### Multi-paste queue (explicit, no automatic typing)
+
+Right-click one or more items and choose **Add to paste queue**, in the order
+you need them. Click **NEXT N** to copy one queued item and paste it
+yourself into the target application. Repeat for subsequent items. The queue
+lives only in memory and resets when ClipMint quits. It does not inject
+keystrokes, run macros, execute clipboard text or alter other windows.
+A deleted clip is skipped. This is a safe staged-paste workflow, not a
+background automation of multiple pastes.
+
+### v0.6 preview installation and acceptance
+
+After the branch CI completes, download the **ClipMint-v0.6-productivity-preview**
+GitHub Actions artifact, verify `SHA256SUMS`, and install the
+`clipmint_0.6.0~preview1_amd64.deb` package via `sudo apt install ./...`.
+First close ClipMint and back up `~/.local/share/clipmint` with SQLite WAL
+files intact. The UI and integration tests run on headless Qt/Xvfb; you must
+still confirm real Cinnamon/X11 search, history migration, keyboard paste,
+Nemo and LibreOffice clipboard formats, screen capture and templates on the
+HP OMEN before treating the preview as a daily-driver release.
