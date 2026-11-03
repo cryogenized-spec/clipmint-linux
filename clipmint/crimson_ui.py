@@ -94,7 +94,7 @@ QPushButton:focus, QToolButton:focus, QComboBox:focus {border:1px solid #C9F473;
 """
 
 
-class GothicSearchCapsule(QFrame):
+class GothicSearchCapsule(QWidget):
     """Rounded painted search shell independent of native X11 QLineEdit styles."""
 
     def paintEvent(self, event):
