@@ -52,6 +52,14 @@ def install_local(raw: bytes) -> Path:
     directory = data_root / "clipmint"
     directory.mkdir(parents=True, exist_ok=True)
     target = directory / "kohaku_card.png"
+    if target.exists() and hashlib.sha256(target.read_bytes()).hexdigest() != EXPECTED_SHA256:
+        previous = directory / "kohaku_card.previous.png"
+        if previous.exists():
+            raise RuntimeError(
+                f"Cannot replace custom artwork: backup target {previous} already exists"
+            )
+        shutil.copy2(target, previous)
+        print(f"Backed up prior card at: {previous}")
     # Atomic file swap: do not touch the user's history database or vault.
     with tempfile.NamedTemporaryFile(prefix=".kohaku-", suffix=".png", dir=directory, delete=False) as f:
         temporary = Path(f.name)
