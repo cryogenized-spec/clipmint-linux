@@ -64,6 +64,29 @@ class CrimsonArchiveTests(unittest.TestCase):
         finally:
             self.finish_window(window)
 
+    def test_reference_typography_palette_and_working_controls(self):
+        """The visual overhaul keeps native Qt actions and accessible focus."""
+        window = self.make_window()
+        try:
+            window.resize(1507, 1044)
+            window.show()
+            self.app.processEvents()
+            stylesheet = window.styleSheet()
+            self.assertIn("Cormorant Garamond", stylesheet)
+            self.assertIn("#C48C6B", stylesheet)
+            self.assertIn("qlineargradient", stylesheet)
+            self.assertIn("SYSTEM READY", window.findChildren(
+                type(window.kana_tag), "systemReady")[0].text())
+            self.assertGreaterEqual(window.record_button.minimumHeight(), 60)
+            self.assertGreaterEqual(window.screenshot_button.minimumHeight(), 60)
+            self.assertIsNotNone(window.record_menu.menu())
+            self.assertIsNotNone(window.screenshot_menu.menu())
+            self.assertTrue(window.copy_action.isEnabled() or not window.history.count())
+            self.assertFalse(window.wordmark.grab().isNull())
+            self.assertFalse(window.record_button.grab().isNull())
+        finally:
+            self.finish_window(window)
+
     def test_compact_view_preserves_data_and_navigation(self):
         window = self.make_window()
         try:

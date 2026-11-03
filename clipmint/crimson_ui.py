@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QRect, QSize, QPoint
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen, QPolygon
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen, QPolygon, QLinearGradient, QBrush, QPainterPath, QFontDatabase
 from PySide6.QtWidgets import (
     QAbstractItemView, QComboBox, QFrame, QHBoxLayout, QLabel, QLineEdit,
     QListWidget, QPushButton, QSizePolicy, QStackedWidget, QStyledItemDelegate, QStyle,
@@ -90,12 +90,59 @@ QToolButton::menu-indicator {image:none;}
 QPushButton#record:hover, QToolButton#recordArrow:hover {background:#C02C50;}
 QPushButton#screenshot:hover, QToolButton#shotArrow:hover {background:#F1E4E1;}
 QPushButton:focus, QToolButton:focus, QComboBox:focus {border:1px solid #C9F473;}
-QPushButton {min-height:24px;}
+/* Footer plaque size is set by Qt; do not override it with a legacy QSS min-height. */
 """
 
 
+class GothicSearchCapsule(QWidget):
+    """Rounded painted search shell independent of native X11 QLineEdit styles."""
+
+    def paintEvent(self, event):
+        p=QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        r=self.rect().adjusted(1,1,-1,-1)
+        fill=QLinearGradient(0,0,self.width(),self.height())
+        fill.setColorAt(0,QColor("#2B202D"))
+        fill.setColorAt(1,QColor("#211925"))
+        p.setPen(QPen(QColor("#985F70"),1.2))
+        p.setBrush(QBrush(fill))
+        p.drawRoundedRect(r, min(21,r.height()/2), min(21,r.height()/2))
+        p.end()
+
+
+class GothicDivider(QWidget):
+    """Subtle line with a central bookplate diamond, matching the reference."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedHeight(16)
+        self.setAccessibleName("Decorative rose-gold archive divider")
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        w, cy = self.width(), self.height() / 2
+        grad = QLinearGradient(0, cy, w, cy)
+        for pos, col in ((0, "#46303A"), (.35, "#A76277"),
+                         (.5, "#D9A27F"), (.65, "#A76277"), (1, "#46303A")):
+            grad.setColorAt(pos, QColor(col))
+        p.setPen(QPen(QBrush(grad), 1))
+        p.drawLine(QPoint(0, int(cy)), QPoint(w, int(cy)))
+        p.setPen(QPen(QColor("#DBA17E"), 1.3))
+        diamond = QPolygon([QPoint(w//2,1), QPoint(w//2+7,int(cy)),
+                            QPoint(w//2,15), QPoint(w//2-7,int(cy))])
+        p.setBrush(QColor("#261820"))
+        p.drawPolygon(diamond)
+        p.setBrush(QColor("#F3C6A0"))
+        p.drawEllipse(QPoint(w//2,int(cy)), 2, 2)
+        for x in (w//2-21, w//2+21):
+            p.drawEllipse(QPoint(x,int(cy)), 1, 1)
+        p.end()
+
+
 class CrimsonFooterButton(QPushButton):
-    """Real clickable action with the angled outline of the approved v2 design."""
+    """Real clickable footer action painted as a lacquered, bevelled plaque."""
 
     def __init__(self, text: str, primary: bool, parent=None):
         super().__init__(text, parent)
@@ -103,35 +150,60 @@ class CrimsonFooterButton(QPushButton):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
     def paintEvent(self, event):
-        painter=QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        w,h=self.width(),self.height()
-        shape=QPolygon([
-            QPoint(13,0),QPoint(w-1,0),QPoint(w-1,h-1),
-            QPoint(0,h-1),QPoint(0,13)
-        ])
-        fill=QColor("#C02C50" if self.underMouse() else "#A62443") if self.primary else QColor("#F1E4E1" if self.underMouse() else "#DFD3D2")
-        painter.setBrush(fill)
-        painter.setPen(QPen(QColor("#B6304C" if self.primary else "#EEE8E7"),1))
-        painter.drawPolygon(shape)
-        painter.setPen(QColor("#F4EEEB" if self.primary else "#25151C"))
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        w, h = self.width(), self.height()
+        border = QPainterPath()
+        border.moveTo(15, 1)
+        border.lineTo(w-7, 1)
+        border.quadTo(w-1, 1, w-1, 7)
+        border.lineTo(w-1, h-7)
+        border.quadTo(w-1,h-1,w-7,h-1)
+        border.lineTo(7,h-1)
+        border.quadTo(1,h-1,1,h-7)
+        border.lineTo(1,16)
+        border.closeSubpath()
+        fill = QLinearGradient(0,0,0,h)
+        if self.primary:
+            fill.setColorAt(0, QColor("#A93C58" if self.underMouse() else "#8F2C48"))
+            fill.setColorAt(.48, QColor("#77243D"))
+            fill.setColorAt(1, QColor("#511D31"))
+            edge = QColor("#E37991")
+            fg = QColor("#FFF0E2")
+        else:
+            fill.setColorAt(0, QColor("#FAE8DD" if self.underMouse() else "#EBD4C8"))
+            fill.setColorAt(.52, QColor("#E2C8BE"))
+            fill.setColorAt(1, QColor("#BA9F9B"))
+            edge = QColor("#FCE8DB")
+            fg = QColor("#311C29")
+        p.setBrush(QBrush(fill))
+        p.setPen(QPen(edge, 1.25))
+        p.drawPath(border)
+        p.setPen(QPen(QColor("#FFFFFF" if not self.primary else "#F7A2AD"), .7))
+        p.drawLine(QPoint(17,4), QPoint(w-9,4))
+        # Decorative circular command glyph, independent of the title font.
+        p.setBrush(fg)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.drawEllipse(QPoint(35,h//2), 7 if self.primary else 6, 7 if self.primary else 6)
+        p.setPen(fg)
         lines=self.text().split("\n",1)
-        font=QFont("DejaVu Sans",12,QFont.Weight.Bold)
-        painter.setFont(font)
-        painter.drawText(QRect(23,7,max(10,w-26),24), Qt.AlignmentFlag.AlignVCenter, lines[0])
+        display_title = lines[0].replace("●", "").replace("▣", "").strip()
+        title_font = QFont("Cormorant Garamond" if "Cormorant Garamond" in QFontDatabase.families() else "Georgia")
+        title_font.setPixelSize(23)
+        p.setFont(title_font)
+        p.drawText(QRect(56,7,max(5,w-64),26),Qt.AlignmentFlag.AlignVCenter,display_title)
         if len(lines)>1:
-            font=QFont("DejaVu Sans Mono",9)
-            painter.setFont(font)
-            painter.drawText(QRect(23,29,max(10,w-26),17),Qt.AlignmentFlag.AlignVCenter,lines[1])
+            p.setFont(QFont("DejaVu Sans Mono", 10))
+            p.drawText(QRect(56,33,max(5,w-64),17),Qt.AlignmentFlag.AlignVCenter,lines[1])
         if self.hasFocus():
-            painter.setPen(QPen(QColor("#C9F473"),2))
-            painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.drawPolygon(shape)
-        painter.end()
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.setPen(QPen(QColor("#FFE3AE"),2))
+            p.drawPath(border)
+        p.end()
 
 
 class CrimsonFooterArrow(QToolButton):
-    """Separate dropdown with a clipped outer corner; retains a native QMenu."""
+    """Split-button arrow retains QMenu selection and keyboard accessibility."""
 
     def __init__(self, primary: bool, parent=None):
         super().__init__(parent)
@@ -139,19 +211,37 @@ class CrimsonFooterArrow(QToolButton):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
     def paintEvent(self, event):
-        painter=QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        p=QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         w,h=self.width(),self.height()
-        polygon=QPolygon([
-            QPoint(0,0),QPoint(w-1,0),QPoint(w-1,h-13),
-            QPoint(w-13,h-1),QPoint(0,h-1)
-        ])
-        painter.setBrush(QColor("#C02C50" if self.underMouse() else "#A62443") if self.primary else QColor("#F1E4E1" if self.underMouse() else "#DFD3D2"))
-        painter.setPen(QPen(QColor("#B6304C" if self.primary else "#EEE8E7"),1))
-        painter.drawPolygon(polygon)
-        painter.setPen(QColor("#F4EEEB" if self.primary else "#25151C"))
-        painter.drawText(self.rect(),Qt.AlignmentFlag.AlignCenter,"▾")
-        painter.end()
+        path=QPainterPath()
+        path.moveTo(0,1)
+        path.lineTo(w-8,1)
+        path.quadTo(w-1,1,w-1,8)
+        path.lineTo(w-1,h-8)
+        path.quadTo(w-1,h-1,w-8,h-1)
+        path.lineTo(0,h-1)
+        path.closeSubpath()
+        grad=QLinearGradient(0,0,0,h)
+        if self.primary:
+            grad.setColorAt(0,QColor("#9E3450" if self.underMouse() else "#80253F"))
+            grad.setColorAt(1,QColor("#4B1B2C"))
+        else:
+            grad.setColorAt(0,QColor("#EFDBCD" if self.underMouse() else "#DDC2B8"))
+            grad.setColorAt(1,QColor("#B39798"))
+        p.setBrush(QBrush(grad))
+        p.setPen(QPen(QColor("#CA7790" if self.primary else "#F1DED2"),1))
+        p.drawPath(path)
+        p.setPen(QPen(QColor("#AA6476" if self.primary else "#9A7A82"),1))
+        p.drawLine(QPoint(1,5),QPoint(1,h-5))
+        p.setPen(QColor("#FAE7DF" if self.primary else "#3B2633"))
+        p.setFont(QFont("DejaVu Sans", 13))
+        p.drawText(self.rect(),Qt.AlignmentFlag.AlignCenter,"▾")
+        if self.hasFocus():
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.setPen(QPen(QColor("#FFE3AE"),2))
+            p.drawPath(path)
+        p.end()
 
 
 def relative_time(created_at: str) -> str:
@@ -191,7 +281,7 @@ class CrimsonClipDelegate(QStyledItemDelegate):
     """Real Qt list rows matching the prototype: icons, type chips, time, pin."""
 
     def sizeHint(self, option, index):
-        return QSize(max(100, option.rect.width()), 71)
+        return QSize(max(100, option.rect.width()), 77)
 
     def paint(self, painter, option, index):
         painter.save()
@@ -201,9 +291,9 @@ class CrimsonClipDelegate(QStyledItemDelegate):
         hover = bool(option.state & QStyle.StateFlag.State_MouseOver)
         # Restrained card-like rows from the approved Gothic Archive design.
         # The soft enclosure defines a selection without a SaaS-grid appearance.
-        bg = QColor("#4C2939" if active else "#32232E" if hover else "#241B26")
+        bg = QColor("#563044" if active else "#35232E" if hover else "#251B26")
         painter.setBrush(bg)
-        painter.setPen(QPen(QColor("#C87883" if active else "#5A3748"), 1))
+        painter.setPen(QPen(QColor("#BC7087" if active else "#624353"), 1))
         painter.drawRoundedRect(r.adjusted(4, 3, -4, -3), 7, 7)
         if active:
             painter.fillRect(QRect(r.left()+4, r.top()+9, 3, r.height()-18), QColor("#F1A0AC"))
@@ -226,7 +316,7 @@ class CrimsonClipDelegate(QStyledItemDelegate):
         textx=tagx+tagw+8
         available=max(30, r.right()-textx-40)
         painter.setPen(QColor("#F4EEEB"))
-        painter.setFont(QFont("Georgia", 12))
+        painter.setFont(QFont("Cormorant Garamond", 17))
         font=QFontMetrics(painter.font())
         painter.drawText(textx, r.top()+29, font.elidedText(name,Qt.TextElideMode.ElideRight,available))
         painter.setFont(QFont("DejaVu Sans Mono", 9))
@@ -255,14 +345,14 @@ def build_crimson_ui(w, image_preview_class):
     shell=QWidget()
     shell.setObjectName("appRoot")
     root=QVBoxLayout(shell)
-    root.setContentsMargins(14,13,14,11)
-    root.setSpacing(11)
+    root.setContentsMargins(15,12,15,11)
+    root.setSpacing(10)
 
     # Masthead
     mast=QHBoxLayout()
-    mast.setSpacing(13)
+    mast.setSpacing(15)
     w.wordmark=w.wordmark.__class__(w.brand_family)
-    w.wordmark.display_font.setPixelSize(43)
+    w.wordmark.display_font.setPixelSize(53)
     w.wordmark.setFixedSize(w.wordmark.sizeHint())
     mast.addWidget(w.wordmark)
     w.kana_tag=make_label("クリップミント","kanaTag")
@@ -270,17 +360,15 @@ def build_crimson_ui(w, image_preview_class):
     mast.addWidget(w.kana_tag)
     mast.addWidget(make_label("/ 04","edition"))
     mast.addStretch(1)
-    mast.addWidget(make_label("● SYSTEM READY","systemReady"))
+    mast.addWidget(make_label("●   SYSTEM READY   ◇","systemReady"))
     root.addLayout(mast)
-    top_rule=QFrame()
-    top_rule.setFixedHeight(1)
-    top_rule.setStyleSheet("background:#8B4E5D")
+    top_rule=GothicDivider()
     root.addWidget(top_rule)
 
     # Four columns: portrait, real working pages, preview, navigation.
     workspace=QHBoxLayout()
     workspace.setContentsMargins(0,0,0,0)
-    workspace.setSpacing(9)
+    workspace.setSpacing(12)
 
     w.manga_dock=KohakuCardFrame()
     w.manga_dock.setFixedWidth(354)
@@ -348,7 +436,7 @@ def build_crimson_ui(w, image_preview_class):
     w.preview_panel.setObjectName("previewPane")
     w.preview_panel.setMinimumWidth(260)
     preview=QVBoxLayout(w.preview_panel)
-    preview.setContentsMargins(14,16,14,13)
+    preview.setContentsMargins(15,16,15,13)
     preview.setSpacing(10)
     heading=QHBoxLayout()
     heading.addWidget(make_label("Selected item","previewTitle"))
@@ -424,7 +512,7 @@ def build_crimson_ui(w, image_preview_class):
     w.dock_panel=dock
     dock.setFixedWidth(144)
     nav=QVBoxLayout(dock)
-    nav.setContentsMargins(7,12,7,9)
+    nav.setContentsMargins(8,12,8,10)
     nav.setSpacing(5)
     nav.addWidget(make_label("MODULES","dockHeading"))
     w.nav_buttons={}
@@ -461,20 +549,20 @@ def build_crimson_ui(w, image_preview_class):
     footer=QFrame()
     footer.setObjectName("footer")
     fl=QHBoxLayout(footer)
-    fl.setContentsMargins(0,11,0,0)
+    fl.setContentsMargins(0,13,0,2)
     fl.setSpacing(0)
     w.footer_status=make_label("● Ready   |   HISTORY 00","footerStatus")
     w.footer_status.setMinimumWidth(110)
     fl.addWidget(w.footer_status,1)
     w.record_button=CrimsonFooterButton("●  Record Video\nREC / MP4 · GIF", primary=True)
     w.record_button.setObjectName("record")
-    w.record_button.setMinimumHeight(55)
+    w.record_button.setFixedHeight(64)
     w.record_button.clicked.connect(lambda: w.choose_recording("MP4"))
     fl.addWidget(w.record_button,2)
     w.record_menu=CrimsonFooterArrow(primary=True)
     w.record_menu.setObjectName("recordArrow")
     w.record_menu.setText("▾")
-    w.record_menu.setMinimumHeight(55)
+    w.record_menu.setFixedHeight(64)
     w.record_menu.setFixedWidth(44)
     w.record_menu.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
     formats=QMenu(w.record_menu)
@@ -485,13 +573,13 @@ def build_crimson_ui(w, image_preview_class):
     fl.addSpacing(11)
     w.screenshot_button=CrimsonFooterButton("▣  Screenshot Area\nCAPTURE / REGION", primary=False)
     w.screenshot_button.setObjectName("screenshot")
-    w.screenshot_button.setMinimumHeight(55)
+    w.screenshot_button.setFixedHeight(64)
     w.screenshot_button.clicked.connect(w.choose_screenshot)
     fl.addWidget(w.screenshot_button,2)
     w.screenshot_menu=CrimsonFooterArrow(primary=False)
     w.screenshot_menu.setObjectName("shotArrow")
     w.screenshot_menu.setText("▾")
-    w.screenshot_menu.setMinimumHeight(55)
+    w.screenshot_menu.setFixedHeight(64)
     w.screenshot_menu.setFixedWidth(44)
     w.screenshot_menu.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
     capture=QMenu(w.screenshot_menu)
@@ -539,11 +627,27 @@ def build_archive_page(w):
     add_bin.clicked.connect(w.new_bin)
     bin_row.addWidget(add_bin)
     layout.addLayout(bin_row)
+    # Draw the search outline on a real QFrame. Qt can otherwise ignore a
+    # QLineEdit's border radius on some X11 themes and render a square box.
+    search_shell=GothicSearchCapsule()
+    search_shell.setObjectName("archiveSearchCapsule")
+    search_row=QHBoxLayout(search_shell)
+    search_row.setContentsMargins(12,1,10,1)
+    search_row.setSpacing(8)
+    glyph=make_label("⌕","archiveSearchGlyph")
+    glyph.setFixedWidth(16)
+    search_row.addWidget(glyph)
     w.search=QLineEdit()
     w.search.setObjectName("archiveSearch")
-    w.search.setPlaceholderText("⌕  Search the archive…")
+    w.search.setStyleSheet(
+        'QLineEdit {background:transparent;border:0;border-radius:0;'
+        'color:#F7E9DD;font:13px "Georgia";padding:7px 0;}'
+        'QLineEdit:focus {background:transparent;border:0;color:#FFF4E7;}'
+    )
+    w.search.setPlaceholderText("Search the archive…")
     w.search.textChanged.connect(w.refresh)
-    layout.addWidget(w.search)
+    search_row.addWidget(w.search,1)
+    layout.addWidget(search_shell)
     controls=QHBoxLayout()
     controls.setSpacing(9)
     w.category=QComboBox()
