@@ -27,6 +27,18 @@ jobs:
           curl --fail --location --retry 3 "$source/OFL.txt" -o vendor/fonts/OFL.txt
           test "$(git hash-object vendor/fonts/DotGothic16-Regular.ttf)" = "844fc6373c3d5716eb9bde1d0663d8fffa4f8f06"
           test "$(git hash-object vendor/fonts/OFL.txt)" = "8a8f6546423f37d1306d76abedaa3c496b933c73"
+      - name: Fetch and verify OFL Cormorant Garamond for offline typography
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p vendor/fonts
+          source="https://raw.githubusercontent.com/google/fonts/main/ofl/cormorantgaramond"
+          curl --fail --location --retry 3 "$source/CormorantGaramond%5Bwght%5D.ttf" -o vendor/fonts/CormorantGaramond-Regular.ttf
+          curl --fail --location --retry 3 "$source/CormorantGaramond-Italic%5Bwght%5D.ttf" -o vendor/fonts/CormorantGaramond-Italic.ttf
+          curl --fail --location --retry 3 "$source/OFL.txt" -o vendor/fonts/OFL-CormorantGaramond.txt
+          test "$(git hash-object vendor/fonts/CormorantGaramond-Regular.ttf)" = "d992a83ce525c330fad3a19087746bcb2dc038ee"
+          test "$(git hash-object vendor/fonts/CormorantGaramond-Italic.ttf)" = "0d914e7663b7a1429d06ec60a5c5bb026031a2ef"
+          test "$(git hash-object vendor/fonts/OFL-CormorantGaramond.txt)" = "507d70f4565352dbfcf2dfc9b42eb092b57c0be"
       - name: Syntax checks
         run: python -m compileall -q clipmint tests
       - name: SQLite and offscreen Qt smoke tests
