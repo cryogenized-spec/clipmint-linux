@@ -1,17 +1,8 @@
-name: Build self-contained Linux Mint installer
+name: Build ClipMint v0.5 integration preview (manual only)
 on:
-  push:
-    branches: [main]
-    paths:
-      - "clipmint/**"
-      - "tests/**"
-      - "packaging/**"
-      - "launcher.py"
-      - "requirements.txt"
-      - ".github/workflows/build-linux.yml"
   workflow_dispatch:
 permissions:
-  contents: write
+  contents: read
 jobs:
   build:
     runs-on: ubuntu-24.04
@@ -25,7 +16,7 @@ jobs:
       - name: Install build tools on GitHub runner ONLY
         run: |
           sudo apt-get update
-          sudo apt-get install -y libegl1 libopengl0 libxcb-cursor0 libxkbcommon-x11-0 libxcb-icccm4 libxcb-shape0 libxcb-keysyms1 xvfb desktop-file-utils
+          sudo apt-get install -y libegl1 libopengl0 libxcb-cursor0 libxkbcommon-x11-0 libxcb-icccm4 libxcb-shape0 libxcb-keysyms1 xvfb desktop-file-utils tesseract-ocr tesseract-ocr-eng xdotool
           python -m pip install --disable-pip-version-check -r requirements.txt "pyinstaller==6.22.3"
       - name: Python syntax and clipboard database tests
         env:
@@ -62,6 +53,10 @@ jobs:
         run: |
           test -f /usr/lib/x86_64-linux-gnu/libxcb-cursor.so.0
           pyinstaller --noconfirm --clean --windowed --onedir --name ClipMint \
+            --hidden-import "_cffi_backend" \
+            --hidden-import "keyring.backends.SecretService" \
+            --collect-submodules "secretstorage" \
+            --collect-binaries "nacl" \
             --add-binary "vendor/ffmpeg:tools" \
             --add-data "vendor/fonts/DotGothic16-Regular.ttf:assets/fonts" \
             --add-data "clipmint/assets/crimson_maid.png:assets/manga" \
@@ -82,18 +77,17 @@ jobs:
           code=$?
           set -e
           if [[ "$code" -ne 124 ]]; then echo "Unexpected app exit status: $code"; exit 1; fi
-      - name: Create normal graphical Debian package
+      - name: Create isolated v0.5 preview Debian package
+        env:
+          CLIPMINT_VERSION: 0.5.0~main1
         run: bash packaging/build-deb.sh
-      - name: Verify and smoke-test INSTALLED field prototype
-        run: bash packaging/verify-field-package.sh dist-packages/clipmint_0.3.0_amd64.deb
+      - name: Verify and smoke-test draft installer (CI runner only)
+        env:
+          CLIPMINT_VERSION: 0.5.0~main1
+        run: bash packaging/verify-field-package.sh dist-packages/clipmint_0.5.0~main1_amd64.deb
       - uses: actions/upload-artifact@v4
         with:
-          name: ClipMint-LinuxMint-0.3.0
+          name: ClipMint-v0.5-main-integration-preview
           path: dist-packages/
           if-no-files-found: error
-          retention-days: 30
-      - name: Publish prerelease download
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release create "clipmint-v0.3.0-build-${GITHUB_RUN_NUMBER}" dist-packages/clipmint_0.3.0_amd64.deb dist-packages/SHA256SUMS --title "ClipMint v0.3.0 — Linux Mint installer (build ${GITHUB_RUN_NUMBER})" --notes "Preview for Linux Mint 22 Cinnamon X11 on x86-64. Download the .deb, double-click it in Nemo, and select Install Package. Bundled Qt/Python and FFmpeg; no other app or terminal is required to run ClipMint. CI validates the installed package and sample MP4/GIF under X11. Actual laptop capture still requires field tests. See docs/FIELD-PROTOTYPE.md." --prerelease
+          retention-days: 14
