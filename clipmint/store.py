@@ -51,6 +51,7 @@ class ClipStore:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.max_unpinned = max_unpinned
+        self.closed = False
         self.conn = sqlite3.connect(self.path)
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("""CREATE TABLE IF NOT EXISTS clips (
@@ -151,4 +152,6 @@ class ClipStore:
         self.conn.commit()
 
     def close(self) -> None:
-        self.conn.close()
+        if not self.closed:
+            self.conn.close()
+            self.closed = True

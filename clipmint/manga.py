@@ -37,30 +37,26 @@ class CrimsonMaidPortrait(QWidget):
         self.setToolTip("ClipMint character artwork / メイド")
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.setFixedSize(self.sizeHint())
+        self.setMinimumSize(180, 230)
 
     def sizeHint(self) -> QSize:
-        return QSize(160, 172)
+        return QSize(310, 440)
 
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
         if self.portrait.isNull():
-            painter.setPen(QColor("#F1F5F9"))
-            painter.drawText(
-                self.rect(), Qt.AlignmentFlag.AlignCenter, "ART UNAVAILABLE"
-            )
+            painter.setPen(QColor("#F4EEEB"))
+            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "ART UNAVAILABLE")
         else:
-            # Show face, hair, upper dress; crop vertically without stretching
-            # or changing the original asset. PNG alpha blends into the panel.
-            source_w = self.portrait.width()
-            source_h = min(
-                self.portrait.height(),
-                round(source_w * self.height() / max(self.width(), 1)),
+            # Approved v2 composition: show the entire original portrait.
+            # Never stretch, truncate its hair or apply a synthetic background.
+            content = self.rect().adjusted(0, 0, 0, 0)
+            image_size = self.portrait.size().scaled(
+                content.size(), Qt.AspectRatioMode.KeepAspectRatio
             )
-            painter.drawPixmap(
-                self.rect(),
-                self.portrait,
-                QRect(0, 0, source_w, source_h),
-            )
+            x = content.center().x() - image_size.width() // 2
+            y = content.top() + (content.height() - image_size.height()) // 2
+            destination = QRect(x, y, image_size.width(), image_size.height())
+            painter.drawPixmap(destination, self.portrait, self.portrait.rect())
         painter.end()
