@@ -38,7 +38,7 @@ def check_artwork(path: Path) -> bytes:
             "941x1672 PNG without cropping, recompression, or edits. "
             f"SHA256 received: {digest}"
         )
-    if not raw.startswith(b"\\x89PNG\\r\\n\\x1a\\n") or len(raw) < 26:
+    if not raw.startswith(b"\x89PNG\r\n\x1a\n") or len(raw) < 26:
         raise ValueError("Approved card is not a valid PNG")
     dimensions = struct.unpack(">II", raw[16:24])
     if dimensions != EXPECTED_DIMENSIONS:
