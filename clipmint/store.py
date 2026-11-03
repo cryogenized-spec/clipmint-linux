@@ -6,6 +6,7 @@ from pathlib import Path
 import os
 import re
 import sqlite3
+from .clipboard_formats import bundle_to_bytes, bundle_from_bytes
 
 DEFAULT_BINS = ("Work", "Personal", "Temporary")
 SORTS = {
@@ -28,6 +29,8 @@ class Clip:
 
 
 def classify(clip: Clip) -> str:
+    if clip.kind == "files":
+        return "Files"
     if clip.kind == "image":
         return "Images"
     text = clip.preview.strip()
@@ -56,8 +59,9 @@ class ClipStore:
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("""CREATE TABLE IF NOT EXISTS clips (
             id INTEGER PRIMARY KEY,
-            kind TEXT NOT NULL CHECK(kind IN ('text', 'image')),
+            kind TEXT NOT NULL CHECK(kind IN ('text', 'image', 'files')),
             content BLOB NOT NULL,
+            formats BLOB,
             preview TEXT NOT NULL,
             pinned INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
@@ -65,6 +69,8 @@ class ClipStore:
         )""")
         # Preserve old ClipMint histories. Existing records are assigned to Work.
         columns = {row[1] for row in self.conn.execute("PRAGMA table_info(clips)")}
+        if "formats" not in columns:
+            self.conn.execute("ALTER TABLE clips ADD COLUMN formats BLOB")
         if "bin" not in columns:
             self.conn.execute("ALTER TABLE clips ADD COLUMN bin TEXT NOT NULL DEFAULT 'Work'")
         self.conn.execute("""CREATE TABLE IF NOT EXISTS bins (
@@ -73,6 +79,36 @@ class ClipStore:
         )""")
         for index, name in enumerate(DEFAULT_BINS):
             self.conn.execute("INSERT OR IGNORE INTO bins(name,position) VALUES(?,?)", (name, index))
+        original_schema = self.conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='clips'"
+        ).fetchone()[0]
+        if "'files'" not in original_schema:
+            # Original v0.3 database CHECK only permitted text/images. Rebuild
+            # transactionally, retaining row IDs, timestamps, pins and bins.
+            # Any failure rolls the whole migration back rather than dropping
+            # or silently rewriting user history.
+            self.conn.execute("SAVEPOINT clipmint_mime_upgrade")
+            try:
+                self.conn.execute("""CREATE TABLE clips_mime_upgrade (
+                    id INTEGER PRIMARY KEY,
+                    kind TEXT NOT NULL CHECK(kind IN ('text','image','files')),
+                    content BLOB NOT NULL, formats BLOB, preview TEXT NOT NULL,
+                    pinned INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL DEFAULT
+                      (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                    bin TEXT NOT NULL DEFAULT 'Work'
+                )""")
+                self.conn.execute("""INSERT INTO clips_mime_upgrade
+                    (id,kind,content,formats,preview,pinned,created_at,bin)
+                    SELECT id,kind,content,formats,preview,pinned,created_at,bin
+                    FROM clips""")
+                self.conn.execute("DROP TABLE clips")
+                self.conn.execute("ALTER TABLE clips_mime_upgrade RENAME TO clips")
+                self.conn.execute("RELEASE SAVEPOINT clipmint_mime_upgrade")
+            except Exception:
+                self.conn.execute("ROLLBACK TO SAVEPOINT clipmint_mime_upgrade")
+                self.conn.execute("RELEASE SAVEPOINT clipmint_mime_upgrade")
+                raise
         self.conn.execute("CREATE INDEX IF NOT EXISTS idx_clips_bin_id ON clips(bin,id)")
         self.conn.commit()
 
@@ -86,21 +122,24 @@ class ClipStore:
         self.conn.execute("INSERT INTO bins(name,position) VALUES(?,COALESCE((SELECT MAX(position)+1 FROM bins),0))", (name,))
         self.conn.commit()
 
-    def add(self, kind: str, content: bytes, preview: str, bin_name: str = "Work") -> int | None:
-        if kind not in ("text", "image"):
+    def add(self, kind: str, content: bytes, preview: str, bin_name: str = "Work",
+            formats: dict[str, bytes] | None = None) -> int | None:
+        if kind not in ("text", "image", "files"):
             raise ValueError("Unsupported clipboard type")
         if bin_name not in self.bins():
             raise ValueError("Unknown accumulation bin")
         if not content:
             return None
+        packed = bundle_to_bytes(formats) if formats else None
         newest = self.conn.execute(
-            "SELECT id,kind,content FROM clips WHERE bin=? ORDER BY id DESC LIMIT 1", (bin_name,)
+            "SELECT id,kind,content,formats FROM clips WHERE bin=? ORDER BY id DESC LIMIT 1", (bin_name,)
         ).fetchone()
-        if newest and newest[1] == kind and newest[2] == content:
+        if newest and newest[1] == kind and newest[2] == content and newest[3] == packed:
             return newest[0]
         cursor = self.conn.execute(
-            "INSERT INTO clips(kind,content,preview,bin) VALUES(?,?,?,?)",
-            (kind, sqlite3.Binary(content), preview[:600], bin_name)
+            "INSERT INTO clips(kind,content,preview,bin,formats) VALUES(?,?,?,?,?)",
+            (kind, sqlite3.Binary(content), preview[:600], bin_name,
+             sqlite3.Binary(packed) if packed is not None else None)
         )
         # Each bin retains its own pinned items and most recent unpinned items.
         self.conn.execute("""DELETE FROM clips WHERE bin=? AND pinned=0 AND id NOT IN
@@ -138,6 +177,10 @@ class ClipStore:
     def get(self, clip_id: int) -> tuple[str, bytes] | None:
         row = self.conn.execute("SELECT kind,content FROM clips WHERE id=?", (clip_id,)).fetchone()
         return (row[0], bytes(row[1])) if row else None
+
+    def get_formats(self, clip_id: int) -> dict[str, bytes]:
+        row = self.conn.execute("SELECT formats FROM clips WHERE id=?", (clip_id,)).fetchone()
+        return bundle_from_bytes(bytes(row[0]) if row and row[0] is not None else None)
 
     def pin(self, clip_id: int, enabled: bool) -> None:
         self.conn.execute("UPDATE clips SET pinned=? WHERE id=?", (int(enabled), clip_id))

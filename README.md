@@ -115,3 +115,71 @@ security review, real laptop acceptance and frozen-package tests pass.
 
 All vault tests use fake data. The app does not upload vault data or collect
 secrets automatically from clipboard history.
+
+
+## v0.5 review — keyboard, rich MIME, OCR, privacy (draft PR #10)
+
+**Not a final release.** The GitHub source branch provides a native PySide6
+quick-search popup, a best-effort local clipboard privacy filter, support for
+plain text + HTML + PNG + Nemo file URI/cut data, and offline Tesseract OCR.
+
+### Keyboard popup on Linux Mint Cinnamon X11
+
+ClipMint runs as one instance with a local Unix socket. Launch
+\`/opt/clipmint/ClipMint --toggle\` while it is running to summon the search
+popup near the pointer. Within the popup type a fuzzy search, use arrow keys,
+press Enter to paste the selected item or Ctrl+Shift+Enter to paste plain text.
+Escape closes the popup. Other invocations signal the existing process; they
+do not create another watcher. In Settings → Quick access, use **Register
+shortcut in Cinnamon** to explicitly create a NEW custom Cinnamon binding
+(default Ctrl+Alt+V). Conflicts with existing custom bindings are rejected
+rather than overwritten. Standard Cinnamon bindings may still conflict; check
+the native Keyboard settings if the hotkey does not fire. A copy-only fallback
+remains available if xdotool cannot target the original X11 window.
+
+The popup's automatic paste is **user-initiated**, following Enter, not a
+blind background action. Terminal classes have a best-effort Ctrl+Shift+V
+heuristic. X11 permissions do not provide safe source-app attribution, and
+the popup does not claim to know whether the target field is sensitive.
+
+### Capture types and privacy
+
+ClipMint retains a **bounded MIME subset**, including text/plain, text/html,
+PNG, text/uri-list and x-special/gnome-copied-files (the Nemo cut/copy format).
+It round-trips these formats when copying an item from history. Old clipboard
+entries continue to work without saved MIME bundles. Unsupported formats do
+not become executable data. PRIMARY highlight selection remains OFF.
+
+Concealed x-kde-passwordManagerHint=secret items and recognized password
+manager-specific MIME targets are discarded before capture. Plain text
+containing common credentials and Luhn-valid card numbers is excluded with
+conservative pattern matching. Active-window exclusion is configurable, but
+**cannot reliably prove clipboard origin on X11**, so it is not a guarantee.
+
+**Encrypted clipboard history is optional, not automatically migrated.**
+Settings → Clipboard privacy → Encrypt history initiates a separate,
+user-approved migration. Entry bytes, saved HTML/file formats and searchable
+preview text are authenticated-encrypted with libsodium; the random key is
+stored in the desktop Secret Service keyring. History metadata such as time,
+type, bin, count and pinned state remains visible. The old plaintext SQLite
+history stays untouched as a recovery copy; users need to manage deletion
+or backups of it themselves. If a previously enabled secure history key is
+unavailable, automatic capture is disabled rather than falling back to
+unencrypted history. This is not a security audit or a substitute for a
+dedicated password manager.
+
+### Screenshot and image OCR
+
+Right-click any PNG image in the clipboard history and choose **OCR · Extract
+text from image**. The screenshots library also offers OCR on right-click;
+after taking a screenshot, the confirmation notice offers an OCR button too.
+ClipMint sends PNG bytes directly to local Tesseract via stdin in a Qt worker
+thread, without uploading images to a remote service or saving temp images.
+Recognized text goes immediately into the **system clipboard**; if monitoring
+is active and the text passes the sensitive-data filter, it is additionally
+saved as a new text entry. Empty OCR results are reported, not saved.
+
+The preview .deb requires \`tesseract-ocr\`, English trained data and
+\`xdotool\` in addition to ClipMint's built-in Qt libraries. Language support
+is English for this first version. Test with captured receipts and screenshot
+text on the actual Mint/Cinnamon X11 desktop before relying on it.
