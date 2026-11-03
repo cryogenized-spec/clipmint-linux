@@ -61,12 +61,16 @@ QTabBar::tab:selected {
 }
 QTabBar::tab:hover:!selected {background:#392734;color:#FFF1E3;}
 QPushButton#addBin {color:#FF7998;background:transparent;border:0;font:25px "Georgia";padding:2px 8px;}
-QLineEdit#archiveSearch {
+QFrame#archiveSearchCapsule {
     background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #2A202C,stop:1 #231B27);
-    color:#F8E9DD;border:1px solid #9C6274;border-radius:20px;
-    padding:10px 15px;selection-background-color:#74405B;font:12px "Georgia";
+    border:1px solid #9C6274;border-radius:20px;min-height:37px;
 }
-QLineEdit#archiveSearch:focus {border:2px solid #E7B18F;}
+QLabel#archiveSearchGlyph {color:#E5C4B5;font:20px "Georgia";}
+QLineEdit#archiveSearch {
+    color:#F8E9DD;background:transparent;border:0;border-radius:0;
+    padding:7px 0;selection-background-color:#74405B;font:13px "Georgia";
+}
+QLineEdit#archiveSearch:focus {border:0;color:#FFECDF;}
 QLabel#filterLabel {color:#D1B6BC;font:11px "DejaVu Sans Mono";}
 QComboBox {
     color:#F5E7DE;background:#2B212D;border:1px solid #8B5664;
