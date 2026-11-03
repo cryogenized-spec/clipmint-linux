@@ -94,6 +94,22 @@ QPushButton:focus, QToolButton:focus, QComboBox:focus {border:1px solid #C9F473;
 """
 
 
+class GothicSearchCapsule(QFrame):
+    """Rounded painted search shell independent of native X11 QLineEdit styles."""
+
+    def paintEvent(self, event):
+        p=QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        r=self.rect().adjusted(1,1,-1,-1)
+        fill=QLinearGradient(0,0,self.width(),self.height())
+        fill.setColorAt(0,QColor("#2B202D"))
+        fill.setColorAt(1,QColor("#211925"))
+        p.setPen(QPen(QColor("#985F70"),1.2))
+        p.setBrush(QBrush(fill))
+        p.drawRoundedRect(r, min(21,r.height()/2), min(21,r.height()/2))
+        p.end()
+
+
 class GothicDivider(QWidget):
     """Subtle line with a central bookplate diamond, matching the reference."""
 
@@ -613,7 +629,7 @@ def build_archive_page(w):
     layout.addLayout(bin_row)
     # Draw the search outline on a real QFrame. Qt can otherwise ignore a
     # QLineEdit's border radius on some X11 themes and render a square box.
-    search_shell=QFrame()
+    search_shell=GothicSearchCapsule()
     search_shell.setObjectName("archiveSearchCapsule")
     search_row=QHBoxLayout(search_shell)
     search_row.setContentsMargins(12,1,10,1)
@@ -623,6 +639,11 @@ def build_archive_page(w):
     search_row.addWidget(glyph)
     w.search=QLineEdit()
     w.search.setObjectName("archiveSearch")
+    w.search.setStyleSheet(
+        'QLineEdit {background:transparent;border:0;border-radius:0;'
+        'color:#F7E9DD;font:13px "Georgia";padding:7px 0;}'
+        'QLineEdit:focus {background:transparent;border:0;color:#FFF4E7;}'
+    )
     w.search.setPlaceholderText("Search the archive…")
     w.search.textChanged.connect(w.refresh)
     search_row.addWidget(w.search,1)
