@@ -1,5 +1,12 @@
-name: Build ClipMint v0.5 integration preview (manual only)
+name: Build ClipMint v0.5 integration preview (no auto release)
 on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "clipmint/**"
+      - "tests/**"
+      - "packaging/**"
+      - ".github/workflows/build-linux.yml"
   workflow_dispatch:
 permissions:
   contents: read
