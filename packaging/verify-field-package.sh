@@ -16,6 +16,10 @@ dpkg-deb --extract "$pkg" "$tmp/unpacked"
 dpkg-deb --control "$pkg" "$tmp/control"
 test -x "$tmp/unpacked/opt/clipmint/ClipMint"
 test -x "$tmp/unpacked/opt/clipmint/_internal/tools/ffmpeg"
+for name in CormorantGaramond-Regular.ttf CormorantGaramond-Italic.ttf; do
+  test -f "$tmp/unpacked/opt/clipmint/_internal/assets/fonts/$name"
+done
+test -f "$tmp/unpacked/usr/share/doc/clipmint/OFL-CormorantGaramond.txt"
 test -f "$tmp/unpacked/usr/share/icons/hicolor/scalable/apps/clipmint.svg"
 desktop="$tmp/unpacked/usr/share/applications/clipmint.desktop"
 desktop-file-validate "$desktop"
