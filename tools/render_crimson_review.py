@@ -1,4 +1,4 @@
-"""Actual Qt Kohaku Gothic Archive screenshots using the approved, packaged card.
+"""Real Qt screenshots of the Crimson Archive layout for comparison with v2 HTML.
 
 This is test-only synthetic data. It never touches the user's clipboard history.
 """
@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from hashlib import sha256
 import sys
 from tempfile import TemporaryDirectory
 
@@ -13,6 +14,7 @@ from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QTimer
 from PySide6.QtGui import QColor, QImage, QPainter, QPen
 from PySide6.QtWidgets import QApplication
 from clipmint.app import ClipMintWindow
+from clipmint.organizer_ui import TemplatesDialog
 
 
 def sample_image() -> bytes:
@@ -44,9 +46,19 @@ def main():
         app=QApplication([])
         app.setQuitOnLastWindowClosed(False)
         window=ClipMintWindow()
-        if not window.manga_dock.has_card_art:
-            raise RuntimeError("Approved Kohaku card missing: screenshot would show fallback art")
+        card = window.manga_dock.asset_path
+        if not window.manga_dock.has_card_art or card is None:
+            raise RuntimeError("Approved Kohaku card missing: no fallback artwork accepted")
+        if sha256(Path(card).read_bytes()).hexdigest() != "585800ce776353d84a9d60e798ff591d06b580f95be0943a46ae67c1c107817a":
+            raise RuntimeError("Kohaku card does not match approved artwork")
         window.monitoring=False
+        report_id=window.store.add(
+            "text", b"Inspection report: detailed bench record with a special "
+                    b"torque wrench calibration diagnostic in the complete body",
+            "Workshop inspection summary"
+        )
+        window.store.favorite(report_id, True)
+        window.store.set_tags(report_id, ["workshop", "priority"])
         window.store.add("text",b"Inspection notes - workshop","Inspection notes - workshop")
         window.store.add("text",b"https://example.org/clipmint","https://example.org/clipmint")
         window.store.add("text",b"sudo apt update && sudo apt upgrade","sudo apt update && sudo apt upgrade")
@@ -56,8 +68,8 @@ def main():
 
         def capture():
             for width,height,name in [
-                (1500,920,"kohaku-qt-desktop.png"),
-                (1100,880,"kohaku-qt-laptop.png")
+                (1500,920,"crimson-qt-desktop.png"),
+                (1100,880,"crimson-qt-laptop.png")
             ]:
                 window.resize(width,height)
                 window.show()
@@ -74,6 +86,36 @@ def main():
                 if result.isNull() or not result.save(str(output),"PNG"):
                     raise RuntimeError("Unable to render "+str(output))
                 print(f"Capture {output}: {result.width()}x{result.height()}",flush=True)
+            # Prove an FTS-only body match works through real Qt controls,
+            # with tag and favourite filtering rather than a static mockup.
+            window.resize(1500,920)
+            window.search.setText("torque wrench")
+            window.sort_combo.setCurrentIndex(
+                window.sort_combo.findData("Best match")
+            )
+            window.favorites_filter.setChecked(True)
+            tag_index=window.tag_filter.findData("workshop")
+            assert tag_index >= 0
+            window.tag_filter.setCurrentIndex(tag_index)
+            app.processEvents()
+            assert window.history.count()==1, "Indexed body search did not reach GUI"
+            window.history.setCurrentRow(0)
+            app.processEvents()
+            target=destination/"kohaku-qt-indexed-search.png"
+            assert window.grab().save(str(target),"PNG")
+            print(f"Capture {target}: full-text + tags + favourites",flush=True)
+
+            # Render the actual editor, not a flattened template screenshot.
+            window.store.save_template("Customer follow-up",
+                "Hello {{customer}}, your repair is ready for collection.")
+            dlg=TemplatesDialog(window.store, lambda _: None, window)
+            dlg.reload(selected=window.store.templates()[0][0])
+            dlg.show()
+            app.processEvents()
+            target=destination/"kohaku-qt-snippets.png"
+            assert dlg.grab().save(str(target),"PNG")
+            print(f"Capture {target}: live reusable snippets editor",flush=True)
+            dlg.close()
             window.monitoring=False
             app.exit(0)
 

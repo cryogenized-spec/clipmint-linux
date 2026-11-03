@@ -139,11 +139,25 @@ class QuickPopup(QWidget):
         text = self.search.text()
         available = []
         for bin_name in self.store.bins():
+            # Merge full-body FTS hits with the original fuzzy preview search.
+            # Typo-tolerant search must keep working when FTS finds no terms.
+            indexed = self.store.search(
+                text, bin_name, sort="Best match"
+            ) if text else []
+            seen = set()
+            for clip in indexed:
+                seen.add(clip.id)
+                score = max(70, fuzzy_score(text, clip.preview))
+                available.append((score + (5 if clip.pinned else 0)
+                                  + (4 if clip.favorite else 0), clip))
             for clip in self.store.search("", bin_name):
+                if clip.id in seen:
+                    continue
                 score = fuzzy_score(text, clip.preview)
                 if text and score < 45:
                     continue
-                available.append((score + (5 if clip.pinned else 0), clip))
+                available.append((score + (5 if clip.pinned else 0)
+                                  + (4 if clip.favorite else 0), clip))
         available.sort(key=lambda x: (-x[0], -x[1].id))
         self.items.clear()
         for _score, clip in available[:65]:

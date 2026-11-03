@@ -1,5 +1,12 @@
-name: Kohaku Gothic Archive native Qt visual review
+name: Crimson Archive native visual review
 on:
+  push:
+    branches: [feat/crimson-archive-native-ui, feat/v04-kohaku-gothic-archive]
+    paths:
+      - "clipmint/**"
+      - "tools/render_crimson_review.py"
+      - "tests/**"
+      - ".github/workflows/crimson-native-review.yml"
   pull_request:
     paths:
       - "clipmint/**"
@@ -8,7 +15,7 @@ on:
       - ".github/workflows/crimson-native-review.yml"
   workflow_dispatch:
 permissions:
-  contents: read
+  contents: write
 jobs:
   capture:
     runs-on: ubuntu-24.04
@@ -17,15 +24,16 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Verify exact approved Kohaku card
-        run: |
-          test -f clipmint/assets/kohaku_card.png
-          echo "585800ce776353d84a9d60e798ff591d06b580f95be0943a46ae67c1c107817a  clipmint/assets/kohaku_card.png" | sha256sum --check
       - name: Install runner-only Qt runtime
         run: |
           sudo apt-get update
           sudo apt-get install -y xvfb libegl1 libopengl0 libxcb-cursor0 libxkbcommon-x11-0 libxcb-icccm4 libxcb-shape0 libxcb-keysyms1
           python -m pip install -r requirements.txt
+      - name: Verify exact Kohaku full-body card
+        run: |
+          set -euo pipefail
+          test -f clipmint/assets/kohaku_card.png
+          echo "585800ce776353d84a9d60e798ff591d06b580f95be0943a46ae67c1c107817a  clipmint/assets/kohaku_card.png" | sha256sum --check
       - name: Fetch verified offline display font
         shell: bash
         run: |
@@ -33,6 +41,18 @@ jobs:
           mkdir -p vendor/fonts
           curl -fLsS --retry 3 https://raw.githubusercontent.com/google/fonts/main/ofl/dotgothic16/DotGothic16-Regular.ttf -o vendor/fonts/DotGothic16-Regular.ttf
           test "$(git hash-object vendor/fonts/DotGothic16-Regular.ttf)" = "844fc6373c3d5716eb9bde1d0663d8fffa4f8f06"
+      - name: Fetch and verify OFL Cormorant Garamond for offline typography
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p vendor/fonts
+          source="https://raw.githubusercontent.com/google/fonts/main/ofl/cormorantgaramond"
+          curl --fail --location --retry 3 "$source/CormorantGaramond%5Bwght%5D.ttf" -o vendor/fonts/CormorantGaramond-Regular.ttf
+          curl --fail --location --retry 3 "$source/CormorantGaramond-Italic%5Bwght%5D.ttf" -o vendor/fonts/CormorantGaramond-Italic.ttf
+          curl --fail --location --retry 3 "$source/OFL.txt" -o vendor/fonts/OFL-CormorantGaramond.txt
+          test "$(git hash-object vendor/fonts/CormorantGaramond-Regular.ttf)" = "d992a83ce525c330fad3a19087746bcb2dc038ee"
+          test "$(git hash-object vendor/fonts/CormorantGaramond-Italic.ttf)" = "0d914e7663b7a1429d06ec60a5c5bb026031a2ef"
+          test "$(git hash-object vendor/fonts/OFL-CormorantGaramond.txt)" = "507d70f4565352dbfcf2dfc9b42eb092b57c0be8"
       - name: Capture actual Qt UI at laptop and desktop sizes
         env:
           XDG_SESSION_TYPE: x11
@@ -42,6 +62,6 @@ jobs:
           file docs/native-review/*.png
       - uses: actions/upload-artifact@v4
         with:
-          name: Kohaku-Approved-Card-native-Qt-screenshots
-          path: docs/native-review/kohaku-qt-*.png
+          name: Kohaku-Gothic-native-Qt-screenshots
+          path: docs/native-review/*.png
           retention-days: 14

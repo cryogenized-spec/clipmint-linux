@@ -1,5 +1,12 @@
-name: Build ClipMint v0.5 integration preview (manual only)
+name: Build ClipMint v0.6 integration preview (no auto release)
 on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "clipmint/**"
+      - "tests/**"
+      - "packaging/**"
+      - ".github/workflows/build-linux.yml"
   workflow_dispatch:
 permissions:
   contents: read
@@ -13,8 +20,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Verify the approved Kohaku artwork before building
+      - name: Verify exact Kohaku full-body card
         run: |
+          set -euo pipefail
           test -f clipmint/assets/kohaku_card.png
           echo "585800ce776353d84a9d60e798ff591d06b580f95be0943a46ae67c1c107817a  clipmint/assets/kohaku_card.png" | sha256sum --check
       - name: Install build tools on GitHub runner ONLY
@@ -53,6 +61,18 @@ jobs:
           curl --fail --location --retry 3 "$source/OFL.txt" -o vendor/fonts/OFL.txt
           test "$(git hash-object vendor/fonts/DotGothic16-Regular.ttf)" = "844fc6373c3d5716eb9bde1d0663d8fffa4f8f06"
           test "$(git hash-object vendor/fonts/OFL.txt)" = "8a8f6546423f37d1306d76abedaa3c496b933c73"
+      - name: Fetch and verify OFL Cormorant Garamond for offline typography
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p vendor/fonts
+          source="https://raw.githubusercontent.com/google/fonts/main/ofl/cormorantgaramond"
+          curl --fail --location --retry 3 "$source/CormorantGaramond%5Bwght%5D.ttf" -o vendor/fonts/CormorantGaramond-Regular.ttf
+          curl --fail --location --retry 3 "$source/CormorantGaramond-Italic%5Bwght%5D.ttf" -o vendor/fonts/CormorantGaramond-Italic.ttf
+          curl --fail --location --retry 3 "$source/OFL.txt" -o vendor/fonts/OFL-CormorantGaramond.txt
+          test "$(git hash-object vendor/fonts/CormorantGaramond-Regular.ttf)" = "d992a83ce525c330fad3a19087746bcb2dc038ee"
+          test "$(git hash-object vendor/fonts/CormorantGaramond-Italic.ttf)" = "0d914e7663b7a1429d06ec60a5c5bb026031a2ef"
+          test "$(git hash-object vendor/fonts/OFL-CormorantGaramond.txt)" = "507d70f4565352dbfcf2dfc9b42eb092b57c0be8"
       - name: Freeze Python Qt application
         run: |
           test -f /usr/lib/x86_64-linux-gnu/libxcb-cursor.so.0
@@ -63,6 +83,8 @@ jobs:
             --collect-binaries "nacl" \
             --add-binary "vendor/ffmpeg:tools" \
             --add-data "vendor/fonts/DotGothic16-Regular.ttf:assets/fonts" \
+            --add-data "vendor/fonts/CormorantGaramond-Regular.ttf:assets/fonts" \
+            --add-data "vendor/fonts/CormorantGaramond-Italic.ttf:assets/fonts" \
             --add-data "clipmint/assets/crimson_maid.png:assets/manga" \
             --add-data "clipmint/assets/kohaku_card.png:assets/manga" \
             --add-binary "/usr/lib/x86_64-linux-gnu/libxcb-cursor.so.0:." \
@@ -71,6 +93,8 @@ jobs:
           test -x dist/ClipMint/ClipMint
           test -x dist/ClipMint/_internal/tools/ffmpeg
           test -f dist/ClipMint/_internal/assets/fonts/DotGothic16-Regular.ttf
+          test -f dist/ClipMint/_internal/assets/fonts/CormorantGaramond-Regular.ttf
+          test -f dist/ClipMint/_internal/assets/fonts/CormorantGaramond-Italic.ttf
           test -f dist/ClipMint/_internal/assets/manga/crimson_maid.png
           test -f dist/ClipMint/_internal/assets/manga/kohaku_card.png
       - name: Test executable starts with virtual X11 display
@@ -83,28 +107,17 @@ jobs:
           code=$?
           set -e
           if [[ "$code" -ne 124 ]]; then echo "Unexpected app exit status: $code"; exit 1; fi
-      - name: Capture native Kohaku UI with test-only clipboard data
+      - name: Create isolated v0.6 preview Debian package
         env:
-          QT_QPA_PLATFORM: xcb
-        run: |
-          xvfb-run -a -s "-screen 0 1680x1050x24" python -m tools.render_crimson_review docs/native-review
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ClipMint-v0.5-Kohaku-Qt-screenshots
-          path: docs/native-review/kohaku-qt-*.png
-          if-no-files-found: error
-          retention-days: 14
-      - name: Create isolated v0.5 preview Debian package
-        env:
-          CLIPMINT_VERSION: 0.5.0~main1
+          CLIPMINT_VERSION: 0.6.0~preview1
         run: bash packaging/build-deb.sh
       - name: Verify and smoke-test draft installer (CI runner only)
         env:
-          CLIPMINT_VERSION: 0.5.0~main1
-        run: bash packaging/verify-field-package.sh dist-packages/clipmint_0.5.0~main1_amd64.deb
+          CLIPMINT_VERSION: 0.6.0~preview1
+        run: bash packaging/verify-field-package.sh dist-packages/clipmint_0.6.0~preview1_amd64.deb
       - uses: actions/upload-artifact@v4
         with:
-          name: ClipMint-v0.5-main-integration-preview
+          name: ClipMint-v0.6-main-integration-preview
           path: dist-packages/
           if-no-files-found: error
           retention-days: 14
