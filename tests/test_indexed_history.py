@@ -28,6 +28,12 @@ class IndexedHistoryTests(unittest.TestCase):
         self.assertEqual(self.db.search("metallurgy", "Personal"), [])
         self.assertIn("FTS5", self.db.index_status())
 
+    def test_ranked_fts_is_scoped_to_selected_archive_bin(self):
+        work = self.db.add("text", b"lucid beacons in full text", "Work note")
+        personal = self.db.add("text", b"lucid beacons in full text", "Personal note", "Personal")
+        self.assertEqual([c.id for c in self.db.search("lucid", "Work", "Best match")], [work])
+        self.assertEqual([c.id for c in self.db.search("lucid", "Personal", "Best match")], [personal])
+
     def test_literal_specials_fts_grammar_never_executable(self):
         self.db.add("text", b"A_1%27", "A_1%27")
         self.db.add("text", b"other", "other")
