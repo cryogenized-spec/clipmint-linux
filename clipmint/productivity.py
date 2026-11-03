@@ -64,10 +64,15 @@ def transform_text(text: str, operation: str) -> str:
         result = text.lower()
     elif operation == "Title case":
         result = text.title()
-    elif operation == "Format JSON":
-        result = json.dumps(json.loads(text), ensure_ascii=False, indent=2)
-    elif operation == "Compact JSON":
-        result = json.dumps(json.loads(text), ensure_ascii=False, separators=(",", ":"))
+    elif operation in ("Format JSON", "Compact JSON"):
+        try:
+            parsed = json.loads(text)
+            if operation == "Format JSON":
+                result = json.dumps(parsed, ensure_ascii=False, indent=2)
+            else:
+                result = json.dumps(parsed, ensure_ascii=False, separators=(",", ":"))
+        except (ValueError, RecursionError, OverflowError) as exc:
+            raise ValueError("Invalid or excessively nested JSON") from exc
     elif operation == "URL encode":
         result = quote(text, safe="")
     elif operation == "URL decode":
