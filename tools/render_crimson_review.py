@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from hashlib import sha256
 import sys
 from tempfile import TemporaryDirectory
 
@@ -45,6 +46,11 @@ def main():
         app=QApplication([])
         app.setQuitOnLastWindowClosed(False)
         window=ClipMintWindow()
+        card = window.manga_dock.asset_path
+        if not window.manga_dock.has_card_art or card is None:
+            raise RuntimeError("Approved Kohaku card missing: no fallback artwork accepted")
+        if sha256(Path(card).read_bytes()).hexdigest() != "585800ce776353d84a9d60e798ff591d06b580f95be0943a46ae67c1c107817a":
+            raise RuntimeError("Kohaku card does not match approved artwork")
         window.monitoring=False
         report_id=window.store.add(
             "text", b"Inspection report: detailed bench record with a special "

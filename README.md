@@ -260,3 +260,18 @@ files intact. The UI and integration tests run on headless Qt/Xvfb; you must
 still confirm real Cinnamon/X11 search, history migration, keyboard paste,
 Nemo and LibreOffice clipboard formats, screen capture and templates on the
 HP OMEN before treating the preview as a daily-driver release.
+
+
+## The approved full-body Kohaku character card (PR #11)
+
+The approved original is `clipmint/assets/kohaku_card.png` (941 × 1672 pixels;
+2,341,345 bytes; SHA-256 `585800ce776353d84a9d60e798ff591d06b580f95be0943a46ae67c1c107817a`). The full floral
+frame and all Japanese, romaji, and English captions are part of this image.
+The native Qt card preserves its aspect ratio without cropping or redrawing.
+Builds, screenshots, and installer verification deliberately fail if it is
+missing, altered, or substituted. The v0.6 indexed search, OCR, tags,
+favourites, snippets, transforms, and controlled paste queue are preserved.
+
+Before merging this PR, upload the exact original PNG at that path and
+confirm all three checks are green. The release remains a development preview
+until actual Cinnamon/X11 field acceptance and security review are complete.

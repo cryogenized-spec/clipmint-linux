@@ -29,6 +29,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y xvfb libegl1 libopengl0 libxcb-cursor0 libxkbcommon-x11-0 libxcb-icccm4 libxcb-shape0 libxcb-keysyms1
           python -m pip install -r requirements.txt
+      - name: Verify exact Kohaku full-body card
+        run: |
+          set -euo pipefail
+          test -f clipmint/assets/kohaku_card.png
+          echo "585800ce776353d84a9d60e798ff591d06b580f95be0943a46ae67c1c107817a  clipmint/assets/kohaku_card.png" | sha256sum --check
       - name: Fetch verified offline display font
         shell: bash
         run: |

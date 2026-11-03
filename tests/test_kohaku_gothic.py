@@ -1,5 +1,6 @@
 """Kohaku archive layout, full-body asset override, and preserved working pages."""
 import os
+from hashlib import sha256
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
@@ -17,6 +18,16 @@ class KohakuGothicTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.app = QApplication.instance() or QApplication([])
+
+    def test_exact_approved_kohaku_character_card(self):
+        path = Path(__file__).resolve().parents[1] / "clipmint" / "assets" / "kohaku_card.png"
+        self.assertTrue(path.is_file(), "Approved full-body Kohaku card not committed")
+        contents = path.read_bytes()
+        self.assertEqual(len(contents), 2341345)
+        self.assertEqual(sha256(contents).hexdigest(), "585800ce776353d84a9d60e798ff591d06b580f95be0943a46ae67c1c107817a")
+        illustration = QImage(str(path))
+        self.assertFalse(illustration.isNull())
+        self.assertEqual((illustration.width(), illustration.height()), (941, 1672))
 
     def test_fullbody_art_preferred_and_not_stretched(self):
         with TemporaryDirectory() as root:

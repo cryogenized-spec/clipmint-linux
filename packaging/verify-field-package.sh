@@ -15,6 +15,8 @@ done
 dpkg-deb --extract "$pkg" "$tmp/unpacked"
 dpkg-deb --control "$pkg" "$tmp/control"
 test -x "$tmp/unpacked/opt/clipmint/ClipMint"
+test -f "$tmp/unpacked/opt/clipmint/_internal/assets/manga/kohaku_card.png"
+echo "585800ce776353d84a9d60e798ff591d06b580f95be0943a46ae67c1c107817a  $tmp/unpacked/opt/clipmint/_internal/assets/manga/kohaku_card.png" | sha256sum --check
 test -x "$tmp/unpacked/opt/clipmint/_internal/tools/ffmpeg"
 for name in CormorantGaramond-Regular.ttf CormorantGaramond-Italic.ttf; do
   test -f "$tmp/unpacked/opt/clipmint/_internal/assets/fonts/$name"

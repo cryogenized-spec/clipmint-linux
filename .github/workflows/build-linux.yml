@@ -20,6 +20,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Verify exact Kohaku full-body card
+        run: |
+          set -euo pipefail
+          test -f clipmint/assets/kohaku_card.png
+          echo "585800ce776353d84a9d60e798ff591d06b580f95be0943a46ae67c1c107817a  clipmint/assets/kohaku_card.png" | sha256sum --check
       - name: Install build tools on GitHub runner ONLY
         run: |
           sudo apt-get update
@@ -81,6 +86,7 @@ jobs:
             --add-data "vendor/fonts/CormorantGaramond-Regular.ttf:assets/fonts" \
             --add-data "vendor/fonts/CormorantGaramond-Italic.ttf:assets/fonts" \
             --add-data "clipmint/assets/crimson_maid.png:assets/manga" \
+            --add-data "clipmint/assets/kohaku_card.png:assets/manga" \
             --add-binary "/usr/lib/x86_64-linux-gnu/libxcb-cursor.so.0:." \
             launcher.py
           ldd dist/ClipMint/_internal/PySide6/Qt/plugins/platforms/libqxcb.so || true
@@ -90,6 +96,7 @@ jobs:
           test -f dist/ClipMint/_internal/assets/fonts/CormorantGaramond-Regular.ttf
           test -f dist/ClipMint/_internal/assets/fonts/CormorantGaramond-Italic.ttf
           test -f dist/ClipMint/_internal/assets/manga/crimson_maid.png
+          test -f dist/ClipMint/_internal/assets/manga/kohaku_card.png
       - name: Test executable starts with virtual X11 display
         shell: bash
         env:
