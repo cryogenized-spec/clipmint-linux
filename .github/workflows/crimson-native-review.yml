@@ -47,7 +47,7 @@ jobs:
           curl --fail --location --retry 3 "$source/OFL.txt" -o vendor/fonts/OFL-CormorantGaramond.txt
           test "$(git hash-object vendor/fonts/CormorantGaramond-Regular.ttf)" = "d992a83ce525c330fad3a19087746bcb2dc038ee"
           test "$(git hash-object vendor/fonts/CormorantGaramond-Italic.ttf)" = "0d914e7663b7a1429d06ec60a5c5bb026031a2ef"
-          test "$(git hash-object vendor/fonts/OFL-CormorantGaramond.txt)" = "507d70f4565352dbfcf2dfc9b42eb092b57c0be"
+          test "$(git hash-object vendor/fonts/OFL-CormorantGaramond.txt)" = "507d70f4565352dbfcf2dfc9b42eb092b57c0be8"
       - name: Capture actual Qt UI at laptop and desktop sizes
         env:
           XDG_SESSION_TYPE: x11
