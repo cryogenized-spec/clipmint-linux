@@ -18,6 +18,8 @@ from PySide6.QtWidgets import (
 )
 
 from .manga import CrimsonMaidPortrait
+from .kohaku_card import KohakuCardFrame
+from .kohaku_theme import KOHaku_QSS
 
 ROSE = "#FF6780"
 LIME = "#C9F473"
@@ -191,21 +193,24 @@ class CrimsonClipDelegate(QStyledItemDelegate):
 
     def paint(self, painter, option, index):
         painter.save()
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         r = option.rect.adjusted(0, 0, -1, -1)
         active = bool(option.state & QStyle.StateFlag.State_Selected)
         hover = bool(option.state & QStyle.StateFlag.State_MouseOver)
-        painter.fillRect(r, QColor("#432330" if active else "#30202B" if hover else "#111017"))
-        painter.setPen(QPen(QColor("#FF6780" if active else "#372A34"), 1))
-        painter.drawLine(r.bottomLeft(), r.bottomRight())
+        # Restrained card-like rows from the approved Gothic Archive design.
+        # The soft enclosure defines a selection without a SaaS-grid appearance.
+        bg = QColor("#4C2939" if active else "#32232E" if hover else "#241B26")
+        painter.setBrush(bg)
+        painter.setPen(QPen(QColor("#C87883" if active else "#5A3748"), 1))
+        painter.drawRoundedRect(r.adjusted(4, 3, -4, -3), 7, 7)
         if active:
-            painter.fillRect(QRect(r.left(), r.top(), 3, r.height()), QColor(ROSE))
+            painter.fillRect(QRect(r.left()+4, r.top()+9, 3, r.height()-18), QColor("#F1A0AC"))
         meta = index.data(int(Qt.ItemDataRole.UserRole) + 1) or {}
         name = meta.get("preview", index.data(Qt.ItemDataRole.DisplayRole) or "")
         tag, icon, colour = label_type(meta.get("kind", "text"), name)
         x = r.left() + 12
         y = r.top() + (r.height() - 34)//2
-        painter.setPen(QPen(QColor("#694957"),1))
+        painter.setPen(QPen(QColor("#9A5A67"),1))
         painter.drawRect(x, y, 34, 34)
         painter.setPen(QColor(PORCELAIN))
         painter.setFont(QFont("DejaVu Sans Mono", 12, QFont.Weight.Bold))
@@ -219,15 +224,15 @@ class CrimsonClipDelegate(QStyledItemDelegate):
         textx=tagx+tagw+8
         available=max(30, r.right()-textx-40)
         painter.setPen(QColor("#F4EEEB"))
-        painter.setFont(QFont("DejaVu Sans", 11))
+        painter.setFont(QFont("Georgia", 12))
         font=QFontMetrics(painter.font())
         painter.drawText(textx, r.top()+29, font.elidedText(name,Qt.TextElideMode.ElideRight,available))
         painter.setFont(QFont("DejaVu Sans Mono", 9))
-        painter.setPen(QColor("#A99BA2"))
+        painter.setPen(QColor("#CCAFB5"))
         subtitle = meta.get("subtitle", "Image clipboard" if tag=="IMG" else "Text clipboard")
         painter.drawText(textx, r.top()+50,
             QFontMetrics(painter.font()).elidedText(subtitle,Qt.TextElideMode.ElideRight,available+17))
-        painter.setPen(QColor("#B7A6AD"))
+        painter.setPen(QColor("#E3C8C4"))
         painter.drawText(QRect(r.right()-38,r.top()+7,31,17),Qt.AlignmentFlag.AlignRight,meta.get("age",""))
         painter.setPen(QColor("#EFBB8E" if meta.get("pinned") else "#7E6573"))
         painter.drawText(QRect(r.right()-28,r.bottom()-29,19,18),Qt.AlignmentFlag.AlignCenter,"★" if meta.get("pinned") else "☆")
@@ -244,18 +249,18 @@ def build_crimson_ui(w, image_preview_class):
     """Recompose the window without replacing existing data or capture methods."""
     w.resize(1300, 870)
     w.setMinimumSize(850, 600)
-    w.setStyleSheet(CRIMSON_QSS)
+    w.setStyleSheet(CRIMSON_QSS + '\n' + KOHaku_QSS)
     shell=QWidget()
     shell.setObjectName("appRoot")
     root=QVBoxLayout(shell)
-    root.setContentsMargins(18,17,18,13)
-    root.setSpacing(12)
+    root.setContentsMargins(14,13,14,11)
+    root.setSpacing(11)
 
     # Masthead
     mast=QHBoxLayout()
     mast.setSpacing(13)
     w.wordmark=w.wordmark.__class__(w.brand_family)
-    w.wordmark.display_font.setPixelSize(39)
+    w.wordmark.display_font.setPixelSize(43)
     w.wordmark.setFixedSize(w.wordmark.sizeHint())
     mast.addWidget(w.wordmark)
     w.kana_tag=make_label("クリップミント","kanaTag")
@@ -267,7 +272,7 @@ def build_crimson_ui(w, image_preview_class):
     root.addLayout(mast)
     top_rule=QFrame()
     top_rule.setFixedHeight(1)
-    top_rule.setStyleSheet("background:#4A2A34")
+    top_rule.setStyleSheet("background:#8B4E5D")
     root.addWidget(top_rule)
 
     # Four columns: portrait, real working pages, preview, navigation.
@@ -275,32 +280,61 @@ def build_crimson_ui(w, image_preview_class):
     workspace.setContentsMargins(0,0,0,0)
     workspace.setSpacing(9)
 
-    w.manga_dock=QFrame()
-    w.manga_dock.setObjectName("maidAlcove")
-    w.manga_dock.setFixedWidth(334)
+    w.manga_dock=KohakuCardFrame()
+    w.manga_dock.setFixedWidth(354)
     alcove=QVBoxLayout(w.manga_dock)
-    alcove.setContentsMargins(13,13,13,13)
-    alcove.setSpacing(7)
+    alcove.setContentsMargins(16,15,16,14)
+    alcove.setSpacing(4)
     alcove.addWidget(make_label("FILE / 001   CHARACTER","ledger"))
     w.manga_mascot=CrimsonMaidPortrait(w.manga_dock)
     w.manga_mascot.setSizePolicy(QSizePolicy.Policy.Expanding,QSizePolicy.Policy.Expanding)
     alcove.addWidget(w.manga_mascot,1)
+    # Character identity and the user's Ephemeral Catch are part of the card,
+    # not a separate cyber-dossier footer. Text remains selectable/accessible.
     dossier=QFrame()
     dossier.setObjectName("maidDossier")
-    dossier.setFixedHeight(103)
+    dossier.setMinimumHeight(154)
     dl=QVBoxLayout(dossier)
-    dl.setContentsMargins(10,7,10,5)
-    dl.setSpacing(3)
-    header=QHBoxLayout()
-    header.addWidget(make_label("SUBJECT / 01","ledger"))
-    header.addStretch()
-    header.addWidget(make_label("CRIMSON","dossierName"))
-    dl.addLayout(header)
-    w.maid_caption=make_label("メイド  /  01","dossierJp")
+    dl.setContentsMargins(6,4,6,4)
+    dl.setSpacing(5)
+    w.maid_caption=make_label("Kohaku  琥珀","dossierName")
+    w.maid_caption.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    w.maid_caption.setAccessibleName("Kohaku, 琥珀")
     dl.addWidget(w.maid_caption)
-    dl.addWidget(make_label("ARCHIVE ATTENDANT","dossierSub"))
-    dl.addWidget(make_label("● LOCAL / OFFLINE                 ◈ FILED","dossierStatus"))
+    jp=make_label("泡沫の如き刹那の思念、悉く我が掌底に封ず。","dossierJp")
+    jp.setWordWrap(True)
+    jp.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    jp.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+    dl.addWidget(jp)
+    roman=make_label(
+        "Utakata no gotoki setsuna no shinen, kotogotoku waga shōtei ni fūzu.",
+        "dossierRoman")
+    roman.setWordWrap(True)
+    roman.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    dl.addWidget(roman)
+    english=make_label(
+        "Transient thoughts that mimic foam upon the water—"
+        "every last one is sealed within the hollow of my palm.",
+        "dossierEnglish")
+    english.setWordWrap(True)
+    english.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    english.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+    dl.addWidget(english)
+    w.kohaku_japanese=jp
+    w.kohaku_roman=roman
+    w.kohaku_english=english
     alcove.addWidget(dossier)
+    if w.manga_dock.has_card_art:
+        # The supplied card already contains its own frame, character, title,
+        # Japanese verse and translation. Do not paint or overlay them again.
+        # Keep semantic labels attached for accessibility without rendering
+        # duplicate copy over the original print artwork.
+        alcove.setContentsMargins(0, 0, 0, 0)
+        for element in (w.manga_mascot, dossier):
+            element.hide()
+        header_item = alcove.itemAt(0)
+        if header_item and header_item.widget():
+            header_item.widget().hide()
     workspace.addWidget(w.manga_dock)
 
     w.pages=QStackedWidget()
@@ -310,10 +344,10 @@ def build_crimson_ui(w, image_preview_class):
 
     w.preview_panel=QFrame()
     w.preview_panel.setObjectName("previewPane")
-    w.preview_panel.setMinimumWidth(250)
+    w.preview_panel.setMinimumWidth(260)
     preview=QVBoxLayout(w.preview_panel)
-    preview.setContentsMargins(13,17,13,15)
-    preview.setSpacing(11)
+    preview.setContentsMargins(14,16,14,13)
+    preview.setSpacing(10)
     heading=QHBoxLayout()
     heading.addWidget(make_label("Selected item","previewTitle"))
     heading.addStretch()
@@ -324,7 +358,7 @@ def build_crimson_ui(w, image_preview_class):
     border=QFrame()
     border.setObjectName("previewBorder")
     border.setMinimumHeight(200)
-    border.setMaximumHeight(302)
+    border.setMaximumHeight(350)
     pb=QVBoxLayout(border)
     pb.setContentsMargins(4,4,4,4)
     w.preview_stack=QStackedWidget()
@@ -368,7 +402,7 @@ def build_crimson_ui(w, image_preview_class):
     preview.addStretch(1)
     buttons=QHBoxLayout()
     buttons.setSpacing(7)
-    w.copy_action=QPushButton("COPY")
+    w.copy_action=QPushButton("♧  COPY")
     w.copy_action.setObjectName("previewCopy")
     w.copy_action.clicked.connect(w.copy_selected)
     buttons.addWidget(w.copy_action)
@@ -386,28 +420,36 @@ def build_crimson_ui(w, image_preview_class):
     dock=QFrame()
     dock.setObjectName("dock")
     w.dock_panel=dock
-    dock.setFixedWidth(74)
+    dock.setFixedWidth(144)
     nav=QVBoxLayout(dock)
-    nav.setContentsMargins(5,12,5,8)
+    nav.setContentsMargins(7,12,7,9)
     nav.setSpacing(5)
     nav.addWidget(make_label("MODULES","dockHeading"))
     w.nav_buttons={}
-    for i,(label,icon,japanese) in enumerate((
-        ("Clipboard","▤","履歴"),("Screenshots","▣","画像"),
-        ("Recordings","◉","録画"),("Secrets & Variables","♢","秘密"),
-        ("Autosort","⇄","分類"),("Settings","⚙","設定")
+    # Names identify the actual action behind each illustrated dock entry.
+    # The top-level wording follows the approved gothic-archive mockup.
+    for i,(label,icon,display,subtitle) in enumerate((
+        ("Clipboard","▤","Clipboard","クリップボード"),
+        ("Screenshots","▣","Archive","SCREENSHOTS"),
+        ("Recordings","◉","Capture","RECORDINGS"),
+        ("Secrets & Variables","♢","Collections","VAULT"),
+        ("Autosort","⇄","Tools","AUTOSORT"),
+        ("Settings","⚙","Settings","設定"),
     )):
-        btn=QPushButton(icon)
+        btn=QPushButton(f"{icon}   {display}\n      {subtitle}")
         btn.setObjectName("nav")
-        btn.setToolTip(f"{label} / {japanese}")
+        btn.setToolTip(f"{display} / {label}")
+        btn.setProperty("dockDisplay", display)
+        btn.setProperty("dockSubtitle", subtitle)
+        btn.setProperty("dockIcon", icon)
         btn.setAccessibleName(label)
         btn.setCheckable(True)
-        btn.setMinimumHeight(60)
+        btn.setMinimumHeight(68)
         btn.clicked.connect(lambda _checked=False, index=i: w.open_section(index))
         w.nav_buttons[label]=btn
         nav.addWidget(btn)
     nav.addStretch()
-    stamp=make_label("整理 / 04","dockStamp")
+    stamp=make_label("◇   Manage / 04\n管理","dockStamp")
     stamp.setAlignment(Qt.AlignmentFlag.AlignCenter)
     nav.addWidget(stamp)
     workspace.addWidget(dock)
@@ -420,7 +462,7 @@ def build_crimson_ui(w, image_preview_class):
     fl.setContentsMargins(0,11,0,0)
     fl.setSpacing(0)
     w.footer_status=make_label("● Ready   |   HISTORY 00","footerStatus")
-    w.footer_status.setMinimumWidth(160)
+    w.footer_status.setMinimumWidth(110)
     fl.addWidget(w.footer_status,1)
     w.record_button=CrimsonFooterButton("●  Record Video\nREC / MP4 · GIF", primary=True)
     w.record_button.setObjectName("record")

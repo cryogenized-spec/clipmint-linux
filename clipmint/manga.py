@@ -6,6 +6,7 @@ external hosting, or runtime file downloads are involved.
 from __future__ import annotations
 
 from pathlib import Path
+import os
 import sys
 
 from PySide6.QtCore import QRect, QSize, Qt
@@ -14,17 +15,33 @@ from PySide6.QtWidgets import QWidget
 
 
 ASSET_NAME = "crimson_maid.png"
+FULL_ART_NAME = "kohaku_full.webp"
 
 
 def _asset_path() -> Path:
+    """Prefer full-body Kohaku artwork; preserve the existing portrait fallback.
+
+    The XDG location also permits the user's original artwork to be installed
+    without modifying or rebuilding their existing clipboard database.
+    """
+    base = Path(os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local/share")))
+    local = base / "clipmint" / FULL_ART_NAME
+    if local.is_file():
+        return local
     frozen_root = getattr(sys, "_MEIPASS", None)
     if frozen_root:
+        bundled = Path(frozen_root) / "assets" / "manga" / FULL_ART_NAME
+        if bundled.is_file():
+            return bundled
         return Path(frozen_root) / "assets" / "manga" / ASSET_NAME
+    bundled = Path(__file__).resolve().parent / "assets" / FULL_ART_NAME
+    if bundled.is_file():
+        return bundled
     return Path(__file__).resolve().parent / "assets" / ASSET_NAME
 
 
 class CrimsonMaidPortrait(QWidget):
-    """A decorative crop of the actual character artwork, not a redrawn mascot."""
+    """Full-body Kohaku illustration, aspect-ratio preserved and never cropped."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -34,13 +51,13 @@ class CrimsonMaidPortrait(QWidget):
         self.setAccessibleName(
             "Crimson-haired maid, looking over her shoulder with her hands held behind her back"
         )
-        self.setToolTip("ClipMint character artwork / メイド")
+        self.setToolTip("Kohaku 琥珀 — full-length archive character")
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.setMinimumSize(180, 230)
 
     def sizeHint(self) -> QSize:
-        return QSize(310, 440)
+        return QSize(315, 560)
 
     def paintEvent(self, event):
         painter = QPainter(self)

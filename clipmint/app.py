@@ -26,6 +26,8 @@ from .recording_ui import RecorderWindow, SaveClipDialog
 from .store import ClipStore, classify, looks_sensitive
 from .autosort import RULE_TYPES, NEVER_CAPTURE, validate_rule, route_clip
 from .vault import Vault, VaultError
+from .screenshot_editor import installed_editors, resolve_editor, open_image_editor
+from .screenshot_notice import ScreenshotNotice
 
 
 THEME = """
@@ -146,6 +148,10 @@ class ClipMintWindow(QMainWindow):
         self._privacy_skipped = 0
         self._closing = False
         self._ignore_next_clipboard_change = False
+        self._last_screenshot_path = None
+        self._last_tray_notification = None
+        self._screenshot_notice_token = 0
+        self.screenshot_notice = None
 
         # Native reconstruction of the approved Crimson Archive v2 prototype.
         # All content comes from the existing history store and capture methods.
@@ -159,6 +165,9 @@ class ClipMintWindow(QMainWindow):
         self.install_shortcuts()
         self.statusBar().showMessage("Ready · Left-click to preview, right-click for Copy / Pin / Move / Delete")
         self.configure_tray()
+        self.screenshot_notice = ScreenshotNotice(
+            self, self.edit_last_screenshot, self.dismiss_screenshot_notice
+        )
         QApplication.clipboard().dataChanged.connect(self.clipboard_changed)
         self.poller = QTimer(self)
         self.poller.timeout.connect(self.poll_recording)
@@ -171,36 +180,44 @@ class ClipMintWindow(QMainWindow):
         super().resizeEvent(event)
         if hasattr(self, "manga_dock"):
             self._update_manga_visibility()
+        if getattr(self, "screenshot_notice", None) is not None:
+            self.screenshot_notice.position_inside_window()
 
     def _update_manga_visibility(self):
-        # Approved prototype: full portrait above compact threshold; protect
-        # useful clipboard/preview real estate on smaller screens.
-        show = self.width() >= 1000 and self.height() >= 650
+        """Keep dock labels readable; never regress to an icons-only rail.
+
+        The character card hides on compact displays so real editing and the
+        selected-item preview retain useful width.
+        """
+        show = self.width() >= 1120 and self.height() >= 700
         self.manga_dock.setVisible(show)
         if show:
             self.manga_dock.setFixedWidth(
-                336 if self.width() < 1140 else min(390, max(305, int(self.width() * .26)))
+                min(390, max(310, int(self.width() * .265)))
             )
-        self.dock_panel.setFixedWidth(110 if self.width() >= 1370 else 56)
+        wide = self.width() >= 1180
+        self.dock_panel.setFixedWidth(142 if wide else 134)
         if hasattr(self, "archive_heading"):
             self.archive_heading.setText(
-                "Clipboard  ·  クリップボード" if self.width() >= 1270 else "Clipboard"
+                "Clipboard  ·  クリップボード"
+                if self.width() >= 1150 else "Clipboard"
             )
         if hasattr(self, "preview_heading"):
             self.preview_heading.setText(
-                "プレビュー / PREVIEW" if self.width() >= 1370 else "プレビュー"
+                "プレビュー  Preview"
+                if self.width() >= 1190 else "プレビュー"
             )
-        icons = {"Clipboard":"▤", "Screenshots":"▣", "Recordings":"◉",
-                 "Secrets & Variables":"♢", "Autosort":"⇄", "Settings":"⚙"}
         for label, button in self.nav_buttons.items():
-            if self.width() >= 1370:
-                short = {"Screenshots":"Shots", "Recordings":"Video",
-                         "Secrets & Variables":"Secrets"}.get(label, label)
-                button.setText(icons[label] + "\n" + short.upper())
-                button.setMinimumHeight(73)
-            else:
-                button.setText(icons[label])
-                button.setMinimumHeight(60)
+            display = button.property("dockDisplay") or label
+            subtitle = button.property("dockSubtitle") or ""
+            icon = button.property("dockIcon") or "◇"
+            # Even in the compact layout titles remain visible.
+            button.setText(
+                f"{icon}  {display}\n   {subtitle}"
+                if wide else f"{icon}  {display}"
+            )
+            button.setMinimumHeight(67 if wide else 49)
+            button.setToolTip(f"{display}: {label}")
 
     def build_clipboard_page(self):
         page = QWidget()
@@ -896,6 +913,34 @@ class ClipMintWindow(QMainWindow):
         open_files.clicked.connect(lambda: self.open_folder(recordings_dir()))
         layout.addWidget(open_files)
 
+        screenshot_group = QGroupBox("Screenshot editor")
+        screenshot_layout = QVBoxLayout(screenshot_group)
+        screenshot_help = QLabel(
+            "Click the notification after a capture to edit the saved PNG. "
+            "Select an installed editor, or use your system's default image application."
+        )
+        screenshot_help.setWordWrap(True)
+        screenshot_layout.addWidget(screenshot_help)
+        self.screenshot_editor_choice = QComboBox()
+        self.screenshot_editor_choice.addItem(
+            "Automatic · first installed image editor", "auto"
+        )
+        for key, title in installed_editors():
+            self.screenshot_editor_choice.addItem(title, key)
+        self.screenshot_editor_choice.addItem(
+            "System image application (may be a viewer)", "system"
+        )
+        saved_editor = str(self.settings.value("capture/editor", "auto"))
+        index = self.screenshot_editor_choice.findData(saved_editor)
+        self.screenshot_editor_choice.setCurrentIndex(max(0, index))
+        self.screenshot_editor_choice.currentIndexChanged.connect(
+            lambda _index: self.settings.setValue(
+                "capture/editor", self.screenshot_editor_choice.currentData()
+            )
+        )
+        screenshot_layout.addWidget(self.screenshot_editor_choice)
+        layout.addWidget(screenshot_group)
+
         # QSettings holds nonsensitive preferences ONLY; never vault credentials.
         self.shortcut_editors = {}
         self.shortcut_values = {}
@@ -1063,6 +1108,7 @@ class ClipMintWindow(QMainWindow):
         menu.addAction("Quit ClipMint").triggered.connect(self.quit_app)
         self.tray.setContextMenu(menu)
         self.tray.activated.connect(self.tray_activated)
+        self.tray.messageClicked.connect(self.tray_notification_clicked)
         self.tray.show()
 
     def tray_activated(self, reason):
@@ -1074,7 +1120,12 @@ class ClipMintWindow(QMainWindow):
         self.raise_()
         self.activateWindow()
 
+    def tray_notification_clicked(self):
+        if self._last_tray_notification == "screenshot":
+            self.edit_last_screenshot()
+
     def inform(self, title: str, message: str):
+        self._last_tray_notification = None
         self.statusBar().showMessage(f"{title}: {message}", 7000)
         if self.tray is not None:
             self.tray.showMessage(title, message, QSystemTrayIcon.MessageIcon.Information, 3000)
@@ -1365,8 +1416,59 @@ class ClipMintWindow(QMainWindow):
             return
         QApplication.clipboard().setImage(pixmap.toImage())
         self.show_window()
-        self.inform("Screenshot saved", str(path))
+        self.notify_screenshot_captured(path)
         self.refresh_library("Screenshots")
+
+    def notify_screenshot_captured(self, path: Path):
+        """Notify only after a PNG was saved successfully to disk."""
+        self._last_screenshot_path = Path(path)
+        self._screenshot_notice_token += 1
+        token = self._screenshot_notice_token
+        self.statusBar().showMessage(f"Screenshot captured: {path}", 8000)
+        if self.screenshot_notice is not None:
+            self.screenshot_notice.present()
+            QTimer.singleShot(
+                12000, lambda: self.dismiss_screenshot_notice(token)
+            )
+        if self.tray is not None:
+            self._last_tray_notification = "screenshot"
+            self.tray.showMessage(
+                "Screenshot captured",
+                "Click here to edit your screenshot.",
+                QSystemTrayIcon.MessageIcon.Information, 10000,
+            )
+
+    def dismiss_screenshot_notice(self, token=None):
+        if type(token) is int and token != self._screenshot_notice_token:
+            return
+        if self.screenshot_notice is not None:
+            self.screenshot_notice.hide()
+
+    def edit_last_screenshot(self, *_args):
+        """A notification click must never create a new screenshot."""
+        path = self._last_screenshot_path
+        if path is None:
+            return
+        preference = str(self.settings.value("capture/editor", "auto"))
+        try:
+            application, editor = open_image_editor(path, preference)
+        except (OSError, ValueError) as exc:
+            self.error(
+                "Screenshot editor",
+                f"Could not open the captured PNG: {exc}. "
+                "Choose an installed editor in Settings.",
+            )
+            return
+        self.dismiss_screenshot_notice()
+        if editor:
+            self.statusBar().showMessage(
+                f"Opening screenshot in {application}", 5000
+            )
+        else:
+            self.statusBar().showMessage(
+                "Opening screenshot with the system image application; "
+                "it may be a viewer. Select an editor in Settings.", 8000
+            )
 
     def choose_recording(self, file_format: str = "MP4"):
         self.capture_format = file_format if file_format in ("MP4", "GIF") else "MP4"
