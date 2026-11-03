@@ -187,7 +187,7 @@ class ClipStore:
         sort = sort if sort in SORTS or sort == "Best match" else "Latest first"
         order = SORTS.get(sort, "id DESC")
         query = str(query)[:256]
-        matched_ids = self.search_index.search_ids(query) if query.strip() else []
+        matched_ids = self.search_index.search_ids(query, bin_name) if query.strip() else []
         params: list[object] = [bin_name]
         where = ["bin=?"]
         if query:
