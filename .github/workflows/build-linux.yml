@@ -1,4 +1,4 @@
-name: Build ClipMint v0.5 integration preview (no auto release)
+name: Build ClipMint v0.6 integration preview (no auto release)
 on:
   pull_request:
     branches: [main]
@@ -100,17 +100,17 @@ jobs:
           code=$?
           set -e
           if [[ "$code" -ne 124 ]]; then echo "Unexpected app exit status: $code"; exit 1; fi
-      - name: Create isolated v0.5 preview Debian package
+      - name: Create isolated v0.6 preview Debian package
         env:
-          CLIPMINT_VERSION: 0.5.0~main1
+          CLIPMINT_VERSION: 0.6.0~preview1
         run: bash packaging/build-deb.sh
       - name: Verify and smoke-test draft installer (CI runner only)
         env:
-          CLIPMINT_VERSION: 0.5.0~main1
-        run: bash packaging/verify-field-package.sh dist-packages/clipmint_0.5.0~main1_amd64.deb
+          CLIPMINT_VERSION: 0.6.0~preview1
+        run: bash packaging/verify-field-package.sh dist-packages/clipmint_0.6.0~preview1_amd64.deb
       - uses: actions/upload-artifact@v4
         with:
-          name: ClipMint-v0.5-main-integration-preview
+          name: ClipMint-v0.6-main-integration-preview
           path: dist-packages/
           if-no-files-found: error
           retention-days: 14
