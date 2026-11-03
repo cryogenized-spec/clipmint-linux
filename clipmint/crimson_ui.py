@@ -90,7 +90,7 @@ QToolButton::menu-indicator {image:none;}
 QPushButton#record:hover, QToolButton#recordArrow:hover {background:#C02C50;}
 QPushButton#screenshot:hover, QToolButton#shotArrow:hover {background:#F1E4E1;}
 QPushButton:focus, QToolButton:focus, QComboBox:focus {border:1px solid #C9F473;}
-QPushButton {min-height:24px;}
+/* Footer plaque size is set by Qt; do not override it with a legacy QSS min-height. */
 """
 
 
