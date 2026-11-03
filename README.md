@@ -1,4 +1,18 @@
-# ClipMint ve-02 / v0.3.0 — Linux Mint Desktop Preview
+# ClipMint — Kohaku Gothic Archive for Linux Mint
+
+> **Release status (3 November 2026):** `main` includes merged v0.5 features; the latest published installer is still **v0.3.0 build 13**. The v0.5 integration package is a **manual, review-only** build, not an approved daily-use release. Source code has passed 50 automated tests, but actual Mint/Cinnamon screen capture, keyboard paste, keyring recovery and independent vault security validation still need acceptance.
+>
+> **Exact artwork requirement:** The approved **941 × 1672 PNG** must be committed at `clipmint/assets/kohaku_card.png` with SHA-256 `585800ce776353d84a9d60e798ff591d06b580f95be0943a46ae67c1c107817a`. The full card already contains its ornate border, Japanese text, name and translation; the Qt display preserves the whole image without labels over it. Builds and native screenshots fail if this precise file is missing or changed. The old `crimson_maid.png` remains only as a legacy fallback, never the approved v0.5 art.
+
+## Feature state
+
+The published v0.3 installer provides clipboard text/image history, Work/Personal/Temporary bins, manual sorting, search, screenshots and region MP4/GIF recording. The merged v0.5 **source** adds the Kohaku theme, exact-card rendering when the asset is installed, selected-image preview, configurable in-window shortcuts, opt-in Autosort, a separate experimental encrypted vault, single-instance quick-search popup, opt-in Cinnamon shortcut registration, HTML/PNG/Nemo clipboard formats, sensitive-data filtering, optional encrypted history and offline Tesseract OCR. These merged features are not automatically installed onto the user's machine.
+
+**Security limits:** encrypted history is opt-in and does not remove the legacy plaintext database; the Secret Vault is a separate feature. X11 clipboard source attribution is heuristic. Store no real credentials in experimental builds until independent review. A keyring or passphrase failure can prevent access to encrypted data. Offline OCR requires `tesseract-ocr`, `tesseract-ocr-eng`, and `xdotool` for the popup's paste behavior.
+
+## Current development build
+
+The manual `.github/workflows/build-linux.yml` workflow assembles `0.5.0~main1`, verifies the exact packaged character card and captures real Qt screenshots with synthetic clipboard entries. Artifacts are for review only; the workflow does not publish a GitHub Release. Existing v0.3 preview installers are preserved for fallback. The separate native screenshot workflow verifies the same card and publishes screenshots as workflow artifacts.
 
 A mouse-first clipboard manager, screenshot tool, and dedicated MP4/GIF recorder for **Linux Mint 22 Cinnamon X11, x86-64**. Independent of Windows ClipClip; no Wine.
 
@@ -23,7 +37,7 @@ Autosort currently classifies previews as URLs, phone numbers, text and images f
 
 ## Screenshots and screen recording
 
-In the **v0.4 development branch**, the **Screenshot Area** button defaults to mouse-dragging a capture rectangle; its **▾** menu retains a **Full screen** action. A noncaptured on-screen instruction overlay says to click and drag, release to confirm, or use Esc/right-click to cancel; selected width and height are shown during drag. Screenshots are saved to `~/Pictures/ClipMint` and can be opened from the Screenshots section.
+In the **merged development source**, the **Screenshot Area** button defaults to mouse-dragging a capture rectangle; its **▾** menu retains a **Full screen** action. A noncaptured on-screen instruction overlay says to click and drag, release to confirm, or use Esc/right-click to cancel; selected width and height are shown during drag. Screenshots are saved to `~/Pictures/ClipMint` and can be opened from the Screenshots section.
 
 Choose **Start Recording MP4 / GIF** or use its **▾** for GIF. The ClipMint main window hides. Click and drag the recording region. A **separate floating recorder window** appears: choose High/Medium/Low quality, choose MP4 or GIF, and click **Start recording**. The same button then says **Stop recording** and shows elapsed time plus an **approximate** estimated file size. After FFmpeg finishes, a **Save this clip?** dialog appears: **Yes (Save)** is selected by default; **Enter** saves and **← / →** switch focus to No. The No option discards the pending recording. Saved files are in `~/Videos/ClipMint`. File size shown during capture is an estimate, not a storage quota or exact output size.
 
@@ -54,7 +68,7 @@ Automated tests cover SQLite bins/migration, UI launch and screen-recorder state
 Original ClipMint code: MIT. Bundled FFmpeg: separate GPL executable, licence/source details inside the package. The included original DotGothic16 font is under SIL OFL 1.1; its licence is packaged as `OFL-DotGothic16.txt`.
 
 
-## v0.4 development preview — NOT YET RELEASED
+## Merged v0.4 features — NOT YET RELEASED IN AN INSTALLER
 
 The Crimson Archive visual redesign, selected-image preview, region-selection
 instructions, keyboard shortcut editing, Autosort and encrypted vault are in
@@ -117,9 +131,9 @@ All vault tests use fake data. The app does not upload vault data or collect
 secrets automatically from clipboard history.
 
 
-## v0.5 review — keyboard, rich MIME, OCR, privacy (draft PR #10)
+## Merged v0.5 source — keyboard, rich MIME, OCR, privacy (PR #10)
 
-**Not a final release.** The GitHub source branch provides a native PySide6
+**Not a final release.** The GitHub `main` branch provides a native PySide6
 quick-search popup, a best-effort local clipboard privacy filter, support for
 plain text + HTML + PNG + Nemo file URI/cut data, and offline Tesseract OCR.
 
