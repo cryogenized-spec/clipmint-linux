@@ -15,6 +15,7 @@ install -m 644 packaging/clipmint.desktop "$root/usr/share/applications/clipmint
 install -m 644 packaging/clipmint.svg "$root/usr/share/icons/hicolor/scalable/apps/clipmint.svg"
 install -m 644 LICENSE "$root/usr/share/doc/clipmint/LICENSE-ClipMint"
 install -m 644 vendor/fonts/OFL.txt "$root/usr/share/doc/clipmint/OFL-DotGothic16.txt"
+install -m 644 vendor/fonts/OFL-CormorantGaramond.txt "$root/usr/share/doc/clipmint/OFL-CormorantGaramond.txt"
 cp /usr/share/common-licenses/GPL-3 "$root/usr/share/doc/clipmint/GPL-3-FFmpeg"
 cat > "$root/usr/share/doc/clipmint/FFmpeg-SOURCE.txt" <<'EOF'
 Bundled FFmpeg: https://github.com/BtbN/FFmpeg-Builds/releases/tag/autobuild-2026-10-31-12-59
