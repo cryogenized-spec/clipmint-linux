@@ -155,6 +155,17 @@ QMenu::item:selected {background:#61354C;}
 QCheckBox {color:#F2DED6;}
 QGroupBox {color:#F4D8C8;border:1px solid #865465;border-radius:5px;margin-top:10px;padding:10px;}
 QGroupBox::title {subcontrol-origin:margin;left:12px;}
+QDialog {
+    background:#1A131D;color:#F6E4D9;
+}
+QPlainTextEdit, QTextEdit {
+    background:#231925;color:#F4E4DD;
+    border:1px solid #855265;border-radius:6px;
+    selection-background-color:#6F394F;
+    font:12px "DejaVu Sans Mono";padding:8px;
+}
+QPlainTextEdit:focus, QTextEdit:focus {border:1px solid #E4A98F;}
+QListWidget::item:hover {background:#4A2B3B;}
 QScrollBar:vertical {background:#1D1520;width:11px;margin:2px;}
 QScrollBar::handle:vertical {background:#754257;border:1px solid #9B6276;border-radius:5px;min-height:28px;}
 QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical {height:0;}
