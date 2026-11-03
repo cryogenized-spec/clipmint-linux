@@ -83,7 +83,7 @@ class ClipSearchIndex:
                 "DELETE FROM clipmint_fts WHERE rowid NOT IN (SELECT id FROM clips)"
             )
 
-    def search_ids(self, query: str) -> list[int]:
+    def search_ids(self, query: str, bin_name: str) -> list[int]:
         if not self.enabled:
             return []
         expression = safe_fts_query(query)
@@ -91,9 +91,11 @@ class ClipSearchIndex:
             return []
         try:
             rows = self.conn.execute(
-                "SELECT rowid FROM clipmint_fts WHERE clipmint_fts MATCH ? "
+                "SELECT clipmint_fts.rowid FROM clipmint_fts "
+                "JOIN clips ON clips.id=clipmint_fts.rowid "
+                "WHERE clipmint_fts MATCH ? AND clips.bin=? "
                 "ORDER BY bm25(clipmint_fts) LIMIT ?",
-                (expression, MAX_RESULTS)
+                (expression, bin_name, MAX_RESULTS)
             )
             return [int(row[0]) for row in rows]
         except sqlite3.OperationalError:
