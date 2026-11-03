@@ -13,6 +13,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Verify the approved Kohaku artwork before building
+        run: |
+          test -f clipmint/assets/kohaku_card.png
+          echo "585800ce776353d84a9d60e798ff591d06b580f95be0943a46ae67c1c107817a  clipmint/assets/kohaku_card.png" | sha256sum --check
       - name: Install build tools on GitHub runner ONLY
         run: |
           sudo apt-get update
@@ -60,6 +64,7 @@ jobs:
             --add-binary "vendor/ffmpeg:tools" \
             --add-data "vendor/fonts/DotGothic16-Regular.ttf:assets/fonts" \
             --add-data "clipmint/assets/crimson_maid.png:assets/manga" \
+            --add-data "clipmint/assets/kohaku_card.png:assets/manga" \
             --add-binary "/usr/lib/x86_64-linux-gnu/libxcb-cursor.so.0:." \
             launcher.py
           ldd dist/ClipMint/_internal/PySide6/Qt/plugins/platforms/libqxcb.so || true
@@ -67,6 +72,7 @@ jobs:
           test -x dist/ClipMint/_internal/tools/ffmpeg
           test -f dist/ClipMint/_internal/assets/fonts/DotGothic16-Regular.ttf
           test -f dist/ClipMint/_internal/assets/manga/crimson_maid.png
+          test -f dist/ClipMint/_internal/assets/manga/kohaku_card.png
       - name: Test executable starts with virtual X11 display
         shell: bash
         env:
@@ -77,6 +83,17 @@ jobs:
           code=$?
           set -e
           if [[ "$code" -ne 124 ]]; then echo "Unexpected app exit status: $code"; exit 1; fi
+      - name: Capture native Kohaku UI with test-only clipboard data
+        env:
+          QT_QPA_PLATFORM: xcb
+        run: |
+          xvfb-run -a -s "-screen 0 1680x1050x24" python -m tools.render_crimson_review docs/native-review
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ClipMint-v0.5-Kohaku-Qt-screenshots
+          path: docs/native-review/kohaku-qt-*.png
+          if-no-files-found: error
+          retention-days: 14
       - name: Create isolated v0.5 preview Debian package
         env:
           CLIPMINT_VERSION: 0.5.0~main1
