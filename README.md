@@ -252,7 +252,7 @@ background automation of multiple pastes.
 
 ### v0.6 preview installation and acceptance
 
-After the branch CI completes, download the **ClipMint-v0.6-productivity-preview**
+After the branch CI completes, download the **ClipMint-v0.6-main-integration-preview**
 GitHub Actions artifact, verify `SHA256SUMS`, and install the
 `clipmint_0.6.0~preview1_amd64.deb` package via `sudo apt install ./...`.
 First close ClipMint and back up `~/.local/share/clipmint` with SQLite WAL
