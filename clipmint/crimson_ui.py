@@ -14,7 +14,7 @@ from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen, QPolygon,
 from PySide6.QtWidgets import (
     QAbstractItemView, QComboBox, QFrame, QHBoxLayout, QLabel, QLineEdit,
     QListWidget, QPushButton, QSizePolicy, QStackedWidget, QStyledItemDelegate, QStyle,
-    QTabBar, QToolButton, QVBoxLayout, QWidget, QMenu,
+    QTabBar, QToolButton, QVBoxLayout, QWidget, QMenu, QCheckBox,
 )
 
 from .manga import CrimsonMaidPortrait
@@ -479,7 +479,7 @@ def build_crimson_ui(w, image_preview_class):
     preview.addWidget(rule)
     preview.addWidget(make_label("FILE DETAILS / 詳細","detailsHeading"))
     w.preview_meta={}
-    for name in ("Type","Saved","Collection","Source"):
+    for name in ("Type","Saved","Collection","Source","Tags"):
         row=QHBoxLayout()
         key=make_label(name,"metaKey")
         key.setFixedWidth(82)
@@ -656,7 +656,7 @@ def build_archive_page(w):
     controls.addWidget(make_label("SHOW","filterLabel"))
     controls.addWidget(w.category,1)
     w.sort_combo=QComboBox()
-    for display, key in (("Newest", "Latest first"), ("Oldest", "Oldest first"),
+    for display, key in (("Newest", "Latest first"), ("Best match", "Best match"), ("Oldest", "Oldest first"),
                          ("A–Z", "A–Z"), ("Z–A", "Z–A"), ("Numbered", "Numbered list")):
         w.sort_combo.addItem(display, key)
     w.sort_combo.setToolTip("Sorting: latest, oldest, alphabetical or numbered")
@@ -665,6 +665,34 @@ def build_archive_page(w):
     w.count_label=make_label("00 / 00","counter")
     controls.addWidget(w.count_label)
     layout.addLayout(controls)
+
+    # Organisational controls are separate from ordinary type/sort filters.
+    # A second restrained row keeps the first row readable on laptop widths.
+    organisers=QHBoxLayout()
+    organisers.setSpacing(5)
+    w.tag_filter=QComboBox()
+    w.tag_filter.setObjectName("tagFilter")
+    w.tag_filter.addItem("All tags", "")
+    w.tag_filter.setToolTip("Show clips carrying a particular tag")
+    w.tag_filter.currentIndexChanged.connect(w.refresh)
+    organisers.addWidget(w.tag_filter, 2)
+    w.favorites_filter=QCheckBox("♥ Favourites")
+    w.favorites_filter.setObjectName("favoriteFilter")
+    w.favorites_filter.setToolTip("Show only favourite clips")
+    w.favorites_filter.toggled.connect(w.refresh)
+    organisers.addWidget(w.favorites_filter, 2)
+    w.templates_button=QPushButton("✧ Snippets")
+    w.templates_button.setObjectName("organizerAction")
+    w.templates_button.setToolTip("Open saved reusable text templates")
+    w.templates_button.clicked.connect(w.show_templates)
+    organisers.addWidget(w.templates_button, 1)
+    w.queue_next_button=QPushButton("NEXT 0")
+    w.queue_next_button.setObjectName("organizerAction")
+    w.queue_next_button.setToolTip("Copy next queued item; paste it manually")
+    w.queue_next_button.clicked.connect(w.queue_copy_next)
+    w.queue_next_button.setEnabled(False)
+    organisers.addWidget(w.queue_next_button, 1)
+    layout.addLayout(organisers)
     w.history=QListWidget()
     w.history.setObjectName("clipHistory")
     w.history.setUniformItemSizes(True)
