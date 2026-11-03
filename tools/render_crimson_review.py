@@ -1,4 +1,4 @@
-"""Real Qt screenshots of the Crimson Archive layout for comparison with v2 HTML.
+"""Actual Qt Kohaku Gothic Archive screenshots using the approved, packaged card.
 
 This is test-only synthetic data. It never touches the user's clipboard history.
 """
@@ -44,6 +44,8 @@ def main():
         app=QApplication([])
         app.setQuitOnLastWindowClosed(False)
         window=ClipMintWindow()
+        if not window.manga_dock.has_card_art:
+            raise RuntimeError("Approved Kohaku card missing: screenshot would show fallback art")
         window.monitoring=False
         window.store.add("text",b"Inspection notes - workshop","Inspection notes - workshop")
         window.store.add("text",b"https://example.org/clipmint","https://example.org/clipmint")
@@ -54,8 +56,8 @@ def main():
 
         def capture():
             for width,height,name in [
-                (1500,920,"crimson-qt-desktop.png"),
-                (1100,880,"crimson-qt-laptop.png")
+                (1500,920,"kohaku-qt-desktop.png"),
+                (1100,880,"kohaku-qt-laptop.png")
             ]:
                 window.resize(width,height)
                 window.show()
