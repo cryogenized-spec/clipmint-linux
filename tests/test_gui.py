@@ -125,7 +125,11 @@ class WindowTests(unittest.TestCase):
                 self.assertGreater(picture.height(), 35)
                 if (Path(__file__).resolve().parents[1] / "vendor/fonts/DotGothic16-Regular.ttf").exists():
                     self.assertEqual(window.brand_family, "DotGothic16")
-                    self.assertEqual(window.wordmark.display_font.family(), "Georgia")
+                    serif_asset = Path(__file__).resolve().parents[1] / (
+                        "vendor/fonts/CormorantGaramond-Regular.ttf"
+                    )
+                    expected = "Cormorant Garamond" if serif_asset.exists() else "Georgia"
+                    self.assertEqual(window.wordmark.display_font.family(), expected)
             finally:
                 if window is not None:
                     window.store.close()
