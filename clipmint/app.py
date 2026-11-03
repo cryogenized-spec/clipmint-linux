@@ -33,6 +33,8 @@ from .clipboard_formats import from_mime, is_concealed, sensitive_text, mime_fro
 from .foreground_privacy import blocked_foreground, DEFAULT_BLOCKED
 from .ocr import OcrWorker
 from .quick_popup import QuickPopup, paste_to_window
+from .productivity import PasteQueue
+from .organizer_ui import TemplatesDialog, TransformDialog
 from .single_instance import InstanceServer, send_command
 from .cinnamon_hotkey import install_shortcut, ShortcutSetupError
 from .secure_history import (EncryptedClipStore, HistorySecurityError,
@@ -178,6 +180,7 @@ class ClipMintWindow(QMainWindow):
 
         # Native reconstruction of the approved Crimson Archive v2 prototype.
         # All content comes from the existing history store and capture methods.
+        self.paste_queue = PasteQueue()
         self.wordmark = ChromaticWordmark(self.brand_family)
         build_crimson_ui(self, ImagePreviewLabel)
         self.build_library_page("Screenshots")
@@ -1297,7 +1300,22 @@ class ClipMintWindow(QMainWindow):
         bin_name = self.active_bin()
         category = self.category.currentText()
         sort = self.sort_combo.currentData() or self.sort_combo.currentText()
-        clips = self.store.search(self.search.text(), bin_name, sort, category)
+        # Refresh tag choices while preserving the user's current filter.
+        current_tag = self.tag_filter.currentData() or ""
+        available_tags = self.store.all_tags()
+        self.tag_filter.blockSignals(True)
+        self.tag_filter.clear()
+        self.tag_filter.addItem("All tags", "")
+        for tag in available_tags:
+            self.tag_filter.addItem("# " + tag, tag)
+        index = self.tag_filter.findData(current_tag)
+        self.tag_filter.setCurrentIndex(max(0, index))
+        self.tag_filter.blockSignals(False)
+        clips = self.store.search(
+            self.search.text(), bin_name, sort, category,
+            tag=self.tag_filter.currentData() or "",
+            favorites_only=self.favorites_filter.isChecked(),
+        )
         for i, clip in enumerate(clips):
             title = f"{i + 1}. {clip.preview}" if sort == "Numbered list" else clip.preview
             item = QListWidgetItem(title)
@@ -1309,14 +1327,18 @@ class ClipMintWindow(QMainWindow):
                     else f"{kind_tag} · clipboard history",
                 "age": relative_time(clip.created_at),
                 "created": clip.created_at, "pinned": clip.pinned,
+                "favorite": clip.favorite,
                 "bin": clip.bin, "type": kind_tag,
             })
-            item.setToolTip(f"{classify(clip)} · {clip.created_at} · {clip.bin}")
+            item.setToolTip(f"{classify(clip)} · {clip.created_at} · {clip.bin} · "
+                            + ", ".join(self.store.tags(clip.id)))
             self.history.addItem(item)
             if clip.id == previous:
                 self.history.setCurrentItem(item)
         self.history.blockSignals(False)
         self.count_label.setText(f"{len(clips):02d} / {self.store.count(bin_name):02d}")
+        self.search.setToolTip(self.store.index_status())
+        self._refresh_queue_button()
         if hasattr(self, "footer_status"):
             self.footer_status.setText(f"● Ready   |   HISTORY {self.store.count(bin_name):02d}")
         if hasattr(self, "footer_status"):
@@ -1356,6 +1378,7 @@ class ClipMintWindow(QMainWindow):
         self.preview_meta["Saved"].setText(meta.get("age", "—") + " ago" if meta.get("age") not in (None, "now", "—") else meta.get("age", "—"))
         self.preview_meta["Collection"].setText(meta.get("bin", self.active_bin()))
         self.preview_meta["Source"].setText("Clipboard image" if kind == "image" else "Clipboard files" if kind == "files" else "Clipboard text")
+        self.preview_meta["Tags"].setText(", ".join(self.store.tags(clip_id)) or "—")
         self.pin_action.setText("UNPIN" if self.store.pinned(clip_id) else "PIN")
         if kind in ("text", "files"):
             self.preview_image.clear_image()
@@ -1393,6 +1416,145 @@ class ClipMintWindow(QMainWindow):
         self.store.pin(clip_id, not self.store.pinned(clip_id))
         self.refresh()
 
+    def toggle_favorite_selected(self):
+        clip_id = self.selected_id()
+        if clip_id is None:
+            return
+        self.store.favorite(clip_id, not self.store.is_favorite(clip_id))
+        self.refresh()
+
+    def edit_selected_tags(self):
+        clip_id = self.selected_id()
+        if clip_id is None:
+            return
+        original = ", ".join(self.store.tags(clip_id))
+        value, ok = QInputDialog.getText(
+            self, "Archive tags", "Comma-separated labels (letters, numbers, - or _):",
+            text=original,
+        )
+        if not ok:
+            return
+        try:
+            self.store.set_tags(clip_id, [tag for tag in value.split(",") if tag.strip()])
+        except ValueError as exc:
+            self.error("Tags", str(exc))
+            return
+        self.refresh()
+
+    def _copy_plain_text(self, value: str):
+        self._ignore_next_clipboard_change = True
+        QApplication.clipboard().setText(value)
+        QTimer.singleShot(400, lambda: setattr(self, "_ignore_next_clipboard_change", False))
+        self.statusBar().showMessage("Copied to clipboard · Paste manually", 5000)
+
+    def _copy_entry_by_id(self, clip_id: int) -> bool:
+        entry = self.store.get(clip_id)
+        if entry is None:
+            return False
+        kind, contents = entry
+        self._ignore_next_clipboard_change = True
+        QApplication.clipboard().setMimeData(
+            mime_from_entry(kind, contents, self.store.get_formats(clip_id))
+        )
+        QTimer.singleShot(400, lambda: setattr(self, "_ignore_next_clipboard_change", False))
+        return True
+
+    def show_templates(self):
+        dialog = TemplatesDialog(self.store, self._copy_plain_text, self)
+        dialog.exec()
+
+    def make_selected_template(self):
+        clip_id = self.selected_id()
+        entry = self.store.get(clip_id) if clip_id is not None else None
+        if not entry or entry[0] != "text":
+            return
+        name, ok = QInputDialog.getText(
+            self, "Save reusable snippet", "Template name:"
+        )
+        if not ok or not name.strip():
+            return
+        body = entry[1].decode("utf-8", "replace")
+        if looks_sensitive(body) or sensitive_text(body):
+            self.error("Snippet templates", "Potential credentials cannot be saved as a template")
+            return
+        try:
+            self.store.save_template(name, body)
+        except (ValueError, Exception) as exc:
+            self.error("Snippet templates", str(exc))
+            return
+        self.inform("Snippet saved", "Use the Snippets button to fill and copy it")
+
+    def transform_selected(self):
+        clip_id = self.selected_id()
+        entry = self.store.get(clip_id) if clip_id is not None else None
+        if not entry or entry[0] != "text":
+            return
+        content = entry[1].decode("utf-8", "replace")
+        if looks_sensitive(content) or sensitive_text(content):
+            self.error("Text workshop", "Potential credentials are excluded from transformations")
+            return
+        dialog = TransformDialog(content, self._copy_plain_text,
+                                 self._save_transformed_text, self)
+        dialog.exec()
+
+    def _save_transformed_text(self, value: str):
+        if not value:
+            self.inform("Text workshop", "No text to save")
+            return
+        if looks_sensitive(value) or sensitive_text(value):
+            self.error("Text workshop", "Potential credentials are not saved in history")
+            return
+        raw = value.encode("utf-8")
+        self.store.add("text", raw, " ".join(value.split())[:550],
+                       self.active_bin(), formats={"text/plain;charset=utf-8": raw})
+        self.refresh()
+        self.inform("Text workshop", "Saved as a new clip; the original is unchanged")
+
+    def queue_add_selected(self):
+        clip_id = self.selected_id()
+        if clip_id is None:
+            return
+        try:
+            added = self.paste_queue.add(clip_id)
+        except ValueError as exc:
+            self.error("Paste queue", str(exc))
+            return
+        self._refresh_queue_button()
+        self.statusBar().showMessage(
+            "Added to paste queue" if added else "Already in paste queue", 4500
+        )
+
+    def _refresh_queue_button(self):
+        if not hasattr(self, "queue_next_button"):
+            return
+        count = len(self.paste_queue)
+        self.queue_next_button.setText(f"NEXT {count}")
+        self.queue_next_button.setEnabled(bool(count))
+        self.queue_next_button.setToolTip(
+            f"{count} queued · copy next item; paste manually (never types into other windows)"
+        )
+
+    def queue_copy_next(self):
+        while len(self.paste_queue):
+            clip_id = self.paste_queue.next_id()
+            self._refresh_queue_button()
+            if clip_id is not None and self._copy_entry_by_id(clip_id):
+                self.inform("Paste queue", "Next item copied; paste manually, then choose NEXT")
+                return
+        self.statusBar().showMessage("Paste queue is empty", 3500)
+
+    def queue_clear(self):
+        if not len(self.paste_queue):
+            return
+        result = QMessageBox.question(
+            self, "Clear paste queue", "Clear all queued items? Saved clips will remain.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if result == QMessageBox.StandardButton.Yes:
+            self.paste_queue.clear()
+            self._refresh_queue_button()
+
     def delete_selected(self):
         clip_id = self.selected_id()
         if clip_id is None:
@@ -1423,6 +1585,16 @@ class ClipMintWindow(QMainWindow):
         is_image = (self.store.get(clip_id) or ("", b""))[0] == "image"
         ocr_action = menu.addAction("OCR · Extract text from image") if is_image else None
         pin = menu.addAction("Unpin" if pinned else "Pin")
+        favorite = menu.addAction(
+            "Remove favourite" if self.store.is_favorite(clip_id) else "Add to favourites"
+        )
+        edit_tags = menu.addAction("Edit tags…")
+        queue_item = menu.addAction("Add to paste queue")
+        menu.addSeparator()
+        is_text = (self.store.get(clip_id) or ("", b""))[0] == "text"
+        make_template = menu.addAction("Save as snippet template…") if is_text else None
+        transform = menu.addAction("Text workshop · Preview transform…") if is_text else None
+        menu.addSeparator()
         move_menu = menu.addMenu("Move to bin")
         moves = {}
         for name in self.store.bins():
@@ -1437,6 +1609,16 @@ class ClipMintWindow(QMainWindow):
         elif choice == pin:
             self.store.pin(clip_id, not pinned)
             self.refresh()
+        elif choice == favorite:
+            self.toggle_favorite_selected()
+        elif choice == edit_tags:
+            self.edit_selected_tags()
+        elif choice == queue_item:
+            self.queue_add_selected()
+        elif choice is not None and choice == make_template:
+            self.make_selected_template()
+        elif choice is not None and choice == transform:
+            self.transform_selected()
         elif choice in moves:
             self.store.move(clip_id, moves[choice])
             self.refresh()

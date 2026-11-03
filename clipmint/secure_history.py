@@ -66,7 +66,7 @@ class EncryptedClipStore(ClipStore):
         if len(key) != SecretBox.KEY_SIZE:
             raise ValueError("Invalid history encryption key")
         self.box = SecretBox(key)
-        super().__init__(path, max_unpinned=max_unpinned)
+        super().__init__(path, max_unpinned=max_unpinned, index_plaintext=False)
         os.chmod(self.path, 0o600)
 
     def _seal(self, data: bytes, preview: str, formats: dict[str, bytes] | None) -> bytes:
@@ -87,6 +87,17 @@ class EncryptedClipStore(ClipStore):
             )
         except (CryptoError, KeyError, ValueError, TypeError) as exc:
             raise HistorySecurityError("Encrypted history entry failed authentication") from exc
+
+    def _encode_template(self, text: str) -> bytes:
+        # Secure history never writes reusable template bodies into plaintext
+        # SQLite columns, FTS indexes, or the old unencrypted database.
+        return bytes(self.box.encrypt(text.encode("utf-8")))
+
+    def _decode_template(self, value: bytes) -> str:
+        try:
+            return self.box.decrypt(value).decode("utf-8")
+        except (CryptoError, UnicodeError) as exc:
+            raise HistorySecurityError("Encrypted template failed authentication") from exc
 
     def add(self, kind: str, content: bytes, preview: str, bin_name="Work",
             formats: dict[str, bytes] | None = None):
@@ -113,17 +124,25 @@ class EncryptedClipStore(ClipStore):
         result = super().get(clip_id)
         return self._open(result[1])[2] if result else {}
 
-    def search(self, query="", bin_name="Work", sort="Latest first", category="All"):
+    def search(self, query="", bin_name="Work", sort="Latest first",
+               category="All", tag="", favorites_only=False):
+        # Decrypt matching previews strictly in-process. No plaintext FTS
+        # index is ever constructed for encrypted history.
         from .store import classify
         rows = self.conn.execute(
-            """SELECT id,kind,content,pinned,created_at,bin FROM clips
+            """SELECT id,kind,content,pinned,created_at,bin,favorite FROM clips
                WHERE bin=? ORDER BY id DESC LIMIT 1000""", (bin_name,)
         )
         clips = []
-        for ident, kind, raw, pinned, date, bucket in rows:
+        for ident, kind, raw, pinned, date, bucket, favorite in rows:
             _, preview, _ = self._open(bytes(raw))
-            if query.casefold() not in preview.casefold(): continue
-            clip = Clip(ident, kind, preview, bool(pinned), date, bucket)
+            if query.casefold() not in preview.casefold():
+                continue
+            if favorites_only and not favorite:
+                continue
+            if tag and tag.lower().strip() not in self.tags(ident):
+                continue
+            clip = Clip(ident, kind, preview, bool(pinned), date, bucket, bool(favorite))
             if category != "All" and classify(clip) != category:
                 continue
             clips.append(clip)
@@ -154,19 +173,27 @@ class EncryptedClipStore(ClipStore):
             for bin_name in legacy.bins():
                 if bin_name not in secure.bins():
                     secure.add_bin(bin_name)
-            for ident, kind, content, formats, preview, pinned, date, bucket in \
+            for ident, kind, content, formats, preview, pinned, date, bucket, favorite in \
                     legacy.conn.execute(
-                        "SELECT id,kind,content,formats,preview,pinned,created_at,bin "
+                        "SELECT id,kind,content,formats,preview,pinned,created_at,bin,favorite "
                         "FROM clips ORDER BY id"
                     ):
                 sealed = secure._seal(bytes(content), preview,
                         bundle_from_bytes(bytes(formats) if formats else None))
                 secure.conn.execute(
                     """INSERT INTO clips
-                       (id,kind,content,formats,preview,pinned,created_at,bin)
-                       VALUES(?,?,?,NULL,?,?,?,?)""",
-                    (ident, kind, sealed, "🔒 Encrypted history item", pinned, date, bucket),
+                       (id,kind,content,formats,preview,pinned,created_at,bin,favorite)
+                       VALUES(?,?,?,NULL,?,?,?,?,?)""",
+                    (ident, kind, sealed, "🔒 Encrypted history item", pinned, date, bucket, favorite),
                 )
+            # Copy organisational metadata and re-seal template bodies. Names
+            # remain visible, while template text is encrypted in the target.
+            secure.conn.executemany(
+                "INSERT INTO clip_tags(clip_id,tag) VALUES(?,?)",
+                legacy.conn.execute("SELECT clip_id,tag FROM clip_tags").fetchall()
+            )
+            for _, name, body in legacy.templates():
+                secure.save_template(name, body)
             secure.conn.commit()
             secure.conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
             secure.close()
