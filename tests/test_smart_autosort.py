@@ -99,7 +99,10 @@ class SmartTypesTests(unittest.TestCase):
             *[{**item, "enabled": False} for item in default_smart_rules()],
         ]
         for value in ("834261", "4111 1111 1111 1111",
-                      "CLIENT_SECRET=synthetic_credential"):
+                      "CLIENT_SECRET=synthetic_credential",
+                      "GITHUB_CLIENT_SECRET=Example_NotReal1234",
+                      "CLICKUP_TOKEN_KEY=synthetic_not_real_1234",
+                      "MY_ACCESS_TOKEN=synthetic_not_real_1234"):
             with self.subTest(value=value[:6]):
                 self.assertIsNone(route_clip(permissive, "text", value,
                                              "Work", bins))
