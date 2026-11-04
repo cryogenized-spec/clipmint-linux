@@ -134,6 +134,48 @@ class TemporaryRetentionUiTests(unittest.TestCase):
                 else:
                     os.environ["XDG_DATA_HOME"] = original
 
+    def test_modal_delete_cannot_target_a_new_clip_after_expiry(self):
+        with TemporaryDirectory() as root:
+            previous = os.environ.get("XDG_DATA_HOME")
+            os.environ["XDG_DATA_HOME"] = root
+            window = None
+            try:
+                window = self.window_in(root)
+                expired = add_old_temporary(window, b"modal old item")
+                index = next(i for i in range(window.tabs.count())
+                             if window.tabs.tabText(i) == "Temporary")
+                window.tabs.setCurrentIndex(index)
+                window.refresh()
+                self.assertEqual(window.history.count(), 1)
+                window.history.setCurrentRow(0)
+                self.assertEqual(window.selected_id(), expired)
+                window.settings.setValue("temporary/expire_24h", True)
+                window.update_temporary_expiry_schedule()
+                replacement_ids = []
+
+                def confirm_after_retention(*args, **kwargs):
+                    window.expire_temporary_if_enabled()
+                    new_id = window.store.add(
+                        "text", b"totally different new Work content",
+                        "totally different new Work content", "Work"
+                    )
+                    replacement_ids.append(new_id)
+                    return QMessageBox.StandardButton.Yes
+
+                with patch.object(QMessageBox, "question",
+                                  side_effect=confirm_after_retention):
+                    window.delete_selected()
+                self.assertEqual(len(replacement_ids), 1)
+                self.assertGreater(replacement_ids[0], expired)
+                self.assertIsNotNone(window.store.get(replacement_ids[0]))
+                self.assertIsNone(window.store.get(expired))
+            finally:
+                self.cleanup(window)
+                if previous is None:
+                    os.environ.pop("XDG_DATA_HOME", None)
+                else:
+                    os.environ["XDG_DATA_HOME"] = previous
+
     def test_exit_setting_skips_tray_hide_but_runs_on_real_quit(self):
         with TemporaryDirectory() as root:
             original = os.environ.get("XDG_DATA_HOME")
