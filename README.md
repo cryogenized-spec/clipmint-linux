@@ -2,6 +2,8 @@
 
 A mouse-first clipboard manager, screenshot tool, and dedicated MP4/GIF recorder for **Linux Mint 22 Cinnamon X11, x86-64**. Independent of Windows ClipClip; no Wine.
 
+**Current source-code licence:** [GNU AGPLv3, version 3 only](LICENSE) (`AGPL-3.0-only`). Earlier MIT-licensed releases keep their original permissions; bundled fonts, FFmpeg, dependencies and art have their own rights. See [third-party notices](THIRD-PARTY-NOTICES.md).
+
 ## Install normally, no terminal
 
 1. Open [ClipMint Releases](https://github.com/cryogenized-spec/clipmint-linux/releases).
@@ -51,7 +53,7 @@ Automated tests cover SQLite bins/migration, UI launch and screen-recorder state
 
 ## Licences
 
-Original ClipMint code: MIT. Bundled FFmpeg: separate GPL executable, licence/source details inside the package. The included original DotGothic16 font is under SIL OFL 1.1; its licence is packaged as `OFL-DotGothic16.txt`.
+The currently published ClipMint-owned source code is licensed under the **GNU Affero General Public License, version 3 only** (`AGPL-3.0-only`); see [`LICENSE`](LICENSE). Previously distributed MIT-licensed copies and the rights already granted for those releases remain valid. The historical MIT text and copyright notice are kept in [`LICENSES/MIT-legacy.txt`](LICENSES/MIT-legacy.txt) for attribution and provenance, not as a new dual-licensing promise for future changes. Bundled FFmpeg, PySide6/Qt and other Python dependencies, SIL OFL fonts, and supplied artwork are **not automatically relicensed** by ClipMint's AGPL declaration. See [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md) and the copyright/licence files inside the Debian package. The corresponding ClipMint build source is publicly available at https://github.com/cryogenized-spec/clipmint-linux; the `.deb` contains a source pointer and build commit.
 
 
 ## v0.4 development preview — NOT YET RELEASED
