@@ -71,7 +71,7 @@ KEY_VALUE = re.compile(
     r"\b[\"']?\s*[:=]\s*[\"']?([^\s\"']{3,})"
 )
 ENV_ASSIGNMENT = re.compile(
-    r"(?m)^\s*[\"']?([A-Za-z_][A-Za-z0-9_.-]{2,80})[\"']?\s*[:=]\s*[\"']?([^\s\"']{4,})"
+    r"(?m)^[ \t]*[\"']?([A-Za-z_][A-Za-z0-9_.-]{2,80})[\"']?[ \t]*[:=][ \t]*[\"']?([^\s\"']{4,})"
 )
 SENSITIVE_ENV_ENDINGS = (
     "PASSWORD", "PASSPHRASE", "SECRET", "TOKEN", "API_KEY",
