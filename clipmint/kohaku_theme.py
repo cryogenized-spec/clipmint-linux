@@ -192,4 +192,66 @@ QPushButton#organizerAction:hover {background:#66384C;}
 QPushButton#organizerAction:disabled {
     color:#8F7783;background:#2A202A;border:1px solid #5F4651;
 }
+
+/* Capture archive: coordinated with the Crimson/Kohaku navigation and ledger. */
+QWidget#captureLibraryPage {
+    background:qlineargradient(x1:0,y1:0,x2:1,y2:1,
+        stop:0 #281B27,stop:1 #1B131C);
+    border:1px solid #865563;border-radius:9px;
+}
+QLabel#captureEyebrow {
+    background:transparent;color:#DE91A3;
+    font:11px "DejaVu Sans Mono";
+}
+QLabel#captureHint {
+    background:transparent;color:#D7B8BD;
+    font:12px "Georgia";
+}
+QLabel#captureFilename {
+    background:transparent;color:#FFE4D6;
+    font:20px "Cormorant Garamond";
+}
+QLabel#captureDetails {
+    background:transparent;color:#D4B0B9;
+    font:11px "DejaVu Sans Mono";
+}
+QListWidget#screenshotGallery {
+    background:#1D1520;color:#F5E5DC;
+    border:1px solid #805064;border-radius:8px;
+    padding:8px;outline:0;
+}
+QListWidget#screenshotGallery::item {
+    background:#31212E;color:#F4E2D8;
+    border:1px solid #674152;border-radius:7px;
+    padding:5px;margin:3px;
+    font:12px "Cormorant Garamond";
+}
+QListWidget#screenshotGallery::item:hover {
+    background:#493044;border:1px solid #AC7185;
+}
+QListWidget#screenshotGallery::item:selected {
+    background:#66364B;border:2px solid #E8A0AE;
+    color:#FFF3E7;
+}
+QListWidget#screenshotGallery::item:focus {border:2px solid #F1C59D;}
+QListWidget#recordingLibrary {
+    background:#1D1520;color:#F4E3D9;
+    border:1px solid #805064;border-radius:7px;padding:8px;
+    font:13px "DejaVu Sans Mono";
+}
+QFrame#capturePreviewPane {
+    background:qlineargradient(x1:0,y1:0,x2:0,y2:1,
+        stop:0 #2E202E,stop:1 #1B141F);
+    border:1px solid #A06877;border-radius:8px;
+}
+QLabel#screenshotLargePreview {
+    background:#151019;border:1px solid #6E4658;border-radius:6px;
+}
+QPushButton#captureAction {
+    color:#F7E6D7;background:#4C2D40;
+    border:1px solid #A36F7D;border-radius:5px;
+    padding:8px 10px;font:13px "Cormorant Garamond";
+}
+QPushButton#captureAction:hover {background:#73445B;}
+QPushButton#captureAction:focus {border:2px solid #F1C59D;}
 """
