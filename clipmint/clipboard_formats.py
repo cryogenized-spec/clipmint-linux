@@ -64,6 +64,21 @@ def sensitive_text(value: str) -> bool:
     return False
 
 
+def sensitive_payload(kind: str, content: bytes,
+                      formats: dict[str, bytes] | None = None) -> bool:
+    """Reject sensitive plaintext and alternate text formats before persistence."""
+    if kind != "text":
+        return False
+    if sensitive_text(content.decode("utf-8", "replace")):
+        return True
+    for name, raw in (formats or {}).items():
+        if name.lower().startswith("text/") and sensitive_text(
+            raw.decode("utf-8", "replace")
+        ):
+            return True
+    return False
+
+
 @dataclass(frozen=True)
 class ClipboardEntry:
     kind: str
