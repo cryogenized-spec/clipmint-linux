@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import os
 import re
@@ -132,6 +133,21 @@ class ClipStore:
                 DELETE FROM clip_tags WHERE clip_id=OLD.id;
             END""")
         self.conn.execute("CREATE INDEX IF NOT EXISTS idx_clips_bin_id ON clips(bin,id)")
+        # SQLite INTEGER PRIMARY KEY can reuse a deleted highest row ID.
+        # Persist a monotonic allocation counter so stale dialogs/queue IDs
+        # can never point to a different future clip.
+        self.conn.execute("""CREATE TABLE IF NOT EXISTS clipmint_sequences (
+            name TEXT PRIMARY KEY,
+            next_id INTEGER NOT NULL CHECK(next_id > 0)
+        )""")
+        self.conn.execute(
+            "INSERT OR IGNORE INTO clipmint_sequences(name,next_id) "
+            "SELECT 'clips',COALESCE(MAX(id),0)+1 FROM clips"
+        )
+        self.conn.execute(
+            "UPDATE clipmint_sequences SET next_id=MAX(next_id,"
+            "(SELECT COALESCE(MAX(id),0)+1 FROM clips)) WHERE name='clips'"
+        )
         self.conn.commit()
         self.search_index = ClipSearchIndex(self.conn, enabled=index_plaintext)
 
@@ -144,6 +160,24 @@ class ClipStore:
             raise ValueError("Bin name must have 1–32 characters")
         self.conn.execute("INSERT INTO bins(name,position) VALUES(?,COALESCE((SELECT MAX(position)+1 FROM bins),0))", (name,))
         self.conn.commit()
+
+    def _allocate_clip_id(self) -> int:
+        # Called only within an insertion transaction. Legacy encrypted
+        # migration may insert explicit IDs, so account for the current max.
+        row = self.conn.execute(
+            "SELECT next_id FROM clipmint_sequences WHERE name='clips'"
+        ).fetchone()
+        next_id = max(
+            int(row[0]),
+            int(self.conn.execute(
+                "SELECT COALESCE(MAX(id),0)+1 FROM clips"
+            ).fetchone()[0]),
+        )
+        self.conn.execute(
+            "UPDATE clipmint_sequences SET next_id=? WHERE name='clips'",
+            (next_id + 1,),
+        )
+        return next_id
 
     def add(self, kind: str, content: bytes, preview: str, bin_name: str = "Work",
             formats: dict[str, bytes] | None = None) -> int | None:
@@ -158,10 +192,19 @@ class ClipStore:
             "SELECT id,kind,content,formats FROM clips WHERE bin=? ORDER BY id DESC LIMIT 1", (bin_name,)
         ).fetchone()
         if newest and newest[1] == kind and newest[2] == content and newest[3] == packed:
+            # Recopying the same item counts as a new use for Temporary TTL.
+            # Leave the stable ID, pin, tags and favourite state untouched.
+            self.conn.execute(
+                "UPDATE clips SET created_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') "
+                "WHERE id=?", (newest[0],)
+            )
+            self.conn.commit()
             return newest[0]
+        clip_id = self._allocate_clip_id()
         cursor = self.conn.execute(
-            "INSERT INTO clips(kind,content,preview,bin,formats) VALUES(?,?,?,?,?)",
-            (kind, sqlite3.Binary(content), preview[:600], bin_name,
+            "INSERT INTO clips(id,kind,content,preview,bin,formats) "
+            "VALUES(?,?,?,?,?,?)",
+            (clip_id, kind, sqlite3.Binary(content), preview[:600], bin_name,
              sqlite3.Binary(packed) if packed is not None else None)
         )
         # Each bin retains its own pinned items and most recent unpinned items.
@@ -299,6 +342,85 @@ class ClipStore:
 
     def count(self, bin_name: str) -> int:
         return self.conn.execute("SELECT COUNT(*) FROM clips WHERE bin=?", (bin_name,)).fetchone()[0]
+
+    def refresh_temporary_copy_time(self, clip_id: int) -> None:
+        """Refresh TTL after a user copies an entry from ClipMint's history.
+
+        Clipboard reinsertion is intentionally suppressed on these paths, so
+        history-copy actions must refresh the original item's retention clock.
+        Pinned clips are also touched, preserving freshness if later unpinned.
+        Other bins remain unaffected.
+        """
+        with self.conn:
+            self.conn.execute(
+                "UPDATE clips SET created_at="
+                "strftime('%Y-%m-%dT%H:%M:%fZ','now') "
+                "WHERE id=? AND bin='Temporary'",
+                (clip_id,),
+            )
+
+    def _remove_temporary_unpinned(
+        self, cutoff_iso: str | None = None,
+        deleted_ids: list[int] | None = None,
+    ) -> int:
+        """Delete only unpinned clips in the built-in Temporary collection.
+
+        A cutoff of None is reserved for an explicitly enabled normal-exit
+        cleanup. A timestamp is used for opt-in age-based expiration.
+        Pinned items, reusable templates, and other bins are not touched.
+        """
+        condition = "bin='Temporary' AND pinned=0"
+        parameters: tuple[str, ...] = ()
+        if cutoff_iso is not None:
+            # julianday ignores malformed/unknown timestamps (NULL), so
+            # legacy rows without a valid UTC date are not purged blindly.
+            condition += " AND julianday(created_at) <= julianday(?)"
+            parameters = (cutoff_iso,)
+        identifiers = [int(row[0]) for row in self.conn.execute(
+            "SELECT id FROM clips WHERE " + condition, parameters
+        )]
+        if not identifiers:
+            return 0
+        with self.conn:
+            for ident in identifiers:
+                self.search_index.delete(ident)
+            self.conn.executemany(
+                "DELETE FROM clips WHERE id=? AND bin='Temporary' AND pinned=0",
+                [(ident,) for ident in identifiers],
+            )
+            self.search_index.trim_deleted()
+        # Report committed removals before any optional compaction. Even if
+        # SQLite VACUUM fails, consumers must invalidate stale clip IDs.
+        if deleted_ids is not None:
+            deleted_ids.extend(identifiers)
+        # FTS5 can retain deleted terms in shadow posting segments even after
+        # the MATCH index no longer reports them. Rebuild surviving postings,
+        # then reconstruct SQLite pages instead of retaining old free space.
+        if self.search_index.enabled:
+            self.search_index.rebuild_after_purge()
+            self.conn.execute("VACUUM")
+        self.conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        return len(identifiers)
+
+    def expire_temporary_unpinned(
+        self, *, now: datetime | None = None,
+        deleted_ids: list[int] | None = None,
+    ) -> int:
+        """Opt-in 24-hour TTL; the caller decides whether it is enabled."""
+        current = datetime.now(timezone.utc) if now is None else now
+        if current.tzinfo is None or current.utcoffset() is None:
+            raise ValueError("Temporary retention requires an aware UTC timestamp")
+        cutoff = current.astimezone(timezone.utc) - timedelta(hours=24)
+        return self._remove_temporary_unpinned(
+            cutoff.isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+            deleted_ids=deleted_ids,
+        )
+
+    def clear_temporary_unpinned(
+        self, *, deleted_ids: list[int] | None = None,
+    ) -> int:
+        """Run only on deliberate application exit with explicit user opt-in."""
+        return self._remove_temporary_unpinned(deleted_ids=deleted_ids)
 
     def move(self, clip_id: int, bin_name: str) -> None:
         if bin_name not in self.bins():

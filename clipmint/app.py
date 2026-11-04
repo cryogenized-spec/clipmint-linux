@@ -5,6 +5,7 @@ from pathlib import Path
 import json
 import os
 import shlex
+import sqlite3
 import subprocess
 import sys
 
@@ -144,6 +145,10 @@ class ClipMintWindow(QMainWindow):
         self.setMinimumSize(850, 600)
         self.store = ClipStore()
         self.settings = QSettings("ClipMint", "ClipMint")
+        self._temporary_exit_cleaned = False
+        self._temporary_expiry_timer = QTimer(self)
+        self._temporary_expiry_timer.setInterval(5 * 60 * 1000)
+        self._temporary_expiry_timer.timeout.connect(self.expire_temporary_if_enabled)
         self.history_secure = False
         self.history_security_error = ""
         if self.settings.value("privacy/history_secure", False, type=bool):
@@ -205,6 +210,11 @@ class ClipMintWindow(QMainWindow):
         self.poller.start(300)
         self.open_section(0)
         self._update_manga_visibility()
+        self.update_temporary_expiry_schedule()
+        # Only an explicitly saved enabled setting can trigger cleanup on
+        # startup. An upgrade or an application crash cannot opt users in.
+        if self._temporary_expiry_timer.isActive():
+            QTimer.singleShot(0, self.expire_temporary_if_enabled)
         QTimer.singleShot(400, self.clipboard_changed)
 
     def resizeEvent(self, event):
@@ -943,6 +953,41 @@ class ClipMintWindow(QMainWindow):
         self.pause_button = QPushButton("Pause monitoring")
         self.pause_button.clicked.connect(self.toggle_monitoring)
         layout.addWidget(self.pause_button)
+
+        temp_group = QGroupBox("Temporary collection · retention")
+        temp_layout = QVBoxLayout(temp_group)
+        explanation = QLabel(
+            "Both options start OFF. Only unpinned clips in Temporary are "
+            "eligible. Pinned entries, Work, Personal, and snippets survive. "
+            "Closing to the tray, an application update or a crash never "
+            "triggers clear-on-exit."
+        )
+        explanation.setWordWrap(True)
+        temp_layout.addWidget(explanation)
+        self.temporary_expiry_toggle = QCheckBox(
+            "Automatically remove unpinned Temporary clips after 24 hours"
+        )
+        self.temporary_expiry_toggle.setChecked(
+            self.settings.value("temporary/expire_24h", False, type=bool)
+        )
+        self.temporary_expiry_toggle.toggled.connect(
+            self.set_temporary_expiry_enabled
+        )
+        temp_layout.addWidget(self.temporary_expiry_toggle)
+        self.temporary_exit_toggle = QCheckBox(
+            "Clear unpinned Temporary clips when I quit ClipMint"
+        )
+        self.temporary_exit_toggle.setChecked(
+            self.settings.value("temporary/clear_on_quit", False, type=bool)
+        )
+        self.temporary_exit_toggle.toggled.connect(
+            lambda enabled: self.settings.setValue(
+                "temporary/clear_on_quit", enabled
+            )
+        )
+        temp_layout.addWidget(self.temporary_exit_toggle)
+        layout.addWidget(temp_group)
+
         open_files = QPushButton("Open recordings folder")
         open_files.clicked.connect(lambda: self.open_folder(recordings_dir()))
         layout.addWidget(open_files)
@@ -1457,6 +1502,7 @@ class ClipMintWindow(QMainWindow):
             mime_from_entry(kind, contents, self.store.get_formats(clip_id))
         )
         QTimer.singleShot(400, lambda: setattr(self, "_ignore_next_clipboard_change", False))
+        self.store.refresh_temporary_copy_time(clip_id)
         return True
 
     def show_templates(self):
@@ -1708,6 +1754,9 @@ class ClipMintWindow(QMainWindow):
             mime_from_entry(kind, contents,
                             self.store.get_formats(item.data(Qt.ItemDataRole.UserRole)))
         )
+        self.store.refresh_temporary_copy_time(
+            item.data(Qt.ItemDataRole.UserRole)
+        )
         self.inform("Copied", "Saved snippet copied to the system clipboard")
 
     def register_cinnamon_hotkey(self):
@@ -1749,6 +1798,7 @@ class ClipMintWindow(QMainWindow):
                 mime_from_entry(kind, content, self.store.get_formats(clip_id))
             )
         QTimer.singleShot(400, lambda: setattr(self, "_ignore_next_clipboard_change", False))
+        self.store.refresh_temporary_copy_time(clip_id)
         if wid and self.settings.value("popup/auto_paste", True, type=bool):
             QTimer.singleShot(150, lambda: self._paste_to_target(wid, klass))
 
@@ -1794,6 +1844,89 @@ class ClipMintWindow(QMainWindow):
             "History encrypted",
             "New captures are encrypted. The old plaintext history still exists."
         )
+
+    def update_temporary_expiry_schedule(self):
+        enabled = (not self.history_security_error and
+                   self.settings.value("temporary/expire_24h", False, type=bool))
+        if enabled:
+            self._temporary_expiry_timer.start()
+        else:
+            self._temporary_expiry_timer.stop()
+
+    def set_temporary_expiry_enabled(self, enabled: bool):
+        if enabled:
+            confirmation = QMessageBox.question(
+                self, "Enable Temporary expiry?",
+                "Automatically delete unpinned Temporary items 24 hours after "
+                "they were saved? Any already older than 24 hours will be "
+                "removed immediately. Pinned items and other collections "
+                "will remain untouched.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if confirmation != QMessageBox.StandardButton.Yes:
+                self.temporary_expiry_toggle.blockSignals(True)
+                self.temporary_expiry_toggle.setChecked(False)
+                self.temporary_expiry_toggle.blockSignals(False)
+                return
+        self.settings.setValue("temporary/expire_24h", enabled)
+        self.update_temporary_expiry_schedule()
+        if enabled:
+            self.expire_temporary_if_enabled()
+
+    def invalidate_removed_clip_references(self, removed_ids: list[int]):
+        """Never let queued/popup IDs outlive deleted SQLite history rows."""
+        if not removed_ids:
+            return
+        self.paste_queue.discard_ids(removed_ids)
+        self._refresh_queue_button()
+        if self.quick_popup.isVisible():
+            self.quick_popup.refresh()
+        else:
+            self.quick_popup.items.clear()
+
+    def expire_temporary_if_enabled(self):
+        if (self.history_security_error or not self.settings.value(
+            "temporary/expire_24h", False, type=bool
+        )):
+            return
+        removed_ids: list[int] = []
+        try:
+            removed = self.store.expire_temporary_unpinned(
+                deleted_ids=removed_ids
+            )
+        except (sqlite3.DatabaseError, OSError) as exc:
+            # Deletions may already be committed even if SQLite maintenance
+            # fails. Never let a failure preserve stale queued clipboard IDs.
+            self.invalidate_removed_clip_references(removed_ids)
+            if removed_ids:
+                self.refresh()
+            self._temporary_expiry_timer.stop()
+            self.error("Temporary expiry", str(exc))
+            return
+        if removed:
+            self.invalidate_removed_clip_references(removed_ids)
+            self.refresh()
+            self.statusBar().showMessage(
+                f"Temporary: {removed} expired unpinned clip(s) removed", 5000
+            )
+
+    def clear_temporary_on_normal_exit(self):
+        """Never run for crashes, updates, or close-to-tray actions."""
+        if self._temporary_exit_cleaned:
+            return
+        if self.history_security_error or not self.settings.value(
+            "temporary/clear_on_quit", False, type=bool
+        ):
+            return
+        try:
+            self.store.clear_temporary_unpinned()
+        except (sqlite3.DatabaseError, OSError) as exc:
+            QMessageBox.warning(
+                self, "Temporary cleanup was not completed", str(exc)
+            )
+            return
+        self._temporary_exit_cleaned = True
 
     def toggle_monitoring(self):
         if self.history_security_error:
@@ -2010,6 +2143,7 @@ class ClipMintWindow(QMainWindow):
             self.error("Recording active", "Finish recording before quitting")
             event.ignore()
         else:
+            self.clear_temporary_on_normal_exit()
             self.store.close()
             event.accept()
 
@@ -2023,6 +2157,7 @@ class ClipMintWindow(QMainWindow):
             self.recorder_window = None
         self._closing = True
         self.lock_vault()
+        self.clear_temporary_on_normal_exit()
         self.store.close()
         if self.tray is not None:
             self.tray.hide()

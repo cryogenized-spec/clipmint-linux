@@ -104,6 +104,13 @@ class PasteQueue:
     def next_id(self) -> int | None:
         return self._items.pop(0) if self._items else None
 
+    def discard_ids(self, deleted: list[int] | tuple[int, ...] | set[int]) -> int:
+        """Invalidate expired/deleted entries without dropping valid queue items."""
+        removed = set(deleted)
+        before = len(self._items)
+        self._items = [ident for ident in self._items if ident not in removed]
+        return before - len(self._items)
+
     def clear(self) -> None:
         self._items.clear()
 
