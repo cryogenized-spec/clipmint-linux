@@ -133,6 +133,21 @@ class ClipStore:
                 DELETE FROM clip_tags WHERE clip_id=OLD.id;
             END""")
         self.conn.execute("CREATE INDEX IF NOT EXISTS idx_clips_bin_id ON clips(bin,id)")
+        # SQLite INTEGER PRIMARY KEY can reuse a deleted highest row ID.
+        # Persist a monotonic allocation counter so stale dialogs/queue IDs
+        # can never point to a different future clip.
+        self.conn.execute("""CREATE TABLE IF NOT EXISTS clipmint_sequences (
+            name TEXT PRIMARY KEY,
+            next_id INTEGER NOT NULL CHECK(next_id > 0)
+        )""")
+        self.conn.execute(
+            "INSERT OR IGNORE INTO clipmint_sequences(name,next_id) "
+            "SELECT 'clips',COALESCE(MAX(id),0)+1 FROM clips"
+        )
+        self.conn.execute(
+            "UPDATE clipmint_sequences SET next_id=MAX(next_id,"
+            "(SELECT COALESCE(MAX(id),0)+1 FROM clips)) WHERE name='clips'"
+        )
         self.conn.commit()
         self.search_index = ClipSearchIndex(self.conn, enabled=index_plaintext)
 
@@ -145,6 +160,24 @@ class ClipStore:
             raise ValueError("Bin name must have 1–32 characters")
         self.conn.execute("INSERT INTO bins(name,position) VALUES(?,COALESCE((SELECT MAX(position)+1 FROM bins),0))", (name,))
         self.conn.commit()
+
+    def _allocate_clip_id(self) -> int:
+        # Called only within an insertion transaction. Legacy encrypted
+        # migration may insert explicit IDs, so account for the current max.
+        row = self.conn.execute(
+            "SELECT next_id FROM clipmint_sequences WHERE name='clips'"
+        ).fetchone()
+        next_id = max(
+            int(row[0]),
+            int(self.conn.execute(
+                "SELECT COALESCE(MAX(id),0)+1 FROM clips"
+            ).fetchone()[0]),
+        )
+        self.conn.execute(
+            "UPDATE clipmint_sequences SET next_id=? WHERE name='clips'",
+            (next_id + 1,),
+        )
+        return next_id
 
     def add(self, kind: str, content: bytes, preview: str, bin_name: str = "Work",
             formats: dict[str, bytes] | None = None) -> int | None:
@@ -167,9 +200,11 @@ class ClipStore:
             )
             self.conn.commit()
             return newest[0]
+        clip_id = self._allocate_clip_id()
         cursor = self.conn.execute(
-            "INSERT INTO clips(kind,content,preview,bin,formats) VALUES(?,?,?,?,?)",
-            (kind, sqlite3.Binary(content), preview[:600], bin_name,
+            "INSERT INTO clips(id,kind,content,preview,bin,formats) "
+            "VALUES(?,?,?,?,?,?)",
+            (clip_id, kind, sqlite3.Binary(content), preview[:600], bin_name,
              sqlite3.Binary(packed) if packed is not None else None)
         )
         # Each bin retains its own pinned items and most recent unpinned items.
