@@ -972,8 +972,11 @@ class ClipMintWindow(QMainWindow):
                 self.tabs.addTab(name)
         self.autosort_rules = default_smart_rules()
         self.persist_autosort()
+        # The explicit Restore defaults action is also the one-click upgrade
+        # path for an older installation with an empty or disabled rule set.
+        self.autosort_switch.setChecked(True)
         self.refresh_autosort_list()
-        self.statusBar().showMessage("30 Autosort defaults restored", 3500)
+        self.statusBar().showMessage("30 Autosort defaults active", 3500)
 
     def autosort_destination(
         self, kind: str, text: str, current_bin: str,
