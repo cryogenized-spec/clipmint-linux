@@ -96,10 +96,14 @@ encrypted Vault. An isolated 6–8-digit number is treated as a possible OTP
 and excluded; this may also exclude ordinary numerical references. Bare
 random 40+ character hexadecimal strings are excluded because a checksum
 is indistinguishable from a secret key without context. Heuristics are
-best-effort and may have false positives/negatives. Clipboard contents remain
-visible to other local processes on X11 until the originating application's
-clipboard manager clears them; skipping history is not the same as purging
-the system clipboard.
+best-effort and may have false positives/negatives. When ClipMint sees a
+recognised sensitive clipboard text value, it schedules a **30-second
+conditional clear**: it empties the X11 clipboard only if the value is
+unchanged, so copying something else is not lost. The timer is memory-only;
+quitting ClipMint or another clipboard manager can defeat expiry, and local
+X11 processes may read the value before it clears. Neither omitting history
+nor a clipboard timer is secure destruction or a substitute for a credential
+manager.
 
 Autosort can still be disabled, reordered, and customised using Text, Image,
 URL, Phone, Keyword, Regex or **Smart** rules. The first enabled matching
