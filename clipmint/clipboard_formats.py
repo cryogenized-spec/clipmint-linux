@@ -66,16 +66,21 @@ def sensitive_text(value: str) -> bool:
 
 def sensitive_payload(kind: str, content: bytes,
                       formats: dict[str, bytes] | None = None) -> bool:
-    """Reject sensitive plaintext and alternate text formats before persistence."""
-    if kind != "text":
-        return False
-    if sensitive_text(content.decode("utf-8", "replace")):
+    """Reject any saved secret-bearing text, including image/file MIME extras.
+
+    Image pixels are not interpreted as text, but accompanying HTML, plain
+    text, URI lists and Nemo file metadata must never smuggle credentials
+    into the history bundle.
+    """
+    if kind == "text" and sensitive_text(content.decode("utf-8", "replace")):
+        return True
+    if kind == "files" and sensitive_text(content.decode("utf-8", "replace")):
         return True
     for name, raw in (formats or {}).items():
-        if name.lower().startswith("text/") and sensitive_text(
-            raw.decode("utf-8", "replace")
-        ):
-            return True
+        if (name.lower().startswith("text/") or
+                name.lower() == "x-special/gnome-copied-files"):
+            if sensitive_text(raw.decode("utf-8", "replace")):
+                return True
     return False
 
 
@@ -128,6 +133,14 @@ def from_mime(mime, png: bytes | None = None) -> ClipboardEntry | None:
         if len(png) > MAX_FORMAT_BYTES or (total - len(previous) + len(png)) > MAX_BUNDLE_BYTES:
             return None
         saved["image/png"] = png
+    # Check every representation BEFORE the file/image fast paths, not only
+    # the textual branch below. A PNG with sensitive text/html must be rejected
+    # rather than persisted as a hidden alternate clipboard format.
+    sample_kind = ("files" if mime.hasUrls() or
+                   "x-special/gnome-copied-files" in saved
+                   else "image" if png else "text")
+    if sensitive_payload(sample_kind, b"", saved):
+        return None
     if mime.hasUrls() or "x-special/gnome-copied-files" in saved:
         uri_raw = saved.get("x-special/gnome-copied-files") or saved.get("text/uri-list", b"")
         text = uri_raw.decode("utf-8", errors="replace")
