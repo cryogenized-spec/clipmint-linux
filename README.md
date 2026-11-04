@@ -326,3 +326,20 @@ that Cinnamon's standard GSettings registry cannot detect; verify the binding
 physically on Linux Mint Cinnamon X11. Disable or remove the custom binding
 using Cinnamon's Keyboard settings if reverting. The original
 \`Ctrl+Shift+S\` in-window shortcut stays available.
+
+
+### Vault: one-click masked copy (review)
+
+After unlocking the encrypted vault, select an entry and choose **Reveal**.
+The value remains hidden as password dots unless **Show value** is explicitly
+enabled. The dialog now includes its own **Copy** button, which copies the
+**entire** saved value without needing to select any characters, even while
+the value remains masked.
+
+The existing Copy action in the vault list uses the same full-value clipboard
+path. Both show a temporary check mark (\`✓ Copied!\`) on the clicked button
+and the status bar shows only \`Copied!\`. The clipboard is cleared after
+30 seconds **only if its contents are unchanged**; copying from the vault
+never adds the value to the normal ClipMint history or search index.
+The usual X11 clipboard-security limitation still applies while the value
+is available for pasting. These changes do not alter the vault encryption.
