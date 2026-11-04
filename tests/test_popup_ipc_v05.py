@@ -53,18 +53,21 @@ class PopUpTests(unittest.TestCase):
                 if messages:
                     break
             self.assertEqual(messages, ["toggle"])
-            self.assertTrue(single_instance.send_command("screenshot-area"))
-            for _ in range(15):
-                self.app.processEvents()
-                if len(messages) == 2:
-                    break
-            self.assertEqual(messages, ["toggle", "screenshot-area"])
-            self.assertTrue(single_instance.send_command("record-area"))
-            for _ in range(15):
-                self.app.processEvents()
-                if len(messages) == 3:
-                    break
+            for command in ("screenshot-area", "record-area"):
+                self.assertTrue(single_instance.send_command(command))
+                for _ in range(15):
+                    self.app.processEvents()
+                    if messages[-1] == command:
+                        break
             self.assertEqual(messages, ["toggle", "screenshot-area", "record-area"])
+            # Quiet login startup probes the incumbent instead of showing its UI.
+            with self.assertRaises(RuntimeError):
+                single_instance.InstanceServer(messages.append, occupied_command="ping")
+            for _ in range(15):
+                self.app.processEvents()
+                if len(messages) >= 4:
+                    break
+            self.assertEqual(messages, ["toggle", "screenshot-area", "record-area", "ping"])
             server.server.close()
             single_instance.QLocalServer.removeServer(unique)
 

@@ -73,14 +73,55 @@ action remains available with the mouse.
 
 ### Autosort
 
-Enable Autosort explicitly (it is OFF by default). Add, edit, disable, delete,
-or reorder top-to-bottom rules to route new clips by type, URL, phone, keyword
-or regex. The first enabled match wins; unmatched clips still go to the active
-bin. You can set a matching rule to **Never capture**. Existing clips are not
-retroactively moved or deleted. Regular expressions have a short execution
-timeout; inputs longer than 8,192 characters are not matched by regex rules.
-Clipboard source-application attribution is not reliably supported by this
-version. Test a currently selected history clip before enabling complex rules.
+On a **fresh installation of this development branch**, Autosort starts
+**enabled**, with 30 editable Smart-type rules and grouped destination
+collections: Writing, Web, Development, Data, Contacts, Media, Utilities,
+Templates and Finance. Each recognized ordinary clip is routed to its
+collection and tagged with its specific type (e.g. `type_json` or
+`type_tracking_urls`). This creates navigable categories without introducing
+30 tiny collection tabs. On upgrades, **an explicitly saved custom rule list
+or on/off preference is preserved**; nothing is silently overwritten.
+
+The 30 built-in detections cover plain and rich text, Markdown, web/tracking
+URLs, code, shell commands, JSON, YAML/XML, OTPs, passwords, API tokens,
+email, phone and postal addresses, payment cards, bank accounts, public crypto
+wallet addresses, images, SVG, colours, CSV/TSV, paths, copied files, parcel
+tracking, dates, logs, hashes, math/LaTeX and reusable templates.
+
+Sensitive classifications (**password/master key, OTP, API key, payment-card
+data, bank routing/account**) are discarded *before* normal and encrypted
+history writes, even if Autosort is switched off or a custom rule tries to
+retain them. No credential is automatically imported into the separately
+encrypted Vault. An isolated 6–8-digit number is treated as a possible OTP
+and excluded; this may also exclude ordinary numerical references. Bare
+random 40+ character hexadecimal strings are excluded because a checksum
+is indistinguishable from a secret key without context. Heuristics are
+best-effort and may have false positives/negatives. When ClipMint sees a
+recognised sensitive clipboard text value, it schedules a **30-second
+conditional clear**: it empties the X11 clipboard only if the value is
+unchanged, so copying something else is not lost. The timer is memory-only;
+quitting ClipMint or another clipboard manager can defeat expiry, and local
+X11 processes may read the value before it clears. Neither omitting history
+nor a clipboard timer is secure destruction or a substitute for a credential
+manager.
+
+Autosort can still be disabled, reordered, and customised using Text, Image,
+URL, Phone, Keyword, Regex or **Smart** rules. The first enabled matching
+rule wins for ordinary content, and unmatched items stay in the selected bin.
+New custom rules are inserted before the broad plain-text fallback.
+**Restore 30 defaults** explicitly replaces rules after a confirmation; it
+does not move, erase or retag existing history. Preset routing only affects
+new clips. No remote link previews, external address-book lookups, executable
+CLI commands, live package tracking, payment processing or cloud calls are
+performed by classification. The advanced per-format utilities in the user's
+feature brief (tree views, rendering, QR generation, etc.) are separate future
+UI features, not part of this detector PR.
+
+Regular expressions remain capped at 200 pattern characters, 8,192 input
+characters and a short execution timeout. Clipboard source-app attribution
+is not reliably available from Linux Cinnamon/X11; confidence is therefore
+heuristic. Use the **Test selected history clip** control to inspect what a
+newly captured entry would be classified as.
 
 ### Secrets & Variables — experimental, needs independent security review
 
@@ -358,3 +399,106 @@ and the status bar shows only \`Copied!\`. The clipboard is cleared after
 never adds the value to the normal ClipMint history or search index.
 The usual X11 clipboard-security limitation still applies while the value
 is available for pasting. These changes do not alter the vault encryption.
+
+
+## Clipboard secret-detection hardening — review branch
+
+The proposed \`fix/clipboard-secret-detection\` branch adds a single, local detector
+used by clipboard MIME capture, direct plaintext-history writes, OCR and snippet
+UI checks. It detects password-manager hints, known token formats, private keys,
+credential assignments, Luhn-valid payment-card numbers, and sufficiently
+random-looking standalone strings. On a match it **does not retain the value**
+in ordinary history, previews, file-format bundles, or the plaintext search index.
+ClipMint shows only a non-revealing "not saved" status.
+
+**No automatic secret import into the vault is attempted.** That would turn
+untrusted clipboard captures into retained credentials without an explicit choice.
+The \`mask()\` helper is deliberately a fixed-length placeholder, not encryption
+or a promise that the source application or X11 system clipboard is protected.
+
+This filter has both false positives (e.g. some hexadecimal hashes) and false
+negatives. Source-application hints are best-effort, not an access-control
+boundary. It is a review-only change until tests and a packaged Linux Mint
+field check pass. It **does not retroactively remove** credentials already
+recorded in \`~/.local/share/clipmint/history.sqlite3\`, previous backups,
+SQLite WAL pages, or the plaintext FTS index. Review old history locally and
+rotate any credentials suspected of exposure; do not paste live secrets into
+GitHub issues, bug reports, or test fixtures.
+
+
+## Temporary collection: optional retention (development review)
+
+**Default: OFF.** Settings → **Temporary collection · retention** exposes
+two independent, opt-in choices:
+
+- **Automatically remove unpinned Temporary clips after 24 hours.** Requires
+  explicit confirmation when enabling; already-expired entries are removed
+  then, and the application checks periodically while running (every five
+  minutes). For an already-enabled setting, expiration also runs on startup.
+- **Clear unpinned Temporary clips when I quit ClipMint.** Runs only on an
+  orderly, deliberate application exit (Quit in the tray or closing when there
+  is no tray), **not** when hiding its window to the tray. An app crash,
+  forced termination or package update does not invoke the exit cleanup.
+
+Both protect **pinned entries**. Neither touches the Work or Personal bins,
+other user-created collections, reusable snippet templates, screenshot files,
+vault data, or other application files. Moving an old item into Temporary
+subjects it to the selected age rule using the item's existing last-copied
+timestamp. Turning a rule off stops that cleanup without purging anything;
+existing saved settings are preserved on upgrade, and no existing user is
+silently opted in. Deletions remove full-text search entries in ordinary
+history too. Expiry is measured against UTC timestamps, not a guessed local
+clock or application installation date. Recopying the same newest entry
+refreshes its last-used timestamp (for both ordinary and encrypted history),
+so a recently reused Temporary item is not removed using its older date.
+Choosing **Copy** in the archive, using the quick-search popup, or copying
+from the Multi-Paste Queue also renews the 24-hour retention clock.
+Expired clip IDs are dropped from the paste queue and quick-popup cache
+before another copy could reuse a SQLite row ID. For plaintext history, a
+cleanup rebuilds FTS5 postings and compacts the SQLite file to reduce old
+search-index remnants; this may briefly use extra CPU on large archives.
+
+**Caution:** These settings deliberately remove eligible history records.
+Enabling the age rule warns before removing previously expired entries.
+SQLite deletion and WAL cleanup reduce recoverable remnants but cannot
+guarantee physical secure erasure on SSDs, backups or OS snapshots. This is
+a draft feature and is not available in the current installed release.
+
+## Verified one-click clipboard archive backup (review branch)
+
+Settings → **Clipboard privacy → Backup clipboard archive…** saves a
+consistent single-file SQLite snapshot of the **currently active** archive
+via Python's built-in SQLite online backup interface. It captures
+committed changes even when the source database is open and using WAL.
+The saved .sqlite3 has owner-only 0600 file permissions and is verified
+using PRAGMA integrity_check before the staged file is placed at the
+selected destination. If a destination already exists, it is *never*
+overwritten without an explicit confirmation. A cancelled or failed backup
+does not modify the original database.
+
+**Plaintext history produces a plaintext backup**, and the app asks you to
+acknowledge this risk before saving. **Encrypted history stays encrypted**
+without copying or exposing its keyring key; a different computer cannot
+read it without the original key. The separately encrypted Vault and the
+application's QSettings are **not** included. This operation is export-only;
+replacing or restoring a live archive requires its own validated restore
+workflow, and is not part of this draft. No cloud sync, shell command, or
+network access is used.
+
+## Optional launch at login (development branch)
+
+Settings → **Start at login → Launch ClipMint when I log in** is **OFF by default**.
+With an installed .deb, enabling it creates only
+`~/.config/autostart/clipmint.desktop` for the current user (mode 0600).
+It starts `/opt/clipmint/ClipMint --hidden` on subsequent Cinnamon/X11 logins.
+If a tray is available, the app stays in the tray; otherwise it opens its
+window so it cannot become an inaccessible background process. Launching
+again does not create another clipboard watcher or force the running window
+to appear. Turning the setting off removes only ClipMint's exact managed
+entry. Existing custom entries and symlinks are never overwritten or removed,
+and the installed executable is checked before enabling. A crash or package
+update cannot opt you into login startup. No system-wide autostart files
+or other users' configuration are changed.
+
+This remains a **review feature** until CI passes and Cinnamon/X11 startup,
+tray and logout behaviour are tested on the HP OMEN.
