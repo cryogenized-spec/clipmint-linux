@@ -134,6 +134,57 @@ class TemporaryRetentionUiTests(unittest.TestCase):
                 else:
                     os.environ["XDG_DATA_HOME"] = original
 
+    def test_all_history_copy_paths_renew_temporary_clock(self):
+        from PySide6.QtWidgets import QListWidgetItem
+        with TemporaryDirectory() as root:
+            previous = os.environ.get("XDG_DATA_HOME")
+            os.environ["XDG_DATA_HOME"] = root
+            window = None
+            try:
+                window = self.window_in(root)
+                ident = add_old_temporary(window, b"reused scratchpad clip")
+                from_history = QListWidgetItem("reused scratchpad clip")
+                from_history.setData(Qt.ItemDataRole.UserRole, ident)
+
+                for route in ("copy_clip", "_copy_entry_by_id", "quick_pick"):
+                    with self.subTest(route=route):
+                        old = datetime.now(timezone.utc) - timedelta(days=3)
+                        window.store.conn.execute(
+                            "UPDATE clips SET created_at=? WHERE id=?",
+                            (old.isoformat(timespec="milliseconds").replace(
+                                "+00:00", "Z"
+                            ), ident),
+                        )
+                        window.store.conn.commit()
+                        if route == "copy_clip":
+                            window.copy_clip(from_history)
+                        elif route == "_copy_entry_by_id":
+                            self.assertTrue(window._copy_entry_by_id(ident))
+                        else:
+                            window.quick_pick(ident, False, None, "")
+                        self.assertEqual(
+                            window.store.expire_temporary_unpinned(), 0
+                        )
+                        self.assertIsNotNone(window.store.get(ident))
+
+                # Work items are unaffected by Temporary's clock.
+                work = window.store.add("text", b"Work reference",
+                                        "Work reference", "Work")
+                before = window.store.conn.execute(
+                    "SELECT created_at FROM clips WHERE id=?", (work,)
+                ).fetchone()[0]
+                self.assertTrue(window._copy_entry_by_id(work))
+                after = window.store.conn.execute(
+                    "SELECT created_at FROM clips WHERE id=?", (work,)
+                ).fetchone()[0]
+                self.assertEqual(after, before)
+            finally:
+                self.cleanup(window)
+                if previous is None:
+                    os.environ.pop("XDG_DATA_HOME", None)
+                else:
+                    os.environ["XDG_DATA_HOME"] = previous
+
     def test_modal_delete_cannot_target_a_new_clip_after_expiry(self):
         with TemporaryDirectory() as root:
             previous = os.environ.get("XDG_DATA_HOME")
