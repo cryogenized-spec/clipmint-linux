@@ -59,6 +59,7 @@ class SecretDetectorTests(unittest.TestCase):
             "Don't archive this as a password.",
             "No tokens were copied today.",
             "abcdefgh",
+            "HighlyUniqueTemporaryHistoryFtsCanaryZyxw987",
         )
         for sample in samples:
             with self.subTest(sample=sample):
