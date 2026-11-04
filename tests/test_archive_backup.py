@@ -94,6 +94,24 @@ class ArchiveBackupTests(unittest.TestCase):
             finally:
                 src.close()
 
+    def test_duplicate_bin_creation_rolls_back_and_backup_still_works(self):
+        with TemporaryDirectory() as root:
+            src = ClipStore(Path(root) / "live.sqlite3")
+            target = Path(root) / "archive.sqlite3"
+            try:
+                with self.assertRaises(sqlite3.IntegrityError):
+                    src.add_bin("Work")
+                self.assertFalse(src.conn.in_transaction)
+                src.add("text", b"archive works", "archive works")
+                backup_archive(src.conn, target)
+                self.assertEqual(
+                    sqlite3.connect(target).execute(
+                        "SELECT COUNT(*) FROM clips"
+                    ).fetchone()[0], 1
+                )
+            finally:
+                src.close()
+
     def test_rejects_open_source_transaction_without_hanging(self):
         with TemporaryDirectory() as root:
             src = ClipStore(Path(root) / "live.sqlite3")
