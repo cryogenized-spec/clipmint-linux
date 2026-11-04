@@ -300,3 +300,29 @@ accessible in their original folder.
 a screenshot of the actual Qt screen using only synthetic image fixtures.
 Review the rendered preview and test with real screenshots on Linux Mint
 before merging or packaging a new release.
+
+
+### Bilingual sidebar and Cinnamon screenshot keyboard shortcut (review branch)
+
+All six sidebar entries now have a consistent English section name and a
+short corresponding Japanese subtitle: Clipboard / クリップボード,
+Screenshots / 撮影画像, Recordings / 画面録画,
+Vault / 秘密保管庫, Autosort / 自動仕分け, Settings / 設定.
+
+**Ctrl+Shift+S** configured in the old Settings → Keyboard shortcuts is a
+*window-local* Qt shortcut, not an OS-wide replacement. This branch adds
+a separate **Settings → Screenshot area · global shortcut** control.
+Click **Register screenshot shortcut in Cinnamon…** to explicitly bind
+the chosen global key to \`/opt/clipmint/ClipMint --screenshot-area\`.
+The command sends a local \`screenshot-area\` instruction to the existing
+ClipMint process; if ClipMint is not running, it starts ClipMint and opens
+its own area selector. It does **not** launch the default screenshot utility.
+
+ClipMint will never silently overwrite another Cinnamon custom shortcut or a
+known built-in screenshot key. If the key is already assigned, first change
+that binding in **System Settings → Keyboard → Shortcuts**, then register
+the ClipMint shortcut. Other applications and desktop extensions may own keys
+that Cinnamon's standard GSettings registry cannot detect; verify the binding
+physically on Linux Mint Cinnamon X11. Disable or remove the custom binding
+using Cinnamon's Keyboard settings if reverting. The original
+\`Ctrl+Shift+S\` in-window shortcut stays available.
