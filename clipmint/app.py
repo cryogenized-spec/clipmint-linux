@@ -209,6 +209,11 @@ class ClipMintWindow(QMainWindow):
             self, self.edit_last_screenshot, self.dismiss_screenshot_notice,
             on_ocr=self.ocr_last_screenshot,
         )
+        # Every clipboard replacement invalidates earlier sensitive expiry
+        # deadlines, even when history monitoring skips or suppresses a copy.
+        QApplication.clipboard().dataChanged.connect(
+            self._clipboard_generation_changed
+        )
         QApplication.clipboard().dataChanged.connect(self.clipboard_changed)
         self.poller = QTimer(self)
         self.poller.timeout.connect(self.poll_recording)
@@ -1321,6 +1326,10 @@ class ClipMintWindow(QMainWindow):
         self.statusBar().showMessage(message, 10000)
         QMessageBox.warning(self.recorder_window or self, title, message)
 
+    def _clipboard_generation_changed(self):
+        """Track *all* X11 clipboard writes, including Vault and concealed data."""
+        self._sensitive_clipboard_token += 1
+
     def clipboard_changed(self):
         if (not self.monitoring or self._closing
                 or getattr(self.store, "closed", False)):
@@ -1362,7 +1371,6 @@ class ClipMintWindow(QMainWindow):
             if data.hasText():
                 original = data.text()
                 if sensitive_text(original):
-                    self._sensitive_clipboard_token += 1
                     token = self._sensitive_clipboard_token
                     QTimer.singleShot(
                         30000,
