@@ -141,10 +141,20 @@ class HistoryHardeningTests(unittest.TestCase):
                     "UPDATE clips SET fingerprint=NULL WHERE id=?", (a,)
                 )
                 store.conn.commit()
-                self.assertEqual(store.add("text", b"SYNTHETIC_A", "A"), a)
+            finally:
+                store.close()
+            # Legacy fingerprint backfill runs once on reopening the keyring
+            # and no longer re-decrypts old rows for every new clipboard copy.
+            store = EncryptedClipStore(store.path, store._dedup_key)
+            try:
                 self.assertIsNotNone(store.conn.execute(
                     "SELECT fingerprint FROM clips WHERE id=?", (a,)
                 ).fetchone()[0])
+                with patch.object(store, "_open", wraps=store._open) as decrypt:
+                    for i in range(10):
+                        store.add("text", f"UNIQUE_{i}".encode(), f"Unique {i}")
+                    self.assertEqual(decrypt.call_count, 0)
+                self.assertEqual(store.add("text", b"SYNTHETIC_A", "A"), a)
             finally:
                 store.close()
 
