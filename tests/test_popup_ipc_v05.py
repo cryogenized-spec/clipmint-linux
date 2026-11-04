@@ -46,45 +46,49 @@ class PopUpTests(unittest.TestCase):
     def test_single_instance_command_handshake(self):
         unique = "clipmint-unit-test-" + str(os.getpid())
         messages = []
-        with patch.object(single_instance, "SERVER_NAME", unique):
+        with TemporaryDirectory() as runtime, patch.dict(
+            os.environ, {"XDG_RUNTIME_DIR": runtime}
+        ), patch.object(single_instance, "SERVER_NAME", unique):
             server = single_instance.InstanceServer(messages.append)
-            self.assertTrue(
-                server.server.socketOptions() & QLocalServer.SocketOption.UserAccessOption
-            )
-            # On Linux, the QLocalServer socket is filesystem-backed. Group
-            # and other permissions should be absent, regardless of umask.
-            socket_path = Path(server.server.fullServerName())
-            if socket_path.is_socket():
-                self.assertEqual(socket_path.stat().st_mode & 0o077, 0)
-            self.assertTrue(single_instance.send_command("toggle"))
-            for _ in range(15):
-                self.app.processEvents()
-                if messages:
-                    break
-            self.assertEqual(messages, ["toggle"])
-            for command in ("screenshot-area", "record-area"):
-                self.assertTrue(single_instance.send_command(command))
-                for _ in range(15):
-                    self.app.processEvents()
-                    if messages[-1] == command:
-                        break
-            self.assertEqual(messages, ["toggle", "screenshot-area", "record-area"])
-            # Quiet login startup probes the incumbent instead of showing its UI.
-            with self.assertRaises(RuntimeError):
-                single_instance.InstanceServer(messages.append, occupied_command="ping")
-            for _ in range(15):
-                self.app.processEvents()
-                if len(messages) >= 4:
-                    break
-            self.assertEqual(messages, ["toggle", "screenshot-area", "record-area", "ping"])
-            # If a busy incumbent accepts the socket but cannot flush the
-            # wakeup command, never remove its socket and start a second app.
-            with patch.object(single_instance, "send_command", return_value=False):
-                with self.assertRaisesRegex(RuntimeError, "already running"):
-                    single_instance.InstanceServer(messages.append, occupied_command="ping")
-            self.assertTrue(server.server.isListening())
-            server.server.close()
-            single_instance.QLocalServer.removeServer(unique)
+            try:
+                self.assertTrue(
+                    server.server.socketOptions() &
+                    QLocalServer.SocketOption.UserAccessOption
+                )
+                socket_path = Path(server.server.fullServerName())
+                if socket_path.is_socket():
+                    self.assertEqual(socket_path.stat().st_mode & 0o077, 0)
+                private = Path(runtime) / "clipmint"
+                self.assertEqual(private.stat().st_mode & 0o077, 0)
+                self.assertEqual((private / "instance.lock").stat().st_mode & 0o077, 0)
+                for command in ("toggle", "screenshot-area", "record-area", "ping"):
+                    self.assertTrue(single_instance.send_command(command))
+                    for _ in range(20):
+                        self.app.processEvents()
+                        if messages and messages[-1] == command:
+                            break
+                self.assertEqual(
+                    messages, ["toggle", "screenshot-area", "record-area", "ping"]
+                )
+                # Even when the event loop is busy, a second watcher cannot
+                # take over the filesystem socket or create a second server.
+                with patch.object(single_instance, "send_command", return_value=False):
+                    with self.assertRaisesRegex(RuntimeError, "already running"):
+                        single_instance.InstanceServer(
+                            messages.append, occupied_command="ping"
+                        )
+                self.assertTrue(server.server.isListening())
+            finally:
+                server.close()
+                QLocalServer.removeServer(unique)
+
+            # The OS releases the advisory lock for a clean app restart.
+            replacement = single_instance.InstanceServer(messages.append)
+            try:
+                self.assertTrue(replacement.server.isListening())
+            finally:
+                replacement.close()
+                QLocalServer.removeServer(unique)
 
 
 if __name__ == "__main__":
