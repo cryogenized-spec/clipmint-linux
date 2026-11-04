@@ -8,7 +8,7 @@ import shlex
 import subprocess
 import sys
 
-from PySide6.QtCore import Qt, QByteArray, QBuffer, QIODevice, QTimer, QSettings
+from PySide6.QtCore import Qt, QByteArray, QBuffer, QIODevice, QTimer, QSettings, QSize
 from PySide6.QtGui import QImage, QFont, QPixmap, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QDialog, QFrame, QHBoxLayout, QInputDialog,
@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
     QMenu, QMessageBox, QPushButton, QStyle, QSystemTrayIcon,
     QTabBar, QToolButton, QVBoxLayout, QWidget, QStackedWidget, QSizePolicy,
     QKeySequenceEdit, QGroupBox, QCheckBox, QDialogButtonBox,
-    QFormLayout, QAbstractItemView, QFileDialog, QScrollArea,
+    QFormLayout, QAbstractItemView, QFileDialog, QScrollArea, QListView,
 )
 
 from .branding import ChromaticWordmark, register_display_font
@@ -29,6 +29,7 @@ from .autosort import RULE_TYPES, NEVER_CAPTURE, validate_rule, route_clip
 from .vault import Vault, VaultError
 from .screenshot_editor import installed_editors, resolve_editor, open_image_editor
 from .screenshot_notice import ScreenshotNotice
+from .screenshot_gallery import read_screenshot, screenshot_thumbnail_icon, PREVIEW_SIZE
 from .clipboard_formats import from_mime, is_concealed, sensitive_text, mime_from_entry
 from .foreground_privacy import blocked_foreground, DEFAULT_BLOCKED
 from .ocr import OcrWorker
@@ -173,6 +174,7 @@ class ClipMintWindow(QMainWindow):
         self._closing = False
         self._ignore_next_clipboard_change = False
         self._last_screenshot_path = None
+        self._screenshot_thumbnail_generation = 0
         self._ocr_workers = set()
         self._last_tray_notification = None
         self._screenshot_notice_token = 0
@@ -330,24 +332,105 @@ class ClipMintWindow(QMainWindow):
 
     def build_library_page(self, kind: str):
         page = QWidget()
+        page.setObjectName("captureLibraryPage")
         layout = QVBoxLayout(page)
-        heading = QLabel(f"{kind} · saved locally")
+        layout.setContentsMargins(18, 17, 18, 17)
+        layout.setSpacing(10)
+
+        eyebrow = QLabel("ARCHIVE / SCREENSHOTS" if kind == "Screenshots"
+                         else "ARCHIVE / RECORDINGS")
+        eyebrow.setObjectName("captureEyebrow")
+        layout.addWidget(eyebrow)
+        heading = QLabel("Screenshot archive" if kind == "Screenshots"
+                         else "Recording archive")
         heading.setObjectName("sectionTitle")
         layout.addWidget(heading)
+        hint = QLabel("Select an image to inspect it here. Double-click to open it."
+                      if kind == "Screenshots"
+                      else "Your locally recorded MP4 and GIF files.")
+        hint.setObjectName("captureHint")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+
         listing = QListWidget()
         listing.itemDoubleClicked.connect(self.open_saved_file)
         if kind == "Screenshots":
+            listing.setObjectName("screenshotGallery")
+            listing.setViewMode(QListView.ViewMode.IconMode)
+            listing.setResizeMode(QListView.ResizeMode.Adjust)
+            listing.setMovement(QListView.Movement.Static)
+            listing.setWrapping(True)
+            listing.setWordWrap(True)
+            listing.setIconSize(QSize(204, 126))
+            listing.setGridSize(QSize(230, 172))
+            listing.setSpacing(6)
+            listing.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
             listing.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
             listing.customContextMenuRequested.connect(self.screenshot_context_menu)
-        layout.addWidget(listing, 1)
+            listing.currentItemChanged.connect(
+                lambda item, _previous: self.preview_saved_screenshot(item)
+            )
+
+            content = QHBoxLayout()
+            content.setSpacing(12)
+            content.addWidget(listing, 3)
+
+            panel = QFrame()
+            panel.setObjectName("capturePreviewPane")
+            panel.setMinimumWidth(220)
+            panel.setMaximumWidth(410)
+            details = QVBoxLayout(panel)
+            details.setContentsMargins(12, 12, 12, 12)
+            details.setSpacing(9)
+            title = QLabel("SELECTED FRAME / プレビュー")
+            title.setObjectName("captureEyebrow")
+            details.addWidget(title)
+
+            self.screenshot_preview_image = ImagePreviewLabel()
+            self.screenshot_preview_image.setObjectName("screenshotLargePreview")
+            self.screenshot_preview_image.setMinimumHeight(165)
+            details.addWidget(self.screenshot_preview_image, 1)
+            self.screenshot_filename = QLabel("Select a screenshot")
+            self.screenshot_filename.setWordWrap(True)
+            self.screenshot_filename.setObjectName("captureFilename")
+            details.addWidget(self.screenshot_filename)
+            self.screenshot_details = QLabel("No screenshot selected")
+            self.screenshot_details.setObjectName("captureDetails")
+            self.screenshot_details.setWordWrap(True)
+            details.addWidget(self.screenshot_details)
+
+            actions = QHBoxLayout()
+            actions.setSpacing(6)
+            for label, handler in (
+                ("Open", self.open_selected_screenshot),
+                ("Edit", self.edit_selected_screenshot),
+                ("OCR", self.ocr_selected_screenshot),
+            ):
+                button = QPushButton(label)
+                button.setObjectName("captureAction")
+                button.clicked.connect(handler)
+                actions.addWidget(button)
+            details.addLayout(actions)
+            content.addWidget(panel, 2)
+            layout.addLayout(content, 1)
+            self.screenshot_count = QLabel("0 screenshots")
+            self.screenshot_count.setObjectName("captureDetails")
+            layout.addWidget(self.screenshot_count)
+        else:
+            listing.setObjectName("recordingLibrary")
+            layout.addWidget(listing, 1)
+
         path = screenshots_dir() if kind == "Screenshots" else recordings_dir()
         bottom = QHBoxLayout()
-        refresh = QPushButton("Refresh")
+        refresh = QPushButton("Refresh archive")
+        refresh.setObjectName("captureAction")
         refresh.clicked.connect(lambda: self.refresh_library(kind))
         bottom.addWidget(refresh)
         folder = QPushButton("Open folder")
+        folder.setObjectName("captureAction")
         folder.clicked.connect(lambda: self.open_folder(path))
         bottom.addWidget(folder)
+        bottom.addStretch()
         layout.addLayout(bottom)
         if not hasattr(self, "libraries"):
             self.libraries = {}
@@ -1180,15 +1263,109 @@ class ClipMintWindow(QMainWindow):
 
     def refresh_library(self, kind: str):
         listing = self.libraries[kind]
+        current = listing.currentItem()
+        selected_path = current.data(Qt.ItemDataRole.UserRole) if current else None
+        if kind == "Screenshots":
+            self._screenshot_thumbnail_generation += 1
+            generation = self._screenshot_thumbnail_generation
+        else:
+            generation = -1
+        listing.blockSignals(True)
         listing.clear()
         folder = screenshots_dir() if kind == "Screenshots" else recordings_dir()
         formats = (".png",) if kind == "Screenshots" else (".mp4", ".gif")
-        for path in sorted(folder.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
-            if path.suffix.lower() not in formats or path.name.startswith("."):
-                continue
-            item = QListWidgetItem(path.name)
+        paths = [p for p in folder.iterdir()
+                 if p.is_file() and p.suffix.lower() in formats
+                 and not p.name.startswith(".")]
+        paths.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+        thumbnail_rows = []
+        preferred = None
+        for path in paths:
+            item = QListWidgetItem(path.stem if kind == "Screenshots" else path.name)
             item.setData(Qt.ItemDataRole.UserRole, str(path))
+            item.setToolTip(path.name)
             listing.addItem(item)
+            if kind == "Screenshots":
+                thumbnail_rows.append((item, path))
+            if selected_path == str(path):
+                preferred = item
+        listing.blockSignals(False)
+        if kind == "Screenshots":
+            self.screenshot_count.setText(
+                f"{len(paths)} saved screenshot{'s' if len(paths) != 1 else ''}"
+            )
+            if preferred is None and listing.count():
+                preferred = listing.item(0)
+            if preferred is not None:
+                listing.setCurrentItem(preferred)
+                # Explicitly refresh if Qt kept the same selection.
+                self.preview_saved_screenshot(preferred)
+            else:
+                self.preview_saved_screenshot(None)
+            self._paint_screenshot_thumbnails(thumbnail_rows, generation)
+
+    def _paint_screenshot_thumbnails(self, rows, generation: int):
+        """Decode in small event-loop batches so large archives stay responsive."""
+        if generation != self._screenshot_thumbnail_generation:
+            return
+        listing = self.libraries.get("Screenshots")
+        for item, path in rows[:8]:
+            if item.listWidget() is not listing:
+                continue
+            icon = screenshot_thumbnail_icon(path)
+            if icon is not None:
+                item.setIcon(icon)
+        if len(rows) > 8:
+            QTimer.singleShot(0, lambda: self._paint_screenshot_thumbnails(
+                rows[8:], generation
+            ))
+
+    def preview_saved_screenshot(self, item):
+        preview = self.screenshot_preview_image
+        preview.clear_image()
+        if item is None:
+            self.screenshot_filename.setText("Select a screenshot")
+            self.screenshot_details.setText("No screenshot selected")
+            return
+        target = Path(item.data(Qt.ItemDataRole.UserRole))
+        self.screenshot_filename.setText(target.name)
+        result = read_screenshot(target, PREVIEW_SIZE)
+        if result is None:
+            self.screenshot_details.setText("Preview unavailable · use Open folder")
+            return
+        image, dimensions = result
+        preview.show_image(image)
+        try:
+            size_kib = target.stat().st_size / 1024
+        except OSError:
+            size_kib = 0
+        self.screenshot_details.setText(
+            f"{dimensions.width()} × {dimensions.height()} px   ·   {size_kib:,.0f} KiB"
+        )
+
+    def selected_screenshot_path(self) -> Path | None:
+        listing = self.libraries.get("Screenshots")
+        item = listing.currentItem() if listing is not None else None
+        if item is None:
+            return None
+        path = Path(item.data(Qt.ItemDataRole.UserRole))
+        return path if path.is_file() and path.suffix.lower() == ".png" else None
+
+    def open_selected_screenshot(self):
+        path = self.selected_screenshot_path()
+        if path is not None:
+            self.open_path(path)
+
+    def edit_selected_screenshot(self):
+        path = self.selected_screenshot_path()
+        if path is not None:
+            self._last_screenshot_path = path
+            self.edit_last_screenshot()
+
+    def ocr_selected_screenshot(self):
+        path = self.selected_screenshot_path()
+        if path is not None:
+            self.start_ocr_file(path)
 
     def open_saved_file(self, item):
         target = Path(item.data(Qt.ItemDataRole.UserRole))
