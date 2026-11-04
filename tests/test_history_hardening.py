@@ -158,6 +158,30 @@ class HistoryHardeningTests(unittest.TestCase):
             finally:
                 store.close()
 
+    def test_plain_to_encrypted_migration_preserves_last_used_order(self):
+        with TemporaryDirectory() as root:
+            legacy = ClipStore(Path(root) / "history.sqlite3")
+            secure = None
+            try:
+                a = legacy.add("text", b"First", "First")
+                b = legacy.add("text", b"Second", "Second")
+                self.assertEqual(legacy.add("text", b"First", "First"), a)
+                self.assertEqual([x.id for x in legacy.search()], [a, b])
+                key = utils.random(SecretBox.KEY_SIZE)
+                secure = EncryptedClipStore.migrate_legacy(
+                    legacy, Path(root) / "secure-history.sqlite3", key,
+                )
+                self.assertEqual([x.id for x in secure.search()], [a, b])
+                self.assertEqual(secure.get(a), ("text", b"First"))
+                self.assertEqual(secure.conn.execute(
+                    "SELECT COUNT(*) FROM clips WHERE fingerprint IS NULL"
+                ).fetchone()[0], 0)
+                self.assertEqual(secure.add("text", b"First", "First"), a)
+            finally:
+                if secure is not None:
+                    secure.close()
+                legacy.close()
+
     def test_delete_checkpoint_and_explicit_compaction(self):
         with TemporaryDirectory() as root:
             path = Path(root) / "history.sqlite3"
