@@ -1502,6 +1502,7 @@ class ClipMintWindow(QMainWindow):
             mime_from_entry(kind, contents, self.store.get_formats(clip_id))
         )
         QTimer.singleShot(400, lambda: setattr(self, "_ignore_next_clipboard_change", False))
+        self.store.refresh_temporary_copy_time(clip_id)
         return True
 
     def show_templates(self):
@@ -1753,6 +1754,9 @@ class ClipMintWindow(QMainWindow):
             mime_from_entry(kind, contents,
                             self.store.get_formats(item.data(Qt.ItemDataRole.UserRole)))
         )
+        self.store.refresh_temporary_copy_time(
+            item.data(Qt.ItemDataRole.UserRole)
+        )
         self.inform("Copied", "Saved snippet copied to the system clipboard")
 
     def register_cinnamon_hotkey(self):
@@ -1794,6 +1798,7 @@ class ClipMintWindow(QMainWindow):
                 mime_from_entry(kind, content, self.store.get_formats(clip_id))
             )
         QTimer.singleShot(400, lambda: setattr(self, "_ignore_next_clipboard_change", False))
+        self.store.refresh_temporary_copy_time(clip_id)
         if wid and self.settings.value("popup/auto_paste", True, type=bool):
             QTimer.singleShot(150, lambda: self._paste_to_target(wid, klass))
 
