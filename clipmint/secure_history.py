@@ -73,6 +73,21 @@ class EncryptedClipStore(ClipStore):
         self.corrupt_row_ids: set[int] = set()
         super().__init__(path, max_unpinned=max_unpinned, index_plaintext=False)
         os.chmod(self.path, 0o600)
+        # Persist non-destructive quarantine across restarts. Do not rely
+        # only on a volatile warning or assume a keyed marker is recognisable.
+        columns = {
+            row[1] for row in self.conn.execute("PRAGMA table_info(clips)")
+        }
+        if "corrupt" not in columns:
+            self.conn.execute(
+                "ALTER TABLE clips ADD COLUMN corrupt INTEGER NOT NULL DEFAULT 0"
+            )
+            self.conn.commit()
+        self.corrupt_row_ids = {
+            ident for (ident,) in self.conn.execute(
+                "SELECT id FROM clips WHERE corrupt=1"
+            )
+        }
         # One-time upgrade on key unlock, not during each clipboard capture.
         # Rows without a fingerprint predate this version.
         self._backfill_legacy_fingerprints()
@@ -155,8 +170,9 @@ class EncryptedClipStore(ClipStore):
                             kind, content, formats
                         )
                     self.conn.execute(
-                        "UPDATE clips SET fingerprint=? WHERE id=?",
-                        (sqlite3.Binary(fingerprint), ident)
+                        "UPDATE clips SET fingerprint=?, corrupt=? WHERE id=?",
+                        (sqlite3.Binary(fingerprint),
+                         int(ident in self.corrupt_row_ids), ident)
                     )
 
     def _find_encrypted_duplicate(
@@ -218,10 +234,11 @@ class EncryptedClipStore(ClipStore):
         from .store import classify
         rows = self.conn.execute(
             """SELECT id,kind,content,pinned,created_at,bin,favorite,touch_seq
-               FROM clips WHERE bin=?
+               FROM clips WHERE bin=? AND corrupt=0
                ORDER BY touch_seq DESC,id DESC LIMIT 1000""", (bin_name,)
         )
         items: list[tuple[int, Clip]] = []
+        newly_damaged: list[int] = []
         for ident, kind, raw, pinned, date, bucket, favorite, sequence in rows:
             try:
                 _, preview, _ = self._open(bytes(raw))
@@ -229,6 +246,7 @@ class EncryptedClipStore(ClipStore):
                 # Preserve the unreadable encrypted row for manual recovery,
                 # but do not let it hide unrelated healthy clipboard history.
                 self.corrupt_row_ids.add(ident)
+                newly_damaged.append(ident)
                 continue
             if query.casefold() not in preview.casefold():
                 continue
@@ -240,6 +258,12 @@ class EncryptedClipStore(ClipStore):
             if category != "All" and classify(clip) != category:
                 continue
             items.append((sequence, clip))
+        if newly_damaged:
+            with self.conn:
+                self.conn.executemany(
+                    "UPDATE clips SET corrupt=1 WHERE id=?",
+                    [(ident,) for ident in newly_damaged],
+                )
         if sort in ("A–Z", "Z–A"):
             items.sort(key=lambda row: (row[1].preview.casefold(), row[1].id),
                        reverse=(sort == "Z–A"))
