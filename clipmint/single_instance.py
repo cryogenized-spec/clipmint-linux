@@ -28,6 +28,11 @@ class InstanceServer(QObject):
         super().__init__(parent)
         self.handler = handler
         self.server = QLocalServer(self)
+        # Qt's default permissions follow the process umask and may allow
+        # other local users to connect. These IPC commands include "quit":
+        # explicitly permit only the account owning this session.
+        # Must be configured before listen(), including the stale-socket retry.
+        self.server.setSocketOptions(QLocalServer.SocketOption.UserAccessOption)
         self.server.newConnection.connect(self._handle)
         # Calling this in a separate user account cannot contact this uid's
         # socket. Only remove stale sockets when no listener answers.
