@@ -1274,10 +1274,18 @@ class ClipMintWindow(QMainWindow):
         listing.clear()
         folder = screenshots_dir() if kind == "Screenshots" else recordings_dir()
         formats = (".png",) if kind == "Screenshots" else (".mp4", ".gif")
-        paths = [p for p in folder.iterdir()
-                 if p.is_file() and p.suffix.lower() in formats
-                 and not p.name.startswith(".")]
-        paths.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+        # Files may disappear mid-refresh (e.g. renamed by the image editor).
+        dated_paths = []
+        for candidate in folder.iterdir():
+            try:
+                if (candidate.suffix.lower() in formats
+                        and not candidate.name.startswith(".")
+                        and candidate.is_file()):
+                    dated_paths.append((candidate.stat().st_mtime, candidate))
+            except OSError:
+                continue
+        dated_paths.sort(key=lambda pair: pair[0], reverse=True)
+        paths = [path for _modified, path in dated_paths]
         thumbnail_rows = []
         preferred = None
         for path in paths:
@@ -1298,8 +1306,6 @@ class ClipMintWindow(QMainWindow):
                 preferred = listing.item(0)
             if preferred is not None:
                 listing.setCurrentItem(preferred)
-                # Explicitly refresh if Qt kept the same selection.
-                self.preview_saved_screenshot(preferred)
             else:
                 self.preview_saved_screenshot(None)
             self._paint_screenshot_thumbnails(thumbnail_rows, generation)
