@@ -9,6 +9,8 @@ import json
 import re
 from dataclasses import dataclass
 
+from .smart_types import sensitive_clipboard_text
+
 ALLOWED = (
     "text/plain", "text/plain;charset=utf-8", "text/html",
     "text/uri-list", "x-special/gnome-copied-files", "image/png",
@@ -45,7 +47,9 @@ def luhn(value: str) -> bool:
 
 
 def sensitive_text(value: str) -> bool:
-    """Conservative broad screening; false negatives are still possible."""
+    """Privacy-first screening before clipboard history or Autosort routing."""
+    if sensitive_clipboard_text(value):
+        return True
     if re.search(r"(?i)(?:password|passwd|api[_ -]?key|secret|access[_ -]?token|"
                  r"authorization|bearer|private[_ -]?key)\s*[:=]\s*\S+", value):
         return True
