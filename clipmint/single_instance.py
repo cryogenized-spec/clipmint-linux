@@ -78,6 +78,14 @@ class InstanceServer(QObject):
                 # Only the lock owner may clean up its own stale socket.
                 if send_command(occupied_command):
                     raise RuntimeError("ClipMint is already running")
+                # Also detect a pre-upgrade instance which did not yet hold
+                # this file lock, but is still accepting IPC connections.
+                probe = QLocalSocket()
+                probe.connectToServer(SERVER_NAME)
+                occupied = probe.waitForConnected(350)
+                probe.abort()
+                if occupied:
+                    raise RuntimeError("ClipMint is already running")
                 QLocalServer.removeServer(SERVER_NAME)
                 if not self.server.listen(SERVER_NAME):
                     raise RuntimeError("Could not start local command socket")
