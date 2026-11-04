@@ -7,6 +7,7 @@ import os
 import re
 import sqlite3
 from .clipboard_formats import bundle_to_bytes, bundle_from_bytes
+from .secret_detector import detect_secret
 from .search_index import ClipSearchIndex
 
 DEFAULT_BINS = ("Work", "Personal", "Temporary")
@@ -44,8 +45,8 @@ def classify(clip: Clip) -> str:
 
 
 def looks_sensitive(text: str) -> bool:
-    """Conservative opt-out for obvious credentials (not a security guarantee)."""
-    return bool(re.search(r"(?i)\b(password|passwd|api[_ -]?key|secret[_ -]?key|access[_ -]?token)\s*[:=]\s*\S+", text))
+    """Compatibility entry point for the shared secret detector."""
+    return detect_secret(text).is_secret
 
 
 class ClipStore:
@@ -153,6 +154,14 @@ class ClipStore:
             raise ValueError("Unknown accumulation bin")
         if not content:
             return None
+        # Protect direct writes as well as interactive clipboard capture.
+        if kind == "text":
+            if detect_secret(content.decode("utf-8", "replace")).is_secret:
+                return None
+            for mime, raw in (formats or {}).items():
+                if mime in ("text/html", "text/plain", "text/plain;charset=utf-8"):
+                    if detect_secret(raw.decode("utf-8", "replace")).is_secret:
+                        return None
         packed = bundle_to_bytes(formats) if formats else None
         newest = self.conn.execute(
             "SELECT id,kind,content,formats FROM clips WHERE bin=? ORDER BY id DESC LIMIT 1", (bin_name,)
