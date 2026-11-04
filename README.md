@@ -73,14 +73,55 @@ action remains available with the mouse.
 
 ### Autosort
 
-Enable Autosort explicitly (it is OFF by default). Add, edit, disable, delete,
-or reorder top-to-bottom rules to route new clips by type, URL, phone, keyword
-or regex. The first enabled match wins; unmatched clips still go to the active
-bin. You can set a matching rule to **Never capture**. Existing clips are not
-retroactively moved or deleted. Regular expressions have a short execution
-timeout; inputs longer than 8,192 characters are not matched by regex rules.
-Clipboard source-application attribution is not reliably supported by this
-version. Test a currently selected history clip before enabling complex rules.
+On a **fresh installation of this development branch**, Autosort starts
+**enabled**, with 30 editable Smart-type rules and grouped destination
+collections: Writing, Web, Development, Data, Contacts, Media, Utilities,
+Templates and Finance. Each recognized ordinary clip is routed to its
+collection and tagged with its specific type (e.g. `type_json` or
+`type_tracking_urls`). This creates navigable categories without introducing
+30 tiny collection tabs. On upgrades, **an explicitly saved custom rule list
+or on/off preference is preserved**; nothing is silently overwritten.
+
+The 30 built-in detections cover plain and rich text, Markdown, web/tracking
+URLs, code, shell commands, JSON, YAML/XML, OTPs, passwords, API tokens,
+email, phone and postal addresses, payment cards, bank accounts, public crypto
+wallet addresses, images, SVG, colours, CSV/TSV, paths, copied files, parcel
+tracking, dates, logs, hashes, math/LaTeX and reusable templates.
+
+Sensitive classifications (**password/master key, OTP, API key, payment-card
+data, bank routing/account**) are discarded *before* normal and encrypted
+history writes, even if Autosort is switched off or a custom rule tries to
+retain them. No credential is automatically imported into the separately
+encrypted Vault. An isolated 6–8-digit number is treated as a possible OTP
+and excluded; this may also exclude ordinary numerical references. Bare
+random 40+ character hexadecimal strings are excluded because a checksum
+is indistinguishable from a secret key without context. Heuristics are
+best-effort and may have false positives/negatives. When ClipMint sees a
+recognised sensitive clipboard text value, it schedules a **30-second
+conditional clear**: it empties the X11 clipboard only if the value is
+unchanged, so copying something else is not lost. The timer is memory-only;
+quitting ClipMint or another clipboard manager can defeat expiry, and local
+X11 processes may read the value before it clears. Neither omitting history
+nor a clipboard timer is secure destruction or a substitute for a credential
+manager.
+
+Autosort can still be disabled, reordered, and customised using Text, Image,
+URL, Phone, Keyword, Regex or **Smart** rules. The first enabled matching
+rule wins for ordinary content, and unmatched items stay in the selected bin.
+New custom rules are inserted before the broad plain-text fallback.
+**Restore 30 defaults** explicitly replaces rules after a confirmation; it
+does not move, erase or retag existing history. Preset routing only affects
+new clips. No remote link previews, external address-book lookups, executable
+CLI commands, live package tracking, payment processing or cloud calls are
+performed by classification. The advanced per-format utilities in the user's
+feature brief (tree views, rendering, QR generation, etc.) are separate future
+UI features, not part of this detector PR.
+
+Regular expressions remain capped at 200 pattern characters, 8,192 input
+characters and a short execution timeout. Clipboard source-app attribution
+is not reliably available from Linux Cinnamon/X11; confidence is therefore
+heuristic. Use the **Test selected history clip** control to inspect what a
+newly captured entry would be classified as.
 
 ### Secrets & Variables — experimental, needs independent security review
 

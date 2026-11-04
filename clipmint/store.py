@@ -7,7 +7,7 @@ from pathlib import Path
 import os
 import re
 import sqlite3
-from .clipboard_formats import bundle_to_bytes, bundle_from_bytes
+from .clipboard_formats import bundle_to_bytes, bundle_from_bytes, sensitive_payload
 from .secret_detector import detect_secret
 from .search_index import ClipSearchIndex
 
@@ -186,6 +186,10 @@ class ClipStore:
         )
         return next_id
 
+    def _history_payload_is_sealed(self) -> bool:
+        """Encrypted history validates cleartext before sealing."""
+        return False
+
     def add(self, kind: str, content: bytes, preview: str, bin_name: str = "Work",
             formats: dict[str, bytes] | None = None) -> int | None:
         if kind not in ("text", "image", "files"):
@@ -194,14 +198,11 @@ class ClipStore:
             raise ValueError("Unknown accumulation bin")
         if not content:
             return None
-        # Protect direct writes as well as interactive clipboard capture.
-        if kind == "text":
-            if detect_secret(content.decode("utf-8", "replace")).is_secret:
-                return None
-            for mime, raw in (formats or {}).items():
-                if mime in ("text/html", "text/plain", "text/plain;charset=utf-8"):
-                    if detect_secret(raw.decode("utf-8", "replace")).is_secret:
-                        return None
+        # A caller may bypass MIME capture, so guard the store as well.
+        # EncryptedClipStore checks before sealing; do not classify ciphertext.
+        if (not self._history_payload_is_sealed()
+                and sensitive_payload(kind, content, formats)):
+            return None
         packed = bundle_to_bytes(formats) if formats else None
         newest = self.conn.execute(
             "SELECT id,kind,content,formats FROM clips WHERE bin=? ORDER BY id DESC LIMIT 1", (bin_name,)

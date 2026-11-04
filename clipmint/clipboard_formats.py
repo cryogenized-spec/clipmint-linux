@@ -9,6 +9,7 @@ import json
 import re
 from dataclasses import dataclass
 from .secret_detector import detect_secret
+from .smart_types import sensitive_clipboard_text
 
 ALLOWED = (
     "text/plain", "text/plain;charset=utf-8", "text/html",
@@ -47,7 +48,27 @@ def luhn(value: str) -> bool:
 
 def sensitive_text(value: str) -> bool:
     """Unified clipboard-history exclusion filter."""
-    return detect_secret(value).is_secret
+    return detect_secret(value).is_secret or sensitive_clipboard_text(value)
+
+
+def sensitive_payload(kind: str, content: bytes,
+                      formats: dict[str, bytes] | None = None) -> bool:
+    """Reject any saved secret-bearing text, including image/file MIME extras.
+
+    Image pixels are not interpreted as text, but accompanying HTML, plain
+    text, URI lists and Nemo file metadata must never smuggle credentials
+    into the history bundle.
+    """
+    if kind == "text" and sensitive_text(content.decode("utf-8", "replace")):
+        return True
+    if kind == "files" and sensitive_text(content.decode("utf-8", "replace")):
+        return True
+    for name, raw in (formats or {}).items():
+        if (name.lower().startswith("text/") or
+                name.lower() == "x-special/gnome-copied-files"):
+            if sensitive_text(raw.decode("utf-8", "replace")):
+                return True
+    return False
 
 
 @dataclass(frozen=True)
@@ -99,6 +120,12 @@ def from_mime(mime, png: bytes | None = None) -> ClipboardEntry | None:
         if len(png) > MAX_FORMAT_BYTES or (total - len(previous) + len(png)) > MAX_BUNDLE_BYTES:
             return None
         saved["image/png"] = png
+    # Reject secrets in alternate MIME data, including image/file bundles.
+    sample_kind = ("files" if mime.hasUrls() or
+                   "x-special/gnome-copied-files" in saved
+                   else "image" if png else "text")
+    if sensitive_payload(sample_kind, b"", saved):
+        return None
     if mime.hasUrls() or "x-special/gnome-copied-files" in saved:
         uri_raw = saved.get("x-special/gnome-copied-files") or saved.get("text/uri-list", b"")
         text = uri_raw.decode("utf-8", errors="replace")
