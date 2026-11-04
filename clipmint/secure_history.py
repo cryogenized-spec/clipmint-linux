@@ -70,6 +70,7 @@ class EncryptedClipStore(ClipStore):
             raise ValueError("Invalid history encryption key")
         self.box = SecretBox(key)
         self._dedup_key = key
+        self.corrupt_row_ids: set[int] = set()
         super().__init__(path, max_unpinned=max_unpinned, index_plaintext=False)
         os.chmod(self.path, 0o600)
         # One-time upgrade on key unlock, not during each clipboard capture.
@@ -135,10 +136,24 @@ class EncryptedClipStore(ClipStore):
                     if row is None:
                         continue
                     kind, sealed = row
-                    content, _preview, formats = self._open(bytes(sealed))
-                    fingerprint = self._encrypted_fingerprint(
-                        kind, content, formats
-                    )
+                    try:
+                        content, _preview, formats = self._open(bytes(sealed))
+                    except HistorySecurityError:
+                        # Keep the ciphertext for possible recovery without
+                        # letting a damaged record block healthy history.
+                        # The marker is keyed and intentionally cannot match
+                        # a valid plaintext content fingerprint.
+                        self.corrupt_row_ids.add(ident)
+                        fingerprint = hmac.digest(
+                            self._dedup_key,
+                            b"clipmint-corrupt-v1\\0" +
+                            int(ident).to_bytes(8, "big") + bytes(sealed),
+                            hashlib.sha256,
+                        )
+                    else:
+                        fingerprint = self._encrypted_fingerprint(
+                            kind, content, formats
+                        )
                     self.conn.execute(
                         "UPDATE clips SET fingerprint=? WHERE id=?",
                         (sqlite3.Binary(fingerprint), ident)
@@ -202,12 +217,19 @@ class EncryptedClipStore(ClipStore):
         # index is ever constructed for encrypted history.
         from .store import classify
         rows = self.conn.execute(
-            """SELECT id,kind,content,pinned,created_at,bin,favorite FROM clips
-               WHERE bin=? ORDER BY touch_seq DESC,id DESC LIMIT 1000""", (bin_name,)
+            """SELECT id,kind,content,pinned,created_at,bin,favorite,touch_seq
+               FROM clips WHERE bin=?
+               ORDER BY touch_seq DESC,id DESC LIMIT 1000""", (bin_name,)
         )
-        clips = []
-        for ident, kind, raw, pinned, date, bucket, favorite in rows:
-            _, preview, _ = self._open(bytes(raw))
+        items: list[tuple[int, Clip]] = []
+        for ident, kind, raw, pinned, date, bucket, favorite, sequence in rows:
+            try:
+                _, preview, _ = self._open(bytes(raw))
+            except HistorySecurityError:
+                # Preserve the unreadable encrypted row for manual recovery,
+                # but do not let it hide unrelated healthy clipboard history.
+                self.corrupt_row_ids.add(ident)
+                continue
             if query.casefold() not in preview.casefold():
                 continue
             if favorites_only and not favorite:
@@ -217,13 +239,13 @@ class EncryptedClipStore(ClipStore):
             clip = Clip(ident, kind, preview, bool(pinned), date, bucket, bool(favorite))
             if category != "All" and classify(clip) != category:
                 continue
-            clips.append(clip)
+            items.append((sequence, clip))
         if sort in ("A–Z", "Z–A"):
-            clips.sort(key=lambda c: (c.preview.casefold(), c.id),
+            items.sort(key=lambda row: (row[1].preview.casefold(), row[1].id),
                        reverse=(sort == "Z–A"))
         elif sort == "Oldest first":
-            clips.sort(key=lambda c: c.id)
-        return clips
+            items.sort(key=lambda row: (row[0], row[1].id))
+        return [clip for _sequence, clip in items]
 
     @classmethod
     def migrate_legacy(cls, legacy: ClipStore, target: Path, key: bytes):
