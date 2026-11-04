@@ -335,3 +335,21 @@ application's QSettings are **not** included. This operation is export-only;
 replacing or restoring a live archive requires its own validated restore
 workflow, and is not part of this draft. No cloud sync, shell command, or
 network access is used.
+
+## Optional launch at login (development branch)
+
+Settings → **Start at login → Launch ClipMint when I log in** is **OFF by default**.
+With an installed .deb, enabling it creates only
+`~/.config/autostart/clipmint.desktop` for the current user (mode 0600).
+It starts `/opt/clipmint/ClipMint --hidden` on subsequent Cinnamon/X11 logins.
+If a tray is available, the app stays in the tray; otherwise it opens its
+window so it cannot become an inaccessible background process. Launching
+again does not create another clipboard watcher or force the running window
+to appear. Turning the setting off removes only ClipMint's exact managed
+entry. Existing custom entries and symlinks are never overwritten or removed,
+and the installed executable is checked before enabling. A crash or package
+update cannot opt you into login startup. No system-wide autostart files
+or other users' configuration are changed.
+
+This remains a **review feature** until CI passes and Cinnamon/X11 startup,
+tray and logout behaviour are tested on the HP OMEN.
