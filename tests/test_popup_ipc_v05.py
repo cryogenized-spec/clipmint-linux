@@ -6,6 +6,7 @@ from unittest.mock import patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("XDG_SESSION_TYPE", "x11")
 from PySide6.QtWidgets import QApplication
+from PySide6.QtNetwork import QLocalServer
 from PySide6.QtCore import Qt, QSettings
 from PySide6.QtTest import QTest
 from tempfile import TemporaryDirectory
@@ -47,6 +48,14 @@ class PopUpTests(unittest.TestCase):
         messages = []
         with patch.object(single_instance, "SERVER_NAME", unique):
             server = single_instance.InstanceServer(messages.append)
+            self.assertTrue(
+                server.server.socketOptions() & QLocalServer.SocketOption.UserAccessOption
+            )
+            # On Linux, the QLocalServer socket is filesystem-backed. Group
+            # and other permissions should be absent, regardless of umask.
+            socket_path = Path(server.server.fullServerName())
+            if socket_path.is_socket():
+                self.assertEqual(socket_path.stat().st_mode & 0o077, 0)
             self.assertTrue(single_instance.send_command("toggle"))
             for _ in range(15):
                 self.app.processEvents()
