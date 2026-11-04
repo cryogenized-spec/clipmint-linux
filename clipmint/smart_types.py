@@ -81,11 +81,11 @@ API_CONTEXT = re.compile(
     r"private[_ -]?key|secret[_ -]?key|auth(?:orization)?|bearer)[ \t]{0,32}"
     r"(?:[\"']?[ \t]{0,16}[:=][ \t]{0,16}[\"']?[ \t]{0,16}|[ \t]{1,32})([^\s]{3,})"
 )
-ENV_CREDENTIAL = re.compile(
-    # Credentials may appear mid-paragraph or inside rich HTML, not just at
-    # the start of a source line. No unbounded whitespace/backtracking.
-    r"(?i)(?<![A-Za-z0-9_.-])(?:export[ \t]+)?[\"']?([A-Za-z_][A-Za-z0-9_.-]{2,80})[\"']?"
-    r"[ \t]{0,32}[:=][ \t]{0,32}[\"']?([^\s\"']{3,})"
+CREDENTIAL_IDENTIFIER = re.compile(
+    # A bounded token recognizer avoids whitespace-related regex backtracking.
+    # Evaluate *each* name independently so an earlier HTML attribute
+    # (class=note>) cannot swallow a subsequent TOKEN=... assignment.
+    r"(?i)(?<![A-Za-z0-9_.-])([A-Za-z_][A-Za-z0-9_.-]{2,80})"
 )
 PRIVATE_ENV_ENDINGS = (
     "PASSWORD", "PASSWD", "PASSPHRASE", "SECRET", "PRIVATE_KEY",
@@ -149,6 +149,49 @@ YAML = re.compile(r"(?m)^[ \t]{0,64}[\w.-]{2,50}:[ \t]{0,64}\S[^\r\n]*$")
 PAN_CVV = re.compile(r"(?i)\b(?:cvv|cvc|security\s*code)\s*[:=#-]?\s*\d{3,4}\b")
 
 
+def _credential_assignment(sample: str) -> str | None:
+    """Scan candidate key names independently with bounded whitespace work.
+
+    Names with a sensitive suffix are never hidden by preceding assignments,
+    malformed HTML or newlines. Parsing overlong whitespace fails closed for
+    candidate credentials instead of blocking the event loop.
+    """
+    max_space = 4096
+    for match in CREDENTIAL_IDENTIFIER.finditer(sample):
+        name = match.group(1).upper().replace("-", "_").replace(".", "_")
+        classification = None
+        if any(name == key or name.endswith("_" + key)
+               for key in PRIVATE_ENV_ENDINGS):
+            classification = "passwords"
+        elif any(name == key or name.endswith("_" + key)
+                 for key in API_ENV_ENDINGS):
+            classification = "api-keys"
+        if classification is None:
+            continue
+        position = match.end()
+        if position < len(sample) and sample[position] in "'\"":
+            position += 1
+        spacing = 0
+        while position < len(sample) and sample[position].isspace():
+            position += 1
+            spacing += 1
+            if spacing > max_space:
+                return classification  # suspicious excess whitespace: skip
+        if position >= len(sample) or sample[position] not in ":=":
+            continue
+        position += 1
+        spacing = 0
+        while (position < len(sample) and
+               (sample[position].isspace() or sample[position] in "'\"")):
+            position += 1
+            spacing += 1
+            if spacing > max_space:
+                return classification
+        if position < len(sample) and sample[position] not in "<>":
+            return classification
+    return None
+
+
 def _entropy(value: str) -> float:
     counts = Counter(value)
     n = len(value)
@@ -205,17 +248,10 @@ def classify_smart(
         # guard continues scanning the entire input in bounded windows.
         return "plain-text"
     sample = value[:262144]
-    # Named environment variables often carry application-specific prefixes
-    # (e.g. GITHUB_CLIENT_SECRET). Detect the *whole key* rather than matching
-    # only an unprefixed word boundary inside it.
-    for assignment in ENV_CREDENTIAL.finditer(sample):
-        name = assignment.group(1).upper().replace("-", "_").replace(".", "_")
-        if any(name == suffix or name.endswith("_" + suffix)
-               for suffix in PRIVATE_ENV_ENDINGS):
-            return "passwords"
-        if any(name == suffix or name.endswith("_" + suffix)
-               for suffix in API_ENV_ENDINGS):
-            return "api-keys"
+    # Prefixed assignments can appear in env files, JSON, prose or HTML.
+    credential_kind = _credential_assignment(sample)
+    if credential_kind is not None:
+        return credential_kind
     if PAN_CVV.search(sample) or any(_luhn(m.group()) for m in CARD.finditer(sample)):
         return "payment-cards"
     if IBAN.search(sample) or SWIFT_CONTEXT.search(sample):
