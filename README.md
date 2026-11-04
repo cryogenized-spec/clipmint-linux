@@ -275,3 +275,34 @@ favourites, snippets, transforms, and controlled paste queue are preserved.
 Before merging this PR, upload the exact original PNG at that path and
 confirm all three checks are green. The release remains a development preview
 until actual Cinnamon/X11 field acceptance and security review are complete.
+
+
+## Temporary collection: optional retention (development review)
+
+**Default: OFF.** Settings → **Temporary collection · retention** exposes
+two independent, opt-in choices:
+
+- **Automatically remove unpinned Temporary clips after 24 hours.** Requires
+  explicit confirmation when enabling; already-expired entries are removed
+  then, and the application checks periodically while running (every five
+  minutes). For an already-enabled setting, expiration also runs on startup.
+- **Clear unpinned Temporary clips when I quit ClipMint.** Runs only on an
+  orderly, deliberate application exit (Quit in the tray or closing when there
+  is no tray), **not** when hiding its window to the tray. An app crash,
+  forced termination or package update does not invoke the exit cleanup.
+
+Both protect **pinned entries**. Neither touches the Work or Personal bins,
+other user-created collections, reusable snippet templates, screenshot files,
+vault data, or other application files. Moving an old item into Temporary
+subjects it to the selected age rule using the item's existing last-copied
+timestamp. Turning a rule off stops that cleanup without purging anything;
+existing saved settings are preserved on upgrade, and no existing user is
+silently opted in. Deletions remove full-text search entries in ordinary
+history too. Expiry is measured against UTC timestamps, not a guessed local
+clock or application installation date.
+
+**Caution:** These settings deliberately remove eligible history records.
+Enabling the age rule warns before removing previously expired entries.
+SQLite deletion and WAL cleanup reduce recoverable remnants but cannot
+guarantee physical secure erasure on SSDs, backups or OS snapshots. This is
+a draft feature and is not available in the current installed release.
