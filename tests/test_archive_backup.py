@@ -201,6 +201,34 @@ class ArchiveBackupTests(unittest.TestCase):
             finally:
                 src.close()
 
+    def test_rejects_foreign_owner_even_with_mode_0755(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from clipmint.archive_backup import _verify_safe_destination_directory
+
+        with TemporaryDirectory() as root:
+            foreign_parent = Path(root) / "untrusted"
+            foreign_parent.mkdir(mode=0o755)
+            child = foreign_parent / "private"
+            child.mkdir(mode=0o700)
+            original_stat = Path.stat
+
+            def fake_stat(path, *args, **kwargs):
+                record = original_stat(path, *args, **kwargs)
+                if path == foreign_parent:
+                    return SimpleNamespace(
+                        st_uid=os.geteuid() + 1000,
+                        st_mode=record.st_mode,
+                    )
+                return record
+
+            with patch.object(Path, "stat", autospec=True,
+                              side_effect=fake_stat):
+                with self.assertRaisesRegex(
+                    ArchiveBackupError, "ancestor is controlled"
+                ):
+                    _verify_safe_destination_directory(child)
+
     def test_no_private_staging_files_left_after_backup(self):
         with TemporaryDirectory() as root:
             src = ClipStore(Path(root) / "source.sqlite3")
