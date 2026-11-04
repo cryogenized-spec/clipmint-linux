@@ -38,18 +38,21 @@ def _verify_safe_destination_directory(parent: Path) -> None:
     for ancestor in (parent, *parent.parents):
         details = ancestor.stat()
         mode = details.st_mode
-        shared_writes = mode & (stat.S_IWGRP | stat.S_IWOTH)
-        if not shared_writes:
-            continue
-        # The root account can already access every user's files and is
-        # not a less-privileged attacker. A standard root-owned /tmp with
-        # sticky permissions is safe for a private user-owned child folder.
-        if (not (mode & stat.S_ISVTX)
-                or details.st_uid not in (owner, 0)):
+        # Directory owners can rename or replace their immediate children
+        # even when the directory mode is 0755. Therefore reject foreign,
+        # non-root ownership on *any* ancestor, not just writable ones.
+        if details.st_uid not in (owner, 0):
             raise ArchiveBackupError(
                 "Choose a private backup folder in your home directory. "
-                "This destination or an ancestor can be replaced by "
-                "another account."
+                "An ancestor is controlled by another account."
+            )
+        shared_writes = mode & (stat.S_IWGRP | stat.S_IWOTH)
+        # A root-owned or user-owned sticky directory is acceptable, but
+        # arbitrary group/world writable ancestors without sticky are not.
+        if shared_writes and not (mode & stat.S_ISVTX):
+            raise ArchiveBackupError(
+                "Choose a private backup folder in your home directory. "
+                "This directory allows other users to replace files."
             )
 
 
