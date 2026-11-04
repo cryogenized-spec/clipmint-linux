@@ -78,8 +78,8 @@ SWIFT_CONTEXT = re.compile(r"(?i)\b(?:swift|bic|iban|sort[\s-]?code|routing[\s-]
 API_CONTEXT = re.compile(
     r"(?i)(?<![\w-])(?:password|passphrase|passwd|pwd|client[_ -]?secret|"
     r"api[_ -]?key|access[_ -]?key|access[_ -]?token|refresh[_ -]?token|"
-    r"private[_ -]?key|secret[_ -]?key|auth(?:orization)?|bearer)\s*"
-    r"(?:[\"']?\s*[:=]\s*[\"']?\s*|\s+)(\S{3,})"
+    r"private[_ -]?key|secret[_ -]?key|auth(?:orization)?|bearer)[ \t]{0,32}"
+    r"(?:[\"']?[ \t]{0,16}[:=][ \t]{0,16}[\"']?[ \t]{0,16}|[ \t]{1,32})([^\s]{3,})"
 )
 ENV_CREDENTIAL = re.compile(
     r"(?im)^[ \t]{0,64}(?:export[ \t]+)?[\"']?([A-Za-z_][A-Za-z0-9_.-]{2,80})[\"']?"
@@ -114,9 +114,9 @@ WIF = re.compile(r"^[5KL][1-9A-HJ-NP-Za-km-z]{50,51}$")
 HEX_COLOR = re.compile(r"^#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$")
 CSS_COLOR = re.compile(r"(?i)^(?:rgba?|hsla?)\s*\([^()]{3,90}\)$")
 LOG = re.compile(r"(?im)(?:^Traceback \(most recent call last\):|"
-                 r"^\s*at\s+\S+\s+\(|^\s*File \".+\", line \d+|"
+                 r"^[ \t]{0,64}at[ \t]+[^\s]{1,512}[ \t]+\(|^[ \t]{0,64}File \"[^\r\n]{1,1024}\", line \d+|"
                  r"^\s*(?:DEBUG|INFO|WARN|WARNING|ERROR|FATAL|CRITICAL)\s*[:\[\s])")
-SOURCE_CODE = re.compile(r"(?m)^\s*(?:def\s+\w+\s*\(|class\s+\w+[\(:]|"
+SOURCE_CODE = re.compile(r"(?m)^[ \t]{0,64}(?:def[ \t]+\w+[ \t]*\(|class[ \t]+\w+[\(:]|"
                          r"from\s+\w+\s+import\s+|import\s+[\w.]+\s*$|"
                          r"(?:async\s+)?function\s+\w+\s*\(|"
                          r"(?:const|let|var)\s+\w+\s*=|"
@@ -128,7 +128,7 @@ COMMAND = re.compile(r"(?i)^\s*(?:sudo|git|npm|npx|pnpm|yarn|pip|python\d?|"
                      r"journalctl|ls|cd|mkdir|grep|find|sed|awk|"
                      r"chmod|chown|export|bash|zsh|pwsh|powershell|"
                      r"ffmpeg)\s+[-./~'\w]")
-MARKDOWN = re.compile(r"(?m)^\s*(?:#{1,6}\s+\S+|[-*+]\s+\S+|"
+MARKDOWN = re.compile(r"(?m)^[ \t]{0,64}(?:#{1,6}[ \t]+\S+|[-*+][ \t]+\S+|"
                       r"\d+\.\s+\S+|>\s+\S+|[~\x60]{3})")
 MATH = re.compile(r"\\(?:frac|int|sum|sqrt|begin|alpha|beta|lim|pi|theta)\b|"
                   r"^\s*\$\$.+\$\$\s*$|^\s*[xy]\s*=\s*[\w\d+\-*/()^. ]{3,}$")
@@ -136,14 +136,14 @@ ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}(?:[T ][0-2]\d:[0-5]\d(?::[0-5]\d(?:\.
 EPOCH = re.compile(r"^\d{10}(?:\d{3})?$")
 TRACKING = re.compile(r"(?i)^(?:1Z[0-9A-Z]{16}|[A-Z]{2}\d{9}[A-Z]{2})$")
 TRACKING_CONTEXT = re.compile(r"(?i)\b(?:fedex|dhl|ups|usps|courier|tracking|waybill|awb)\b")
-POSTAL = re.compile(r"(?im)^\s*\d{1,6}[A-Za-z]?\s+[\w.' -]{4,80}"
+POSTAL = re.compile(r"(?im)^[ \t]{0,64}\d{1,6}[A-Za-z]?\s+[\w.' -]{4,80}"
                     r"\b(?:st(?:reet)?|rd|road|ave(?:nue)?|lane|ln|drive|dr|"
                     r"boulevard|blvd|crescent|close|way)\b[^\n]*(?:\n|,)")
 PATH = re.compile(r"^(?:/[^/\s]|~/|\.{1,2}/|[A-Z]:\\)[^\n]{1,500}$", re.I)
 TEMPLATE = re.compile(r"\{\{\s*[A-Za-z_]\w{0,64}\s*\}\}|\$\{[A-Za-z_]\w{0,64}\}")
-SVG = re.compile(r"(?is)^\s*(?:<\?xml[^>]*>\s*)?<svg\b")
+SVG = re.compile(r"(?i)^[ \t\r\n]{0,64}(?:<\?xml[^>]{0,2048}>[ \t\r\n]{0,64})?<svg\b")
 XML = re.compile(r"(?i)^[ \t\r\n]{0,64}(?:<\?xml\b|<(?!html\b)[a-z][\w:.-]{0,127}(?=[\s>/]))")
-YAML = re.compile(r"(?m)^\s*[\w.-]{2,50}:\s*\S.*$", re.M)
+YAML = re.compile(r"(?m)^[ \t]{0,64}[\w.-]{2,50}:[ \t]{0,64}\S[^\r\n]*$")
 PAN_CVV = re.compile(r"(?i)\b(?:cvv|cvc|security\s*code)\s*[:=#-]?\s*\d{3,4}\b")
 
 
