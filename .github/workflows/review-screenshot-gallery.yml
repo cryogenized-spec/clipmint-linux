@@ -1,0 +1,44 @@
+name: Review ClipMint screenshot gallery
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "clipmint/screenshot_gallery.py"
+      - "tests/test_screenshot_gallery.py"
+      - "tools/render_screenshot_gallery_review.py"
+      - ".github/workflows/review-screenshot-gallery.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gallery-qa:
+    runs-on: ubuntu-24.04
+    env:
+      QT_QPA_PLATFORM: offscreen
+      XDG_SESSION_TYPE: x11
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install offline Qt test dependencies on runner
+        run: |
+          python -m pip install --disable-pip-version-check -r requirements.txt
+      - name: Compile source and run gallery and regression tests
+        run: |
+          python -m compileall -q clipmint tests tools/render_screenshot_gallery_review.py
+          python -m unittest -v tests.test_screenshot_gallery tests.test_crimson_ui tests.test_context_ocr_v05
+      - name: Render the real Qt screenshot gallery using synthetic PNG files
+        run: |
+          mkdir -p artifacts
+          python -m tools.render_screenshot_gallery_review artifacts/gallery-review.png
+          test -s artifacts/gallery-review.png
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ClipMint-screenshot-gallery-visual-review
+          path: artifacts/gallery-review.png
+          if-no-files-found: error
+          retention-days: 14
