@@ -177,6 +177,8 @@ class ArchiveBackupTests(unittest.TestCase):
 
     def test_foreign_owned_sticky_parent_is_not_trusted(self):
         from unittest.mock import patch
+        if os.geteuid() == 0:
+            self.skipTest("Root-owned directories are privileged, not untrusted")
         with TemporaryDirectory() as root:
             directory = Path(root) / "shared-sticky"
             directory.mkdir()
