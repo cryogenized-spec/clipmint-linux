@@ -89,6 +89,30 @@ class CodexAutosortRegressionTests(unittest.TestCase):
         alternate.setHtml("<b>GITHUB_CLIENT_SECRET=fakeOnly12345</b>")
         self.assertIsNone(from_mime(alternate, png=b"fakePNG"))
 
+    def test_prefixed_tokens_with_html_and_long_multiline_whitespace(self):
+        samples = (
+            "<div class=note>MY_REFRESH_TOKEN=synthetic_value_12345</div>",
+            "MY_REFRESH_TOKEN=" + " " * 33 + "synthetic_value_12345",
+            "MY_REFRESH_TOKEN=\nsynthetic_value_12345",
+            '<span class="note">MY_REFRESH_TOKEN: fake_1234567</span>',
+        )
+        with TemporaryDirectory() as root:
+            plain = ClipStore(Path(root) / "tokens.sqlite3")
+            try:
+                for sample in samples:
+                    with self.subTest(sample=sample[:65]):
+                        self.assertTrue(sensitive_text(sample))
+                        self.assertIsNone(plain.add(
+                            "image", b"synthetic png", "safe preview", "Work",
+                            formats={"text/html": sample.encode("utf-8")}
+                        ))
+                        self.assertIsNone(plain.add(
+                            "text", sample.encode("utf-8"), "safe preview", "Work"
+                        ))
+                self.assertEqual(plain.count("Work"), 0)
+            finally:
+                plain.close()
+
     def test_deep_json_is_handled_without_exception(self):
         nested = "[" * 10000 + "0" + "]" * 10000
         self.assertIn(classify_smart("text", nested), ("json", "plain-text"))
