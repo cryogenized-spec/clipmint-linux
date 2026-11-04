@@ -318,14 +318,29 @@ The command sends a local \`screenshot-area\` instruction to the existing
 ClipMint process; if ClipMint is not running, it starts ClipMint and opens
 its own area selector. It does **not** launch the default screenshot utility.
 
-ClipMint will never silently overwrite another Cinnamon custom shortcut or a
-known built-in screenshot key. If the key is already assigned, first change
-that binding in **System Settings → Keyboard → Shortcuts**, then register
-the ClipMint shortcut. Other applications and desktop extensions may own keys
-that Cinnamon's standard GSettings registry cannot detect; verify the binding
-physically on Linux Mint Cinnamon X11. Disable or remove the custom binding
-using Cinnamon's Keyboard settings if reverting. The original
-\`Ctrl+Shift+S\` in-window shortcut stays available.
+ClipMint never silently overrides another shortcut. It checks the Cinnamon
+media-key, window-manager and custom-shortcut registries before registering
+and verifies the final binding afterward. If a **built-in screenshot** action
+owns the desired shortcut, ClipMint explicitly asks whether to give it priority.
+If approved, only the conflicting combination is disabled, all other keys
+remain assigned as before, and a local restoration backup is written to
+`~/.config/clipmint/cinnamon-keybinding-backups.json`. Use **Restore previous
+Cinnamon screenshot binding…** to reverse the takeover (unless an independent
+user edit would be overwritten). Other system or custom shortcut conflicts
+require manual reassignment in **System Settings → Keyboard → Shortcuts**.
+
+The new optional global **recording** shortcut (`Ctrl+Shift+R`) starts MP4
+region selection from outside ClipMint. The clipboard popup global shortcut
+(`Ctrl+Alt+V`) continues to open quick search. In-app search, copy and
+monitoring shortcuts intentionally remain *window-local*: taking global
+ownership of Ctrl+F and Ctrl+C would disrupt other applications.
+
+Use **Check Cinnamon hotkey assignments…** for a read-only report of the
+screenshot, recording and popup shortcuts. A Cinnamon global keybinding
+normally takes precedence over a focused application's local hotkeys, but
+another shortcut daemon or desktop extension may still interfere. Test by
+pressing the keys while another app is focused on your Linux Mint Cinnamon
+X11 desktop. No shortcuts are replaced during installation without approval.
 
 
 ### Vault: one-click masked copy (review)
