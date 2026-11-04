@@ -11,7 +11,7 @@ from unittest.mock import MagicMock, patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("XDG_SESSION_TYPE", "x11")
 
-from PySide6.QtCore import QSettings
+from PySide6.QtCore import QSettings, Qt
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import QApplication, QMessageBox
 
@@ -95,6 +95,14 @@ class TemporaryRetentionUiTests(unittest.TestCase):
                 old = add_old_temporary(window, b"expired by opt-in")
                 pinned = add_old_temporary(window, b"pinned survives expiry",
                                            pinned=True)
+                window.paste_queue.add(old)
+                window.quick_popup.refresh()
+                self.assertTrue(any(
+                    window.quick_popup.items.item(i).data(
+                        Qt.ItemDataRole.UserRole
+                    ) == old
+                    for i in range(window.quick_popup.items.count())
+                ))
                 with patch.object(QMessageBox, "question",
                                   return_value=QMessageBox.StandardButton.No):
                     window.temporary_expiry_toggle.setChecked(True)
@@ -108,6 +116,11 @@ class TemporaryRetentionUiTests(unittest.TestCase):
                 self.assertTrue(window._temporary_expiry_timer.isActive())
                 self.assertIsNone(window.store.get(old))
                 self.assertIsNotNone(window.store.get(pinned))
+                self.assertEqual(window.paste_queue.ids(), ())
+                # Hidden quick-search results must not retain deleted IDs.
+                self.assertEqual(window.quick_popup.items.count(), 0)
+                window.store.add("text", b"fresh work copy", "fresh work copy", "Work")
+                self.assertEqual(window.paste_queue.ids(), ())
 
                 window.temporary_expiry_toggle.setChecked(False)
                 self.assertFalse(window._temporary_expiry_timer.isActive())
