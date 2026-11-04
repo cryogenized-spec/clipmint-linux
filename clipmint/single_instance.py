@@ -39,6 +39,15 @@ class InstanceServer(QObject):
         if not self.server.listen(SERVER_NAME):
             if send_command(occupied_command):
                 raise RuntimeError("ClipMint is already running")
+            # The incumbent might accept connections yet fail to flush a
+            # command while its Qt event loop is busy. Never unlink a live
+            # server's path just because the command write timed out.
+            probe = QLocalSocket()
+            probe.connectToServer(SERVER_NAME)
+            occupied = probe.waitForConnected(350)
+            probe.abort()
+            if occupied:
+                raise RuntimeError("ClipMint is already running")
             QLocalServer.removeServer(SERVER_NAME)
             if not self.server.listen(SERVER_NAME):
                 raise RuntimeError("Could not start local command socket")
