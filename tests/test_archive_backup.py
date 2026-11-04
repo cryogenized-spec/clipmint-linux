@@ -94,6 +94,82 @@ class ArchiveBackupTests(unittest.TestCase):
             finally:
                 src.close()
 
+    def test_rejects_open_source_transaction_without_hanging(self):
+        with TemporaryDirectory() as root:
+            src = ClipStore(Path(root) / "live.sqlite3")
+            target = Path(root) / "archive.sqlite3"
+            try:
+                src.add("text", b"committed row", "committed row")
+                src.conn.execute(
+                    "INSERT INTO bins(name,position) VALUES('uncommitted', 999)"
+                )
+                self.assertTrue(src.conn.in_transaction)
+                with self.assertRaisesRegex(
+                    ArchiveBackupError, "unfinished database write"
+                ):
+                    backup_archive(src.conn, target, timeout_seconds=0.25)
+                self.assertFalse(target.exists())
+                src.conn.rollback()
+                backup_archive(src.conn, target)
+                self.assertTrue(target.exists())
+            finally:
+                src.close()
+
+    def test_refuses_overwrite_target_with_live_wal_sidecars(self):
+        with TemporaryDirectory() as root:
+            src = ClipStore(Path(root) / "live.sqlite3")
+            target = Path(root) / "target.sqlite3"
+            other = sqlite3.connect(target)
+            try:
+                src.add("text", b"good new data", "good new data")
+                other.execute("PRAGMA journal_mode=WAL")
+                other.execute("CREATE TABLE old_data(value TEXT)")
+                other.execute(
+                    "INSERT INTO old_data(value) VALUES('existing important data')"
+                )
+                other.commit()
+                other.execute("INSERT INTO old_data(value) VALUES('still open')")
+                other.commit()
+                self.assertTrue(Path(str(target) + "-wal").exists())
+                with self.assertRaisesRegex(
+                    ArchiveBackupError, "WAL/journal sidecars"
+                ):
+                    backup_archive(src.conn, target, overwrite=True)
+                self.assertEqual(
+                    other.execute("SELECT COUNT(*) FROM old_data").fetchone()[0], 2
+                )
+            finally:
+                other.close()
+                src.close()
+
+    def test_refuses_unsafe_world_writable_nonsticky_parent(self):
+        with TemporaryDirectory() as root:
+            directory = Path(root) / "insecure"
+            directory.mkdir()
+            directory.chmod(0o777)
+            src = ClipStore(Path(root) / "source.sqlite3")
+            try:
+                with self.assertRaisesRegex(
+                    ArchiveBackupError, "private destination directory"
+                ):
+                    backup_archive(src.conn, directory / "archive.sqlite3")
+                self.assertEqual(list(directory.iterdir()), [])
+            finally:
+                src.close()
+
+    def test_no_private_staging_files_left_after_backup(self):
+        with TemporaryDirectory() as root:
+            src = ClipStore(Path(root) / "source.sqlite3")
+            target = Path(root) / "archive.sqlite3"
+            try:
+                src.add("text", b"test", "test")
+                backup_archive(src.conn, target)
+                self.assertFalse(
+                    list(Path(root).glob(".clipmint-backup-*"))
+                )
+            finally:
+                src.close()
+
     def test_encrypted_history_remains_ciphertext_without_key_export(self):
         with TemporaryDirectory() as root:
             key = utils.random(SecretBox.KEY_SIZE)
