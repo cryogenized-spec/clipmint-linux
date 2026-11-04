@@ -661,17 +661,41 @@ class ClipMintWindow(QMainWindow):
                 QLineEdit.EchoMode.Normal if checked else QLineEdit.EchoMode.Password
             )
         )
+        # Copy the full value directly from the unlocked vault, regardless
+        # of cursor position, text selection or masked display state.
+        copy_button = QPushButton("Copy")
+        copy_button.setObjectName("vaultRevealCopy")
+        copy_button.setToolTip("Copy the complete value without revealing it")
+        copy_button.clicked.connect(
+            lambda _checked=False: self.copy_specific_vault_value(
+                entry_id, feedback_button=copy_button
+            )
+        )
         close = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         close.rejected.connect(dialog.reject)
         form.addRow("Value", field)
         form.addRow("", reveal)
+        form.addRow("Clipboard", copy_button)
+        clipboard_note = QLabel("Clipboard clears after 30 seconds if unchanged.")
+        clipboard_note.setObjectName("captureDetails")
+        form.addRow("", clipboard_note)
         form.addRow(close)
         dialog.exec()
         field.clear()
 
-    def copy_vault_value(self):
+    def copy_vault_value(self, *_args):
+        """Copy from the main vault list without relying on selected text."""
         entry_id = self.selected_vault_id()
-        if entry_id is None or not self.vault.unlocked:
+        if entry_id is not None:
+            self.copy_specific_vault_value(
+                entry_id, feedback_button=self.vault_actions.get("copy")
+            )
+
+    def copy_specific_vault_value(
+        self, entry_id: str, *, feedback_button: QPushButton | None = None
+    ) -> None:
+        """Copy the entire decrypted value; never add it to clipboard history."""
+        if not self.vault.unlocked:
             return
         try:
             value = self.vault.get_value(entry_id)
@@ -679,17 +703,32 @@ class ClipMintWindow(QMainWindow):
             self.error("Vault", str(exc))
             return
         self.touch_vault()
-        # Never route a deliberate secret copy through clipboard history.
         self._vault_clipboard_text = value
         self._vault_clipboard_token += 1
         token = self._vault_clipboard_token
         self._ignore_next_clipboard_change = True
         QApplication.clipboard().setText(value)
         QTimer.singleShot(30000, lambda: self.expire_vault_clipboard(token))
-        self.statusBar().showMessage(
-            "Value copied · clipboard will clear after 30 seconds if unchanged",
-            5000,
-        )
+
+        if feedback_button is not None:
+            feedback_button.setText("✓ Copied!")
+            feedback_button.setAccessibleName("Copied!")
+            # A timer owned by the button can't update a closed dialog.
+            timer = getattr(feedback_button, "_clipmint_copy_timer", None)
+            if timer is None:
+                timer = QTimer(feedback_button)
+                timer.setSingleShot(True)
+                timer.timeout.connect(
+                    lambda: self.reset_vault_copy_feedback(feedback_button)
+                )
+                feedback_button._clipmint_copy_timer = timer
+            timer.start(1800)
+        self.statusBar().showMessage("Copied!", 3000)
+
+    @staticmethod
+    def reset_vault_copy_feedback(button: QPushButton) -> None:
+        button.setText("Copy")
+        button.setAccessibleName("Copy full value")
 
     def expire_vault_clipboard(self, token: int):
         if token != self._vault_clipboard_token:
