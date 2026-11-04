@@ -41,6 +41,7 @@ from .cinnamon_hotkey import install_shortcut, ShortcutSetupError
 from .secure_history import (EncryptedClipStore, HistorySecurityError,
                              key_from_secret_service, secure_path)
 from .archive_backup import backup_archive, ArchiveBackupError
+from .autostart import AutostartError, is_enabled as login_startup_enabled, set_enabled as set_login_startup
 
 
 THEME = """
@@ -955,6 +956,21 @@ class ClipMintWindow(QMainWindow):
         self.pause_button.clicked.connect(self.toggle_monitoring)
         layout.addWidget(self.pause_button)
 
+        login_group = QGroupBox("Start at login")
+        login_layout = QVBoxLayout(login_group)
+        login_help = QLabel(
+            "Optional and OFF by default. Starts ClipMint quietly in the tray "
+            "on Cinnamon/X11. Requires the installed .deb; if the system tray "
+            "is unavailable, ClipMint opens its window instead."
+        )
+        login_help.setWordWrap(True)
+        login_layout.addWidget(login_help)
+        self.login_startup_toggle = QCheckBox("Launch ClipMint when I log in")
+        self.login_startup_toggle.setChecked(login_startup_enabled())
+        self.login_startup_toggle.toggled.connect(self.set_login_startup_enabled)
+        login_layout.addWidget(self.login_startup_toggle)
+        layout.addWidget(login_group)
+
         temp_group = QGroupBox("Temporary collection · retention")
         temp_layout = QVBoxLayout(temp_group)
         explanation = QLabel(
@@ -1252,6 +1268,15 @@ class ClipMintWindow(QMainWindow):
         target = Path(item.data(Qt.ItemDataRole.UserRole))
         if target.is_file():
             self.open_path(target)
+
+    def set_login_startup_enabled(self, enabled: bool) -> None:
+        try:
+            set_login_startup(enabled)
+        except (AutostartError, OSError) as exc:
+            self.login_startup_toggle.blockSignals(True)
+            self.login_startup_toggle.setChecked(login_startup_enabled())
+            self.login_startup_toggle.blockSignals(False)
+            self.error("Start at login", str(exc))
 
     def configure_tray(self):
         self.tray = None
@@ -2233,8 +2258,12 @@ class ClipMintWindow(QMainWindow):
 def main():
     if sys.platform != "linux":
         raise SystemExit("ClipMint currently supports Linux only")
-    command = "toggle" if "--toggle" in sys.argv[1:] else (
-        "quit" if "--quit" in sys.argv[1:] else "show"
+    arguments = sys.argv[1:]
+    hidden = "--hidden" in arguments and not (
+        "--toggle" in arguments or "--quit" in arguments
+    )
+    command = "toggle" if "--toggle" in arguments else (
+        "quit" if "--quit" in arguments else ("ping" if hidden else "show")
     )
     # Every invocation first signals an existing instance. The running daemon
     # owns the clipboard; --toggle never starts a second clipboard watcher.
@@ -2257,12 +2286,18 @@ def main():
         elif action == "quit":
             window.quit_app()
     try:
-        window._instance_server = InstanceServer(on_command, window)
+        window._instance_server = InstanceServer(
+            on_command, window, occupied_command="ping" if hidden else "show"
+        )
     except RuntimeError as exc:
         QMessageBox.warning(None, "ClipMint", str(exc))
         return
     if command == "toggle":
         QTimer.singleShot(150, window.toggle_quick_popup)
+    elif hidden and window.tray is not None:
+        # Login startup stays headless but is reachable through the tray.
+        app.setQuitOnLastWindowClosed(False)
     else:
+        # Never leave a background watcher inaccessible on desktops with no tray.
         window.show()
     raise SystemExit(app.exec())
