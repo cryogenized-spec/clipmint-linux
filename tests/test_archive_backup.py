@@ -168,9 +168,33 @@ class ArchiveBackupTests(unittest.TestCase):
             src = ClipStore(Path(root) / "source.sqlite3")
             try:
                 with self.assertRaisesRegex(
-                    ArchiveBackupError, "private destination directory"
+                    ArchiveBackupError, "private backup folder"
                 ):
                     backup_archive(src.conn, directory / "archive.sqlite3")
+                self.assertEqual(list(directory.iterdir()), [])
+            finally:
+                src.close()
+
+    def test_foreign_owned_sticky_parent_is_not_trusted(self):
+        from unittest.mock import patch
+        with TemporaryDirectory() as root:
+            directory = Path(root) / "shared-sticky"
+            directory.mkdir()
+            directory.chmod(0o1777)
+            src = ClipStore(Path(root) / "source.sqlite3")
+            try:
+                # Simulate a destination directory owned by a different
+                # account than the active caller, as with /tmp.
+                with patch(
+                    "clipmint.archive_backup.os.geteuid",
+                    return_value=os.geteuid() + 1,
+                ):
+                    with self.assertRaisesRegex(
+                        ArchiveBackupError, "private backup folder"
+                    ):
+                        backup_archive(
+                            src.conn, directory / "private-copy.sqlite3"
+                        )
                 self.assertEqual(list(directory.iterdir()), [])
             finally:
                 src.close()
