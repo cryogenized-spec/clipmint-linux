@@ -59,6 +59,12 @@ class PopUpTests(unittest.TestCase):
                 if len(messages) == 2:
                     break
             self.assertEqual(messages, ["toggle", "screenshot-area"])
+            self.assertTrue(single_instance.send_command("record-area"))
+            for _ in range(15):
+                self.app.processEvents()
+                if len(messages) == 3:
+                    break
+            self.assertEqual(messages, ["toggle", "screenshot-area", "record-area"])
             server.server.close()
             single_instance.QLocalServer.removeServer(unique)
 
