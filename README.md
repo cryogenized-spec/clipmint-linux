@@ -502,3 +502,36 @@ or other users' configuration are changed.
 
 This remains a **review feature** until CI passes and Cinnamon/X11 startup,
 tray and logout behaviour are tested on the HP OMEN.
+
+## Clipboard history hardening (draft PR)
+
+A separate history-hardening draft introduces \`0700\` permissions on the managed
+\`~/.local/share/clipmint\` directory and \`0600\` on the history SQLite
+database (including upgrades from permissive modes), with
+\`PRAGMA secure_delete=ON\`. Deleted clips are removed from the full-text
+index, committed, and followed by a \`wal_checkpoint(TRUNCATE)\` to avoid
+leaving ordinary WAL remnants indefinitely. The optional
+\`ClipStore.compact_history()\` maintenance operation performs a checkpoint,
+\`VACUUM\`, and another checkpoint; it can be expensive with large images
+and must be invoked intentionally, not on every copy.
+
+Copying **A → B → A** now refreshes the *existing* record's recency and
+last-used timestamp rather than inserting another A. Identity, pinned state,
+favourites and user tags survive. The recency sequence also controls the
+unpinned LRU retention limit and survives reopens and migrations.
+Encrypted history uses keyed HMAC fingerprints; cleartext/hashes of
+possible passwords are not written into its metadata. Existing encrypted
+archives receive a one-time fingerprint backfill at unlock; a large
+image-heavy archive may take longer to open that first time. Entries that
+fail ciphertext authentication are **preserved but hidden** from ordinary
+search so one corrupted record cannot prevent access to healthy items. A
+visible warning reports detected damaged entries; manual recovery is
+necessary, and no plaintext fallback is enabled.
+
+**Privacy limitation:** SQLite secure-delete, VACUUM and WAL truncation
+reduce remnants inside the active database. None of these can guarantee
+physical erasure from SSD flash cells, snapshots, backups, swap, other
+applications or previously generated copies. This change neither removes
+existing plaintext legacy history after an encrypted migration nor changes
+the retention policy, snapshot/export behaviour, or current package release.
+Do not treat it as a guarantee that a secret once recorded is unrecoverable.

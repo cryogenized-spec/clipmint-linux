@@ -157,6 +157,7 @@ class ClipMintWindow(QMainWindow):
         self._temporary_expiry_timer.timeout.connect(self.expire_temporary_if_enabled)
         self.history_secure = False
         self.history_security_error = ""
+        self.history_integrity_warning = ""
         if self.settings.value("privacy/history_secure", False, type=bool):
             try:
                 if not secure_path().is_file():
@@ -166,6 +167,11 @@ class ClipMintWindow(QMainWindow):
                 self.store.close()
                 self.store = encrypted
                 self.history_secure = True
+                if encrypted.corrupt_row_ids:
+                    self.history_integrity_warning = (
+                        f"Warning: {len(encrypted.corrupt_row_ids)} unreadable "
+                        "encrypted history item(s) hidden, not deleted."
+                    )
             except (HistorySecurityError, OSError) as exc:
                 self.history_security_error = str(exc)
         # Seed new installations with ready-to-use Smart collections, but do
@@ -211,7 +217,7 @@ class ClipMintWindow(QMainWindow):
         self.install_shortcuts()
         self.quick_popup = QuickPopup(self.store, self.quick_pick)
         self.statusBar().showMessage(
-            self.history_security_error or
+            self.history_security_error or self.history_integrity_warning or
             "Ready · Left-click to preview, right-click for Copy / Pin / Move / Delete"
         )
         self.configure_tray()
@@ -1823,6 +1829,12 @@ class ClipMintWindow(QMainWindow):
         self.history.blockSignals(False)
         self.count_label.setText(f"{len(clips):02d} / {self.store.count(bin_name):02d}")
         self.search.setToolTip(self.store.index_status())
+        if self.history_secure and self.store.corrupt_row_ids:
+            self.statusBar().showMessage(
+                f"Warning: {len(self.store.corrupt_row_ids)} encrypted history "
+                "item(s) could not be decrypted and are hidden, not deleted.",
+                15000,
+            )
         self._refresh_queue_button()
         if hasattr(self, "footer_status"):
             self.footer_status.setText(f"● Ready   |   HISTORY {self.store.count(bin_name):02d}")
