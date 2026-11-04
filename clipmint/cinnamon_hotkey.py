@@ -63,23 +63,70 @@ def _list(value: str) -> list[str]:
     return result
 
 
-def install_shortcut(command: str, sequence: str = "Ctrl+Alt+V") -> str:
+MEDIA_KEYS = "org.cinnamon.desktop.keybindings.media-keys"
+SCREENSHOT_ACTIONS = (
+    "screenshot", "window-screenshot", "area-screenshot",
+    "screenshot-clip", "window-screenshot-clip", "area-screenshot-clip",
+)
+
+
+def _canonical(accelerator: str) -> tuple[tuple[str, ...], str]:
+    """Compare common GSettings modifier spellings independently of order."""
+    modifier_names = re.findall(r"<([^>]+)>", accelerator)
+    aliases = {"control": "primary", "ctrl": "primary", "super": "super"}
+    modifiers = tuple(sorted(aliases.get(name.lower(), name.lower())
+                             for name in modifier_names))
+    key = re.sub(r"<[^>]+>", "", accelerator).lower()
+    return modifiers, key
+
+
+def _check_cinnamon_screenshot_conflicts(accelerator: str) -> None:
+    requested = _canonical(accelerator)
+    # Do not silently replace Mint's built-in screenshot shortcuts. The user
+    # can reassign them explicitly in the system keyboard settings.
+    for action in SCREENSHOT_ACTIONS:
+        try:
+            bindings = _list(_run("get", MEDIA_KEYS, action))
+        except ShortcutSetupError:
+            continue  # Older Cinnamon version may not have every key.
+        if any(_canonical(bound) == requested for bound in bindings if bound):
+            raise ShortcutSetupError(
+                "Cinnamon's built-in screenshot action already owns this key. "
+                "Open System Settings → Keyboard → Shortcuts → Screenshots "
+                "and remove or change that binding before registering ClipMint."
+            )
+
+
+def install_shortcut(
+    command: str,
+    sequence: str = "Ctrl+Alt+V",
+    *,
+    name: str = "ClipMint quick search",
+) -> str:
     accelerator = cinnamon_accelerator(sequence)
     current = _list(_run("get", PARENT, "custom-list"))
     for ident in current:
-        existing = _list(_run("get", f"{CHILD}:{BASE}{ident}/", "binding"))
-        if accelerator in existing:
-            raise ShortcutSetupError("That shortcut is already assigned in Cinnamon")
-    # Add a completely new entry rather than rewriting any existing binding.
+        schema = f"{CHILD}:{BASE}{ident}/"
+        existing = _list(_run("get", schema, "binding"))
+        if any(_canonical(bound) == _canonical(accelerator) for bound in existing):
+            existing_command = _run("get", schema, "command").strip("'")
+            if existing_command == command:
+                return accelerator  # Idempotent registration of our own shortcut.
+            raise ShortcutSetupError(
+                "That key combination is already assigned to a Cinnamon custom "
+                "shortcut. Change it under System Settings → Keyboard → "
+                "Shortcuts → Custom Shortcuts first."
+            )
+    _check_cinnamon_screenshot_conflicts(accelerator)
+    # Never overwrite existing custom shortcuts. New registration is opt-in.
     slot = next(f"custom{i}" for i in range(1000) if f"custom{i}" not in current)
     schema = f"{CHILD}:{BASE}{slot}/"
     for key, value in (
-        ("name", "ClipMint quick search"),
+        ("name", name),
         ("command", command),
         ("binding", str([accelerator])),
     ):
         _run("set", schema, key, value)
-    # Refresh the list at the final commit point to protect unrelated changes.
     updated = _list(_run("get", PARENT, "custom-list"))
     if slot in updated:
         raise ShortcutSetupError("Cinnamon shortcut list changed concurrently")
