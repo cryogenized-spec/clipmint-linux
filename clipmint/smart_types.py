@@ -82,8 +82,8 @@ API_CONTEXT = re.compile(
     r"(?:[\"']?\s*[:=]\s*[\"']?\s*|\s+)(\S{3,})"
 )
 ENV_CREDENTIAL = re.compile(
-    r"(?im)^\s*(?:export\s+)?[\"']?([A-Za-z_][A-Za-z0-9_.-]{2,80})[\"']?"
-    r"\s*[:=]\s*[\"']?([^\s\"']{3,})"
+    r"(?im)^[ \t]{0,64}(?:export[ \t]+)?[\"']?([A-Za-z_][A-Za-z0-9_.-]{2,80})[\"']?"
+    r"[ \t]{0,32}[:=][ \t]{0,32}[\"']?([^\s\"']{3,})"
 )
 PRIVATE_ENV_ENDINGS = (
     "PASSWORD", "PASSWD", "PASSPHRASE", "SECRET", "PRIVATE_KEY",
@@ -142,7 +142,7 @@ POSTAL = re.compile(r"(?im)^\s*\d{1,6}[A-Za-z]?\s+[\w.' -]{4,80}"
 PATH = re.compile(r"^(?:/[^/\s]|~/|\.{1,2}/|[A-Z]:\\)[^\n]{1,500}$", re.I)
 TEMPLATE = re.compile(r"\{\{\s*[A-Za-z_]\w{0,64}\s*\}\}|\$\{[A-Za-z_]\w{0,64}\}")
 SVG = re.compile(r"(?is)^\s*(?:<\?xml[^>]*>\s*)?<svg\b")
-XML = re.compile(r"(?is)^\s*(?:<\?xml\b|<(?!html\b)[a-z][\w:.-]*(?:\s+[^<>]*)?>)")
+XML = re.compile(r"(?i)^[ \t\r\n]{0,64}(?:<\?xml\b|<(?!html\b)[a-z][\w:.-]{0,127}(?=[\s>/]))")
 YAML = re.compile(r"(?m)^\s*[\w.-]{2,50}:\s*\S.*$", re.M)
 PAN_CVV = re.compile(r"(?i)\b(?:cvv|cvc|security\s*code)\s*[:=#-]?\s*\d{3,4}\b")
 
@@ -199,6 +199,8 @@ def classify_smart(
     # Bounded heuristics; the separate privacy filter also inspects text
     # before the clipboard item is admitted into history.
     if len(value) > 262144:
+        # UI classification can stop here; the separate sensitive-content
+        # guard continues scanning the entire input in bounded windows.
         return "plain-text"
     sample = value[:262144]
     # Named environment variables often carry application-specific prefixes
@@ -262,6 +264,8 @@ def classify_smart(
         return "crypto-wallets"
     if EMAIL.fullmatch(value):
         return "email"
+    if ISO_DATE.fullmatch(value) or EPOCH.fullmatch(value):
+        return "calendar-dates"
     if (PHONE.fullmatch(value)
             and 7 <= sum(ch.isdigit() for ch in value) <= 15
             and not EPOCH.fullmatch(value)):
@@ -271,9 +275,9 @@ def classify_smart(
     if TRACKING.fullmatch(value) or (TRACKING_CONTEXT.search(sample)
                                     and re.search(r"(?i)[A-Z0-9]{10,35}", sample)):
         return "package-tracking"
-    if ISO_DATE.fullmatch(value) or EPOCH.fullmatch(value) or re.search(
-        r"(?i)\b(?:tomorrow|next\s+(?:monday|tuesday|wednesday|thursday|"
-        r"friday|saturday|sunday))\s+(?:at\s+)?\d{1,2}:\d{2}\b", value
+    if re.search(
+        r"(?i)\b(?:tomorrow|next[ \t]+(?:monday|tuesday|wednesday|thursday|"
+        r"friday|saturday|sunday))[ \t]+(?:at[ \t]+)?\d{1,2}:\d{2}\b", value
     ):
         return "calendar-dates"
     if PATH.fullmatch(value):
@@ -287,7 +291,7 @@ def classify_smart(
             decoded = json.loads(value)
             if isinstance(decoded, (dict, list)):
                 return "json"
-        except (json.JSONDecodeError, ValueError):
+        except (json.JSONDecodeError, ValueError, RecursionError):
             # Preserve malformed JSON-like documents in a data collection
             # for later validation. Do not execute or parse as code.
             if re.match(r"^\s*[\{\[]\s*[\"'\[\{]", value):
@@ -317,8 +321,26 @@ def classify_smart(
 
 
 def sensitive_clipboard_text(text: str) -> bool:
-    """Privacy-first gate, independent of whether Autosort is toggled on."""
-    return classify_smart("text", text) in PRIVATE_KEYS
+    """Privacy-first gate; scan *all* copied text even above the type size cap.
+
+    The ordinary classifier has a 256 KiB classification limit. A dangerous
+    field embedded near the end of a 2 MiB document must still be rejected.
+    Small overlapping windows prevent boundary splits from evading matching.
+    Oversized direct-store payloads fail closed rather than hogging the GUI.
+    """
+    if not isinstance(text, str) or not text.strip():
+        return False
+    if len(text) > 2 * 1024 * 1024:
+        return True
+    window = 131072
+    overlap = 2048
+    if len(text) <= window:
+        return classify_smart("text", text) in PRIVATE_KEYS
+    for start in range(0, len(text), window - overlap):
+        segment = text[start:start + window]
+        if classify_smart("text", segment) in PRIVATE_KEYS:
+            return True
+    return False
 
 
 def default_smart_rules() -> list[dict]:
