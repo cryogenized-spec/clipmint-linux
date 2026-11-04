@@ -878,8 +878,17 @@ class ClipMintWindow(QMainWindow):
             pattern.setEnabled(current in ("Keyword", "Regex"))
             smart_choice.setEnabled(current == "Smart")
 
+        def on_smart_changed(_index: int) -> None:
+            if mode.currentText() == "Smart":
+                selected = TYPE_BY_KEY.get(smart_choice.currentData())
+                if selected:
+                    destination.setCurrentText(selected.bin)
+
         mode.currentTextChanged.connect(on_mode_changed)
+        smart_choice.currentIndexChanged.connect(on_smart_changed)
         on_mode_changed(mode.currentText())
+        if original is None and mode.currentText() == "Smart":
+            on_smart_changed(smart_choice.currentIndex())
         actions = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok |
             QDialogButtonBox.StandardButton.Cancel
@@ -904,9 +913,15 @@ class ClipMintWindow(QMainWindow):
     def add_autosort_rule(self):
         rule = self.edit_autosort_dialog()
         if rule is not None:
-            self.autosort_rules.append(rule)
+            # A custom rule appended after the broad Plain Text fallback
+            # would never match normal prose. Insert just before that fallback.
+            next_index = next((
+                i for i, item in enumerate(self.autosort_rules)
+                if item["mode"] == "Smart" and item["pattern"] == "plain-text"
+            ), len(self.autosort_rules))
+            self.autosort_rules.insert(next_index, rule)
             self.persist_autosort()
-            self.refresh_autosort_list(len(self.autosort_rules) - 1)
+            self.refresh_autosort_list(next_index)
 
     def edit_autosort_rule(self):
         i = self.autosort_list.currentRow()
