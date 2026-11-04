@@ -24,8 +24,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install offline Qt test dependencies on runner
+      - name: Install native Qt libraries and Python test dependencies on runner
         run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libopengl0 libxcb-cursor0 libxkbcommon-x11-0
           python -m pip install --disable-pip-version-check -r requirements.txt
       - name: Compile source and run gallery and regression tests
         run: |
