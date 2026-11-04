@@ -253,11 +253,12 @@ def install_shortcut(
             "before": c["bindings"], "after": c["after"],
         } for c in replacements],
     }
-    if replacements and not any(
+    recorded_here = bool(replacements) and not any(
         entry.get("command") == command and
         _canonical(entry.get("accelerator", "")) == _canonical(accelerator)
         for entry in backups
-    ):
+    )
+    if recorded_here:
         # Persist originals *before* touching Cinnamon.
         _save_backups(backups + [backup])
     try:
@@ -289,6 +290,7 @@ def install_shortcut(
             )
     except Exception:
         # Keep unrelated bindings intact and roll back the changes we made.
+        rollback_ok = True
         if slot is not None:
             try:
                 now = _list(_run("get", PARENT, "custom-list"))
@@ -296,13 +298,17 @@ def install_shortcut(
                     _run("set", PARENT, "custom-list",
                          repr([x for x in now if x != slot]))
             except ShortcutSetupError:
-                pass
+                rollback_ok = False
         for change in replacements:
             try:
                 _run("set", change["schema"], change["key"],
                      repr(change["bindings"]))
             except ShortcutSetupError:
-                pass
+                rollback_ok = False
+        if recorded_here and rollback_ok:
+            # An entirely rolled-back takeover must not leave a stale
+            # restoration entry that points at an unregistered custom slot.
+            _save_backups(backups)
         raise
     return accelerator
 
