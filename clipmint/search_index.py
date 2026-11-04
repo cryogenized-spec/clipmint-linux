@@ -83,6 +83,28 @@ class ClipSearchIndex:
                 "DELETE FROM clipmint_fts WHERE rowid NOT IN (SELECT id FROM clips)"
             )
 
+    def rebuild_after_purge(self) -> None:
+        """Rewrite FTS5 segments from surviving rows after retention cleanup.
+
+        Merely deleting MATCH rows can leave old terms in the FTS5 shadow
+        index until it is compacted. The caller performs VACUUM afterward
+        to discard obsolete database pages. This is not SSD secure erasure.
+        """
+        if not self.enabled:
+            return
+        with self.conn:
+            self.conn.execute("DELETE FROM clipmint_fts")
+            for ident, kind, content, preview in self.conn.execute(
+                "SELECT id,kind,content,preview FROM clips"
+            ):
+                self.conn.execute(
+                    "INSERT INTO clipmint_fts(rowid,preview,body) VALUES(?,?,?)",
+                    (ident, preview, self.body_text(kind, bytes(content))),
+                )
+            self.conn.execute(
+                "INSERT INTO clipmint_fts(clipmint_fts) VALUES('optimize')"
+            )
+
     def search_ids(self, query: str, bin_name: str) -> list[int]:
         if not self.enabled:
             return []
