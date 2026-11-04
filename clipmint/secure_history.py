@@ -8,10 +8,13 @@ metadata (kind/bin/timestamps/count) remains visible on disk.
 from __future__ import annotations
 import base64
 from dataclasses import replace
+import hashlib
+import hmac
 import json
 import os
 from pathlib import Path
 import secrets
+import sqlite3
 import shutil
 
 from nacl.secret import SecretBox
@@ -66,6 +69,7 @@ class EncryptedClipStore(ClipStore):
         if len(key) != SecretBox.KEY_SIZE:
             raise ValueError("Invalid history encryption key")
         self.box = SecretBox(key)
+        self._dedup_key = key
         super().__init__(path, max_unpinned=max_unpinned, index_plaintext=False)
         os.chmod(self.path, 0o600)
 
@@ -99,19 +103,56 @@ class EncryptedClipStore(ClipStore):
         except (CryptoError, UnicodeError) as exc:
             raise HistorySecurityError("Encrypted template failed authentication") from exc
 
+    def _encrypted_fingerprint(
+        self, kind: str, content: bytes, formats: dict[str, bytes] | None,
+    ) -> bytes:
+        """Secret-keyed HMAC; unlike plain SHA256 it resists guessable text."""
+        packed = bundle_to_bytes(dict(sorted((formats or {}).items())))
+        message = (b"clipmint-dedup-v1\\0" + kind.encode("ascii") +
+                   len(content).to_bytes(8, "big") + content + packed)
+        return hmac.digest(self._dedup_key, message, hashlib.sha256)
+
+    def _find_encrypted_duplicate(
+        self, kind: str, content: bytes, formats: dict[str, bytes] | None,
+        bin_name: str, fingerprint: bytes,
+    ) -> int | None:
+        expected = formats or {}
+        # Efficient keyed lookup for new rows, with a lazy fallback for old
+        # encrypted databases which do not yet have fingerprint metadata.
+        for where, params in (
+            ("fingerprint=?", (sqlite3.Binary(fingerprint),)),
+            ("fingerprint IS NULL", ()),
+        ):
+            rows = self.conn.execute(
+                "SELECT id,content FROM clips WHERE bin=? AND kind=? AND " + where +
+                " ORDER BY touch_seq DESC",
+                (bin_name, kind, *params)
+            )
+            for ident, sealed in rows:
+                prior_bytes, _preview, prior_formats = self._open(bytes(sealed))
+                if prior_bytes == content and prior_formats == expected:
+                    return ident
+        return None
+
     def add(self, kind: str, content: bytes, preview: str, bin_name="Work",
             formats: dict[str, bytes] | None = None):
-        # Dedup based on unencrypted content held *only* in process memory.
-        row = self.conn.execute(
-            "SELECT id,content FROM clips WHERE bin=? ORDER BY id DESC LIMIT 1",
-            (bin_name,),
-        ).fetchone()
-        if row:
-            old_content, _, old_formats = self._open(bytes(row[1]))
-            if old_content == content and old_formats == (formats or {}):
-                return row[0]
-        return super().add(kind, self._seal(content, preview, formats),
-                           "🔒 Encrypted history item", bin_name)
+        if kind not in ("text", "image", "files"):
+            raise ValueError("Unsupported clipboard type")
+        if not content:
+            return None
+        if bin_name not in self.bins():
+            raise ValueError("Unknown accumulation bin")
+        fingerprint = self._encrypted_fingerprint(kind, content, formats)
+        found = self._find_encrypted_duplicate(
+            kind, content, formats, bin_name, fingerprint
+        )
+        if found is not None:
+            return self._touch_duplicate(found, fingerprint)
+        return super().add(
+            kind, self._seal(content, preview, formats),
+            "🔒 Encrypted history item", bin_name,
+            _sealed_fingerprint=fingerprint
+        )
 
     def get(self, clip_id: int):
         result = super().get(clip_id)
@@ -131,7 +172,7 @@ class EncryptedClipStore(ClipStore):
         from .store import classify
         rows = self.conn.execute(
             """SELECT id,kind,content,pinned,created_at,bin,favorite FROM clips
-               WHERE bin=? ORDER BY id DESC LIMIT 1000""", (bin_name,)
+               WHERE bin=? ORDER BY touch_seq DESC,id DESC LIMIT 1000""", (bin_name,)
         )
         clips = []
         for ident, kind, raw, pinned, date, bucket, favorite in rows:
@@ -194,6 +235,7 @@ class EncryptedClipStore(ClipStore):
             )
             for _, name, body in legacy.templates():
                 secure.save_template(name, body)
+            secure.conn.execute("UPDATE clips SET touch_seq=id WHERE touch_seq=0")
             secure.conn.commit()
             secure.conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
             secure.close()
