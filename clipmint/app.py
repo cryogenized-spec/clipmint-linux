@@ -169,6 +169,7 @@ class ClipMintWindow(QMainWindow):
         self.vault = Vault()
         self._vault_clipboard_text = None
         self._vault_clipboard_token = 0
+        self._sensitive_clipboard_token = 0
         self._vault_lock_timer = QTimer(self)
         self._vault_lock_timer.setSingleShot(True)
         self._vault_lock_timer.timeout.connect(self.lock_vault)
@@ -1355,6 +1356,22 @@ class ClipMintWindow(QMainWindow):
                         png = bytes(buffer_bytes)
         entry = from_mime(data, png=png)
         if entry is None:
+            # A likely secret/OTP is deliberately excluded from disk history;
+            # also clear the system clipboard after 30s if it is still the same.
+            # This is best-effort on X11, not secure destruction of other copies.
+            if data.hasText():
+                original = data.text()
+                if sensitive_text(original):
+                    self._sensitive_clipboard_token += 1
+                    token = self._sensitive_clipboard_token
+                    QTimer.singleShot(
+                        30000,
+                        lambda: self.expire_sensitive_clipboard(token, original),
+                    )
+                    self.statusBar().showMessage(
+                        "Sensitive clipboard item not saved · clears after "
+                        "30 seconds if unchanged", 5500,
+                    )
             return
         current_bin = self.active_bin()
         full_text = (entry.content.decode("utf-8", "replace")
@@ -1380,6 +1397,15 @@ class ClipMintWindow(QMainWindow):
                 if tag not in existing and len(existing) < 15:
                     self.store.set_tags(saved_id, [*existing, tag])
         self.refresh()
+
+    def expire_sensitive_clipboard(self, token: int, expected: str) -> None:
+        """Never clear unrelated clipboard content copied in the meantime."""
+        if token != self._sensitive_clipboard_token:
+            return
+        clipboard = QApplication.clipboard()
+        if clipboard.text() == expected:
+            self._ignore_next_clipboard_change = True
+            clipboard.clear()
 
     def refresh(self, *_args):
         if not hasattr(self, "history"):
