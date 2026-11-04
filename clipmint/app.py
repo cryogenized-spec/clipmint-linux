@@ -1361,6 +1361,12 @@ class ClipMintWindow(QMainWindow):
                         png = bytes(buffer_bytes)
         entry = from_mime(data, png=png)
         if entry is None:
+            # Never display the actual credential, even in an error message.
+            if (is_concealed(data)
+                    or (data.hasText() and sensitive_text(data.text()))):
+                self.statusBar().showMessage(
+                    "Sensitive clipboard content detected · not saved to history", 6000
+                )
             return
         current_bin = self.active_bin()
         target = self.autosort_destination(entry.kind, entry.preview, current_bin)

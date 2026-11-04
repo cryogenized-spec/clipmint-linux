@@ -277,6 +277,31 @@ confirm all three checks are green. The release remains a development preview
 until actual Cinnamon/X11 field acceptance and security review are complete.
 
 
+## Clipboard secret-detection hardening — review branch
+
+The proposed \`fix/clipboard-secret-detection\` branch adds a single, local detector
+used by clipboard MIME capture, direct plaintext-history writes, OCR and snippet
+UI checks. It detects password-manager hints, known token formats, private keys,
+credential assignments, Luhn-valid payment-card numbers, and sufficiently
+random-looking standalone strings. On a match it **does not retain the value**
+in ordinary history, previews, file-format bundles, or the plaintext search index.
+ClipMint shows only a non-revealing "not saved" status.
+
+**No automatic secret import into the vault is attempted.** That would turn
+untrusted clipboard captures into retained credentials without an explicit choice.
+The \`mask()\` helper is deliberately a fixed-length placeholder, not encryption
+or a promise that the source application or X11 system clipboard is protected.
+
+This filter has both false positives (e.g. some hexadecimal hashes) and false
+negatives. Source-application hints are best-effort, not an access-control
+boundary. It is a review-only change until tests and a packaged Linux Mint
+field check pass. It **does not retroactively remove** credentials already
+recorded in \`~/.local/share/clipmint/history.sqlite3\`, previous backups,
+SQLite WAL pages, or the plaintext FTS index. Review old history locally and
+rotate any credentials suspected of exposure; do not paste live secrets into
+GitHub issues, bug reports, or test fixtures.
+
+
 ## Temporary collection: optional retention (development review)
 
 **Default: OFF.** Settings → **Temporary collection · retention** exposes

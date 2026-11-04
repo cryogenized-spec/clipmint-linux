@@ -8,6 +8,7 @@ import base64
 import json
 import re
 from dataclasses import dataclass
+from .secret_detector import detect_secret
 
 ALLOWED = (
     "text/plain", "text/plain;charset=utf-8", "text/html",
@@ -45,19 +46,8 @@ def luhn(value: str) -> bool:
 
 
 def sensitive_text(value: str) -> bool:
-    """Conservative broad screening; false negatives are still possible."""
-    if re.search(r"(?i)(?:password|passwd|api[_ -]?key|secret|access[_ -]?token|"
-                 r"authorization|bearer|private[_ -]?key)\s*[:=]\s*\S+", value):
-        return True
-    if re.search(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----", value):
-        return True
-    if re.search(r"(?i)\b(?:sk-[\w-]{18,}|gh[pousr]_[A-Za-z0-9_]{18,}|"
-                 r"AKIA[A-Z0-9]{16})\b", value):
-        return True
-    for match in re.finditer(r"(?<!\d)(?:\d[ -]?){13,19}(?!\d)", value):
-        if luhn(match.group()):
-            return True
-    return False
+    """Unified clipboard-history exclusion filter."""
+    return detect_secret(value).is_secret
 
 
 @dataclass(frozen=True)
@@ -92,7 +82,7 @@ def bundle_from_bytes(raw: bytes | None) -> dict[str, bytes]:
 
 def from_mime(mime, png: bytes | None = None) -> ClipboardEntry | None:
     """Capture a safe MIME subset; never decode unknown clipboard objects."""
-    if is_concealed(mime):
+    if is_concealed(mime) or detect_secret("", mime_targets=list(mime.formats())).is_secret:
         return None
     saved: dict[str, bytes] = {}
     total = 0
