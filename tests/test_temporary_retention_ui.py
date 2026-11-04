@@ -52,6 +52,7 @@ class TemporaryRetentionUiTests(unittest.TestCase):
             window.poller.stop()
             window._vault_lock_timer.stop()
             window._temporary_expiry_timer.stop()
+            window._closing = True
             if not window.store.closed:
                 window.store.close()
             window.close()
@@ -70,7 +71,9 @@ class TemporaryRetentionUiTests(unittest.TestCase):
                 window.expire_temporary_if_enabled()
                 self.assertIsNotNone(window.store.get(old))
                 window.quit_app()
-                self.assertFalse(window.store.closed is False)
+                self.assertTrue(window.store.closed)
+                window.poller.stop()
+                window._temporary_expiry_timer.stop()
                 window = self.window_in(root)
                 self.assertIsNotNone(window.store.get(old))
                 self.assertEqual(window.store.count("Temporary"), 1)
@@ -150,6 +153,8 @@ class TemporaryRetentionUiTests(unittest.TestCase):
 
                 window.quit_app()
                 self.assertTrue(window.store.closed)
+                window.poller.stop()
+                window._temporary_expiry_timer.stop()
                 window = self.window_in(root)
                 self.assertIsNone(window.store.get(unpinned))
                 self.assertIsNotNone(window.store.get(pinned))
