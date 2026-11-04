@@ -82,7 +82,9 @@ API_CONTEXT = re.compile(
     r"(?:[\"']?[ \t]{0,16}[:=][ \t]{0,16}[\"']?[ \t]{0,16}|[ \t]{1,32})([^\s]{3,})"
 )
 ENV_CREDENTIAL = re.compile(
-    r"(?im)^[ \t]{0,64}(?:export[ \t]+)?[\"']?([A-Za-z_][A-Za-z0-9_.-]{2,80})[\"']?"
+    # Credentials may appear mid-paragraph or inside rich HTML, not just at
+    # the start of a source line. No unbounded whitespace/backtracking.
+    r"(?i)(?<![A-Za-z0-9_.-])(?:export[ \t]+)?[\"']?([A-Za-z_][A-Za-z0-9_.-]{2,80})[\"']?"
     r"[ \t]{0,32}[:=][ \t]{0,32}[\"']?([^\s\"']{3,})"
 )
 PRIVATE_ENV_ENDINGS = (
