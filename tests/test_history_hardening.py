@@ -213,8 +213,20 @@ class HistoryHardeningTests(unittest.TestCase):
                 self.assertIsNotNone(store.conn.execute(
                     "SELECT content FROM clips WHERE id=?", (damaged,)
                 ).fetchone())
+                self.assertEqual(store.conn.execute(
+                    "SELECT corrupt FROM clips WHERE id=?", (damaged,)
+                ).fetchone()[0], 1)
             finally:
                 store.close()
+            reopened = EncryptedClipStore(path, key)
+            try:
+                self.assertIn(damaged, reopened.corrupt_row_ids)
+                self.assertEqual(
+                    [item.id for item in reopened.search()],
+                    [new_id, healthy],
+                )
+            finally:
+                reopened.close()
 
     def test_encrypted_oldest_first_uses_last_copy_not_original_id(self):
         with TemporaryDirectory() as root:
