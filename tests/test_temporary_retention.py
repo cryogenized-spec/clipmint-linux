@@ -108,6 +108,69 @@ class TemporaryRetentionTests(unittest.TestCase):
             finally:
                 store.close()
 
+    def test_recopied_duplicate_resets_age_in_plain_and_encrypted_stores(self):
+        with TemporaryDirectory() as root:
+            stores = (
+                ClipStore(Path(root) / "plain.sqlite3"),
+                EncryptedClipStore(
+                    Path(root) / "secure.sqlite3",
+                    utils.random(SecretBox.KEY_SIZE),
+                ),
+            )
+            try:
+                for index, store in enumerate(stores):
+                    with self.subTest(encrypted=bool(index)):
+                        message = f"reused item {index}".encode()
+                        ident = store.add(
+                            "text", message, message.decode(), "Temporary"
+                        )
+                        age_item(store, ident, timedelta(days=5))
+                        store.pin(ident, True)
+                        self.assertEqual(
+                            store.add("text", message, message.decode(), "Temporary"),
+                            ident,
+                        )
+                        self.assertTrue(store.pinned(ident))
+                        store.pin(ident, False)
+                        # Freshly copied item is not older than 24 hours.
+                        self.assertEqual(store.expire_temporary_unpinned(), 0)
+                        self.assertIsNotNone(store.get(ident))
+            finally:
+                for store in stores:
+                    store.close()
+
+    def test_removed_ids_are_reported_and_fts_shadow_postings_rebuilt(self):
+        with TemporaryDirectory() as root:
+            store = ClipStore(Path(root) / "history.sqlite3")
+            try:
+                term = "HighlyUniqueTemporaryHistoryFtsCanaryZyxw987"
+                expired = store.add("text", term.encode(), term, "Temporary")
+                kept = store.add(
+                    "text", b"normal retained entry", "normal retained entry",
+                    "Work",
+                )
+                age_item(store, expired, timedelta(days=3))
+                removed_ids = []
+                count = store.expire_temporary_unpinned(
+                    now=NOW, deleted_ids=removed_ids
+                )
+                self.assertEqual(count, 1)
+                self.assertEqual(removed_ids, [expired])
+                self.assertIsNotNone(store.get(kept))
+                if store.search_index.enabled:
+                    self.assertEqual(
+                        store.search_index.search_ids(term, "Temporary"), []
+                    )
+                    blocks = b"".join(bytes(row[0]) for row in store.conn.execute(
+                        "SELECT block FROM clipmint_fts_data"
+                    ))
+                    self.assertNotIn(term.encode(), blocks)
+            finally:
+                store.close()
+            # Rebuilt index and VACUUM must also be durable after close.
+            self.assertNotIn(term.encode(),
+                             (Path(root) / "history.sqlite3").read_bytes())
+
     def test_naive_clock_is_rejected(self):
         with TemporaryDirectory() as root:
             store = ClipStore(Path(root) / "history.sqlite3")
