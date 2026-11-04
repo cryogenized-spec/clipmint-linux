@@ -142,8 +142,14 @@ class ClipStore:
         name = name.strip()
         if not name or len(name) > 32:
             raise ValueError("Bin name must have 1–32 characters")
-        self.conn.execute("INSERT INTO bins(name,position) VALUES(?,COALESCE((SELECT MAX(position)+1 FROM bins),0))", (name,))
-        self.conn.commit()
+        # A duplicate name or other SQLite error must not leave an open
+        # transaction that blocks later history exports.
+        with self.conn:
+            self.conn.execute(
+                "INSERT INTO bins(name,position) "
+                "VALUES(?,COALESCE((SELECT MAX(position)+1 FROM bins),0))",
+                (name,),
+            )
 
     def add(self, kind: str, content: bytes, preview: str, bin_name: str = "Work",
             formats: dict[str, bytes] | None = None) -> int | None:
