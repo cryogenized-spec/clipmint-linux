@@ -2,14 +2,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import hashlib
 import os
 import re
 import sqlite3
 import stat
-from .clipboard_formats import bundle_to_bytes, bundle_from_bytes
+from .clipboard_formats import bundle_to_bytes, bundle_from_bytes, sensitive_payload
+from .secret_detector import detect_secret
 from .search_index import ClipSearchIndex
 
 DEFAULT_BINS = ("Work", "Personal", "Temporary")
@@ -47,26 +48,26 @@ def classify(clip: Clip) -> str:
 
 
 def looks_sensitive(text: str) -> bool:
-    """Conservative opt-out for obvious credentials (not a security guarantee)."""
-    return bool(re.search(r"(?i)\b(password|passwd|api[_ -]?key|secret[_ -]?key|access[_ -]?token)\s*[:=]\s*\S+", text))
+    """Compatibility entry point for the shared secret detector."""
+    return detect_secret(text).is_secret
 
 
 class ClipStore:
     def __init__(self, path: Path | None = None, max_unpinned: int = 250,
                  index_plaintext: bool = True):
-        path_is_managed = path is None
+        managed_path = path is None
         if path is None:
             base = Path(os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local/share")))
             path = base / "clipmint" / "history.sqlite3"
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        if path_is_managed:
-            # This is ClipMint's own directory, not a caller-supplied parent.
+        if managed_path:
             os.chmod(self.path.parent, 0o700)
-        # os.open() honours the requested 0600 permissions even with a
-        # permissive umask; O_NOFOLLOW rejects symlink redirection.
-        flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
-        fd = os.open(self.path, flags, 0o600)
+        # Refuse final-component symlink redirects, then enforce owner-only DB
+        # permissions on both new and upgraded history databases.
+        fd = os.open(
+            self.path, os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600
+        )
         try:
             if not stat.S_ISREG(os.fstat(fd).st_mode):
                 raise OSError("Clipboard history path is not a regular file")
@@ -149,9 +150,6 @@ class ClipStore:
             AFTER DELETE ON clips BEGIN
                 DELETE FROM clip_tags WHERE clip_id=OLD.id;
             END""")
-        # A durable recency sequence allows A → B → A to resurface the
-        # original entry (and keep its ID, pin, favourites and tags).
-        # Legacy entries retain their prior ID-based chronological order.
         columns = {row[1] for row in self.conn.execute("PRAGMA table_info(clips)")}
         if "touch_seq" not in columns:
             self.conn.execute(
@@ -160,13 +158,27 @@ class ClipStore:
         if "fingerprint" not in columns:
             self.conn.execute("ALTER TABLE clips ADD COLUMN fingerprint BLOB")
         self.conn.execute("UPDATE clips SET touch_seq=id WHERE touch_seq=0")
-        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_clips_bin_id ON clips(bin,id)")
         self.conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_clips_bin_recent ON clips(bin,touch_seq)"
         )
         self.conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_clips_bin_fingerprint "
-            "ON clips(bin,fingerprint)"
+            "CREATE INDEX IF NOT EXISTS idx_clips_bin_fingerprint ON clips(bin,fingerprint)"
+        )
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_clips_bin_id ON clips(bin,id)")
+        # SQLite INTEGER PRIMARY KEY can reuse a deleted highest row ID.
+        # Persist a monotonic allocation counter so stale dialogs/queue IDs
+        # can never point to a different future clip.
+        self.conn.execute("""CREATE TABLE IF NOT EXISTS clipmint_sequences (
+            name TEXT PRIMARY KEY,
+            next_id INTEGER NOT NULL CHECK(next_id > 0)
+        )""")
+        self.conn.execute(
+            "INSERT OR IGNORE INTO clipmint_sequences(name,next_id) "
+            "SELECT 'clips',COALESCE(MAX(id),0)+1 FROM clips"
+        )
+        self.conn.execute(
+            "UPDATE clipmint_sequences SET next_id=MAX(next_id,"
+            "(SELECT COALESCE(MAX(id),0)+1 FROM clips)) WHERE name='clips'"
         )
         self.conn.commit()
         self.search_index = ClipSearchIndex(self.conn, enabled=index_plaintext)
@@ -178,8 +190,32 @@ class ClipStore:
         name = name.strip()
         if not name or len(name) > 32:
             raise ValueError("Bin name must have 1–32 characters")
-        self.conn.execute("INSERT INTO bins(name,position) VALUES(?,COALESCE((SELECT MAX(position)+1 FROM bins),0))", (name,))
-        self.conn.commit()
+        # A duplicate name or other SQLite error must not leave an open
+        # transaction that blocks later history exports.
+        with self.conn:
+            self.conn.execute(
+                "INSERT INTO bins(name,position) "
+                "VALUES(?,COALESCE((SELECT MAX(position)+1 FROM bins),0))",
+                (name,),
+            )
+
+    def _allocate_clip_id(self) -> int:
+        # Called only within an insertion transaction. Legacy encrypted
+        # migration may insert explicit IDs, so account for the current max.
+        row = self.conn.execute(
+            "SELECT next_id FROM clipmint_sequences WHERE name='clips'"
+        ).fetchone()
+        next_id = max(
+            int(row[0]),
+            int(self.conn.execute(
+                "SELECT COALESCE(MAX(id),0)+1 FROM clips"
+            ).fetchone()[0]),
+        )
+        self.conn.execute(
+            "UPDATE clipmint_sequences SET next_id=? WHERE name='clips'",
+            (next_id + 1,),
+        )
+        return next_id
 
     @staticmethod
     def _fingerprint(kind: str, content: bytes, packed: bytes | None) -> bytes:
@@ -231,6 +267,10 @@ class ClipStore:
                 return ident
         return None
 
+    def _history_payload_is_sealed(self) -> bool:
+        """Encrypted history validates cleartext before sealing."""
+        return False
+
     def add(
         self, kind: str, content: bytes, preview: str, bin_name: str = "Work",
         formats: dict[str, bytes] | None = None, *,
@@ -242,8 +282,12 @@ class ClipStore:
             raise ValueError("Unknown accumulation bin")
         if not content:
             return None
+        # Check plaintext direct writes. EncryptedClipStore checks sensitive
+        # payloads BEFORE encrypting; ciphertext must never be classified.
+        if (not self._history_payload_is_sealed()
+                and sensitive_payload(kind, content, formats)):
+            return None
         packed = bundle_to_bytes(formats) if formats else None
-        # EncryptedClipStore performs a keyed comparison on plaintext first.
         fingerprint = (_sealed_fingerprint if _sealed_fingerprint is not None
                        else self._fingerprint(kind, content, packed))
         if _sealed_fingerprint is None:
@@ -252,25 +296,26 @@ class ClipStore:
             )
             if previous is not None:
                 return self._touch_duplicate(previous, fingerprint)
-        cursor = self.conn.execute(
+        # Retention's monotonic IDs prevent stale queue entries resolving to
+        # another clip after deletion; dedup recency is tracked separately.
+        clip_id = self._allocate_clip_id()
+        self.conn.execute(
             """INSERT INTO clips
-               (kind,content,preview,bin,formats,touch_seq,fingerprint)
-               VALUES(?,?,?,?,?,?,?)""",
-            (kind, sqlite3.Binary(content), preview[:600], bin_name,
+               (id,kind,content,preview,bin,formats,touch_seq,fingerprint)
+               VALUES(?,?,?,?,?,?,?,?)""",
+            (clip_id, kind, sqlite3.Binary(content), preview[:600], bin_name,
              sqlite3.Binary(packed) if packed is not None else None,
              self._next_touch_seq(), sqlite3.Binary(fingerprint))
         )
-        # Keep the most recently used items in each bin, not simply the
-        # highest row IDs; pinned items are exempt from the count limit.
         self.conn.execute("""DELETE FROM clips WHERE bin=? AND pinned=0 AND id NOT IN
             (SELECT id FROM clips WHERE bin=? AND pinned=0
              ORDER BY touch_seq DESC,id DESC LIMIT ?)""",
             (bin_name, bin_name, self.max_unpinned)
         )
-        self.search_index.insert(cursor.lastrowid, kind, content, preview[:600])
+        self.search_index.insert(clip_id, kind, content, preview[:600])
         self.search_index.trim_deleted()
         self.conn.commit()
-        return cursor.lastrowid
+        return clip_id
 
     def search(
         self, query: str = "", bin_name: str = "Work",
@@ -283,7 +328,7 @@ class ClipStore:
         A separate 'Best match' sort uses bm25() ranking from SQLite FTS5.
         """
         sort = sort if sort in SORTS or sort == "Best match" else "Latest first"
-        order = SORTS.get(sort, "id DESC")
+        order = SORTS.get(sort, "touch_seq DESC, id DESC")
         query = str(query)[:256]
         matched_ids = self.search_index.search_ids(query, bin_name) if query.strip() else []
         params: list[object] = [bin_name]
@@ -398,6 +443,85 @@ class ClipStore:
     def count(self, bin_name: str) -> int:
         return self.conn.execute("SELECT COUNT(*) FROM clips WHERE bin=?", (bin_name,)).fetchone()[0]
 
+    def refresh_temporary_copy_time(self, clip_id: int) -> None:
+        """Refresh TTL after a user copies an entry from ClipMint's history.
+
+        Clipboard reinsertion is intentionally suppressed on these paths, so
+        history-copy actions must refresh the original item's retention clock.
+        Pinned clips are also touched, preserving freshness if later unpinned.
+        Other bins remain unaffected.
+        """
+        with self.conn:
+            self.conn.execute(
+                "UPDATE clips SET created_at="
+                "strftime('%Y-%m-%dT%H:%M:%fZ','now') "
+                "WHERE id=? AND bin='Temporary'",
+                (clip_id,),
+            )
+
+    def _remove_temporary_unpinned(
+        self, cutoff_iso: str | None = None,
+        deleted_ids: list[int] | None = None,
+    ) -> int:
+        """Delete only unpinned clips in the built-in Temporary collection.
+
+        A cutoff of None is reserved for an explicitly enabled normal-exit
+        cleanup. A timestamp is used for opt-in age-based expiration.
+        Pinned items, reusable templates, and other bins are not touched.
+        """
+        condition = "bin='Temporary' AND pinned=0"
+        parameters: tuple[str, ...] = ()
+        if cutoff_iso is not None:
+            # julianday ignores malformed/unknown timestamps (NULL), so
+            # legacy rows without a valid UTC date are not purged blindly.
+            condition += " AND julianday(created_at) <= julianday(?)"
+            parameters = (cutoff_iso,)
+        identifiers = [int(row[0]) for row in self.conn.execute(
+            "SELECT id FROM clips WHERE " + condition, parameters
+        )]
+        if not identifiers:
+            return 0
+        with self.conn:
+            for ident in identifiers:
+                self.search_index.delete(ident)
+            self.conn.executemany(
+                "DELETE FROM clips WHERE id=? AND bin='Temporary' AND pinned=0",
+                [(ident,) for ident in identifiers],
+            )
+            self.search_index.trim_deleted()
+        # Report committed removals before any optional compaction. Even if
+        # SQLite VACUUM fails, consumers must invalidate stale clip IDs.
+        if deleted_ids is not None:
+            deleted_ids.extend(identifiers)
+        # FTS5 can retain deleted terms in shadow posting segments even after
+        # the MATCH index no longer reports them. Rebuild surviving postings,
+        # then reconstruct SQLite pages instead of retaining old free space.
+        if self.search_index.enabled:
+            self.search_index.rebuild_after_purge()
+            self.conn.execute("VACUUM")
+        self.conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        return len(identifiers)
+
+    def expire_temporary_unpinned(
+        self, *, now: datetime | None = None,
+        deleted_ids: list[int] | None = None,
+    ) -> int:
+        """Opt-in 24-hour TTL; the caller decides whether it is enabled."""
+        current = datetime.now(timezone.utc) if now is None else now
+        if current.tzinfo is None or current.utcoffset() is None:
+            raise ValueError("Temporary retention requires an aware UTC timestamp")
+        cutoff = current.astimezone(timezone.utc) - timedelta(hours=24)
+        return self._remove_temporary_unpinned(
+            cutoff.isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+            deleted_ids=deleted_ids,
+        )
+
+    def clear_temporary_unpinned(
+        self, *, deleted_ids: list[int] | None = None,
+    ) -> int:
+        """Run only on deliberate application exit with explicit user opt-in."""
+        return self._remove_temporary_unpinned(deleted_ids=deleted_ids)
+
     def move(self, clip_id: int, bin_name: str) -> None:
         if bin_name not in self.bins():
             raise ValueError("Unknown accumulation bin")
@@ -424,12 +548,10 @@ class ClipStore:
         self.search_index.delete(clip_id)
         self.conn.execute("DELETE FROM clips WHERE id=?", (clip_id,))
         self.conn.commit()
-        # Do not leave deleted plaintext indefinitely in this process's WAL.
-        # This cannot erase earlier filesystem snapshots or SSD flash cells.
         self.conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
     def compact_history(self) -> None:
-        """User-initiated compaction; can be expensive on large image histories."""
+        """Explicit user-initiated compaction; may use CPU on large histories."""
         self.conn.commit()
         self.conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         self.conn.execute("VACUUM")

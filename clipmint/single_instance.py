@@ -6,7 +6,7 @@ from PySide6.QtCore import QObject
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 
 SERVER_NAME = "clipmint-single-instance-" + str(os.getuid())
-VALID_COMMANDS = {"toggle", "show", "quit"}
+VALID_COMMANDS = {"toggle", "show", "quit", "ping", "screenshot-area", "record-area"}
 
 
 def send_command(command: str, timeout_ms: int = 350) -> bool:
@@ -24,7 +24,7 @@ def send_command(command: str, timeout_ms: int = 350) -> bool:
 
 
 class InstanceServer(QObject):
-    def __init__(self, handler, parent=None):
+    def __init__(self, handler, parent=None, occupied_command="show"):
         super().__init__(parent)
         self.handler = handler
         self.server = QLocalServer(self)
@@ -32,7 +32,7 @@ class InstanceServer(QObject):
         # Calling this in a separate user account cannot contact this uid's
         # socket. Only remove stale sockets when no listener answers.
         if not self.server.listen(SERVER_NAME):
-            if send_command("show"):
+            if send_command(occupied_command):
                 raise RuntimeError("ClipMint is already running")
             QLocalServer.removeServer(SERVER_NAME)
             if not self.server.listen(SERVER_NAME):

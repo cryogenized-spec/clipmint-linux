@@ -21,7 +21,7 @@ from nacl.secret import SecretBox
 from nacl.exceptions import CryptoError
 
 from .store import ClipStore, Clip
-from .clipboard_formats import bundle_to_bytes, bundle_from_bytes
+from .clipboard_formats import bundle_to_bytes, bundle_from_bytes, sensitive_payload
 
 KEY_SERVICE = "clipmint.secure-history.v1"
 KEY_NAME = "local-history-key"
@@ -196,6 +196,10 @@ class EncryptedClipStore(ClipStore):
                 return ident
         return None
 
+    def _history_payload_is_sealed(self) -> bool:
+        """The encrypted store checks secrets before sealing its payload."""
+        return True
+
     def add(self, kind: str, content: bytes, preview: str, bin_name="Work",
             formats: dict[str, bytes] | None = None):
         if kind not in ("text", "image", "files"):
@@ -204,6 +208,9 @@ class EncryptedClipStore(ClipStore):
             return None
         if bin_name not in self.bins():
             raise ValueError("Unknown accumulation bin")
+        # Do not persist even encrypted sensitive clipboard entries.
+        if sensitive_payload(kind, content, formats):
+            return None
         fingerprint = self._encrypted_fingerprint(kind, content, formats)
         found = self._find_encrypted_duplicate(
             kind, content, formats, bin_name, fingerprint
