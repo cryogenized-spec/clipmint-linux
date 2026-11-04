@@ -77,6 +77,12 @@ class PopUpTests(unittest.TestCase):
                 if len(messages) >= 4:
                     break
             self.assertEqual(messages, ["toggle", "screenshot-area", "record-area", "ping"])
+            # If a busy incumbent accepts the socket but cannot flush the
+            # wakeup command, never remove its socket and start a second app.
+            with patch.object(single_instance, "send_command", return_value=False):
+                with self.assertRaisesRegex(RuntimeError, "already running"):
+                    single_instance.InstanceServer(messages.append, occupied_command="ping")
+            self.assertTrue(server.server.isListening())
             server.server.close()
             single_instance.QLocalServer.removeServer(unique)
 
