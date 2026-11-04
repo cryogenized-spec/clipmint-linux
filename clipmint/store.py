@@ -159,6 +159,13 @@ class ClipStore:
             "SELECT id,kind,content,formats FROM clips WHERE bin=? ORDER BY id DESC LIMIT 1", (bin_name,)
         ).fetchone()
         if newest and newest[1] == kind and newest[2] == content and newest[3] == packed:
+            # Recopying the same item counts as a new use for Temporary TTL.
+            # Leave the stable ID, pin, tags and favourite state untouched.
+            self.conn.execute(
+                "UPDATE clips SET created_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') "
+                "WHERE id=?", (newest[0],)
+            )
+            self.conn.commit()
             return newest[0]
         cursor = self.conn.execute(
             "INSERT INTO clips(kind,content,preview,bin,formats) VALUES(?,?,?,?,?)",
@@ -301,7 +308,10 @@ class ClipStore:
     def count(self, bin_name: str) -> int:
         return self.conn.execute("SELECT COUNT(*) FROM clips WHERE bin=?", (bin_name,)).fetchone()[0]
 
-    def _remove_temporary_unpinned(self, cutoff_iso: str | None = None) -> int:
+    def _remove_temporary_unpinned(
+        self, cutoff_iso: str | None = None,
+        deleted_ids: list[int] | None = None,
+    ) -> int:
         """Delete only unpinned clips in the built-in Temporary collection.
 
         A cutoff of None is reserved for an explicitly enabled normal-exit
@@ -328,24 +338,36 @@ class ClipStore:
                 [(ident,) for ident in identifiers],
             )
             self.search_index.trim_deleted()
-        # Keep recently removed plaintext from lingering in SQLite's WAL.
-        # This is hygiene, not a forensic erase guarantee.
+        # FTS5 can retain deleted terms in shadow posting segments even after
+        # the MATCH index no longer reports them. Rebuild surviving postings,
+        # then reconstruct SQLite pages instead of retaining old free space.
+        if self.search_index.enabled:
+            self.search_index.rebuild_after_purge()
+            self.conn.execute("VACUUM")
         self.conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        if deleted_ids is not None:
+            deleted_ids.extend(identifiers)
         return len(identifiers)
 
-    def expire_temporary_unpinned(self, *, now: datetime | None = None) -> int:
+    def expire_temporary_unpinned(
+        self, *, now: datetime | None = None,
+        deleted_ids: list[int] | None = None,
+    ) -> int:
         """Opt-in 24-hour TTL; the caller decides whether it is enabled."""
         current = datetime.now(timezone.utc) if now is None else now
         if current.tzinfo is None or current.utcoffset() is None:
             raise ValueError("Temporary retention requires an aware UTC timestamp")
         cutoff = current.astimezone(timezone.utc) - timedelta(hours=24)
         return self._remove_temporary_unpinned(
-            cutoff.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+            cutoff.isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+            deleted_ids=deleted_ids,
         )
 
-    def clear_temporary_unpinned(self) -> int:
+    def clear_temporary_unpinned(
+        self, *, deleted_ids: list[int] | None = None,
+    ) -> int:
         """Run only on deliberate application exit with explicit user opt-in."""
-        return self._remove_temporary_unpinned()
+        return self._remove_temporary_unpinned(deleted_ids=deleted_ids)
 
     def move(self, clip_id: int, bin_name: str) -> None:
         if bin_name not in self.bins():
