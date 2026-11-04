@@ -283,7 +283,11 @@ def classify_smart(
             and sum((any(c.islower() for c in value),
                      any(c.isupper() for c in value),
                      any(c.isdigit() for c in value),
-                     any(not c.isalnum() for c in value))) >= 3):
+                     any(not c.isalnum() for c in value))) >= 3
+            # CamelCase identifiers ending in a short number are ordinary
+            # searchable content, not automatically credentials.
+            and (any(not c.isalnum() for c in value)
+                 or sum(c.isdigit() for c in value) >= max(4, len(value) // 5))):
         return "passwords"
     if HEX.fullmatch(value) and len(value) >= 40 and not HASH_CONTEXT.search(value):
         # A bare hash may also be a random authentication key: exclude rather
