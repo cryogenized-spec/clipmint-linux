@@ -23,15 +23,32 @@ class CinnamonShortcutTests(unittest.TestCase):
         with self.assertRaises(ShortcutSetupError):
             cinnamon_accelerator("Ctrl+Alt+Something")
 
-    def test_registration_appends_a_free_slot_without_overwrite(self):
+    def _fake_gsettings(self, with_conflict=False):
         calls = []
-        def fake_run(*args):
+        schema = ("org.cinnamon.desktop.keybindings.custom-keybinding:"
+                  "/org/cinnamon/desktop/keybindings/custom-keybindings/custom0/")
+        values = {
+            ("org.cinnamon.desktop.keybindings", "custom-list"): "['custom0']",
+            (schema, "binding"): "['<Primary><Alt>v']" if with_conflict
+                                else "['<Primary><Alt>x']",
+            (schema, "command"): "'other-app'",
+            (schema, "name"): "'Other app'",
+        }
+
+        def run(*args):
             calls.append(args)
-            if args == ("get", "org.cinnamon.desktop.keybindings", "custom-list"):
-                return "['custom0']"
-            if args[0] == "get" and args[-1] == "binding":
-                return "['<Primary><Alt>x']"
-            return ""
+            if args[0] == "get":
+                return values[(args[1], args[2])]
+            if args[0] == "list-recursively":
+                return ""  # No global desktop conflicts in this test fixture.
+            if args[0] == "set":
+                values[(args[1], args[2])] = args[3]
+                return ""
+            raise AssertionError(args)
+        return run, calls, values
+
+    def test_registration_appends_a_free_slot_without_overwrite(self):
+        fake_run, calls, values = self._fake_gsettings()
         with patch("clipmint.cinnamon_hotkey._run", side_effect=fake_run):
             self.assertEqual(install_shortcut(
                 "/opt/clipmint/ClipMint --toggle", "Ctrl+Alt+V"
@@ -41,14 +58,15 @@ class CinnamonShortcutTests(unittest.TestCase):
         self.assertFalse(any(
             "custom0/" in str(x) and x[0] == "set" for x in calls
         ))
+        self.assertEqual(values[("org.cinnamon.desktop.keybindings", "custom-list")],
+                         "['custom0', 'custom1']")
 
     def test_existing_binding_is_never_modified(self):
-        with patch("clipmint.cinnamon_hotkey._run",
-                   side_effect=["['custom0']", "['<Primary><Alt>v']"]) as run:
+        fake_run, calls, _values = self._fake_gsettings(with_conflict=True)
+        with patch("clipmint.cinnamon_hotkey._run", side_effect=fake_run):
             with self.assertRaises(ShortcutSetupError):
                 install_shortcut("clipmint --toggle", "Ctrl+Alt+V")
-        self.assertEqual(run.call_count, 2)
-
+        self.assertFalse(any(call[0] == "set" for call in calls))
 
 class RealOcrTests(unittest.TestCase):
     @unittest.skipUnless(shutil.which("tesseract"), "Tesseract not installed in this runner")
