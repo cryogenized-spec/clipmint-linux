@@ -250,7 +250,7 @@ class HistoryHardeningTests(unittest.TestCase):
             path = Path(root) / "history.sqlite3"
             store = ClipStore(path)
             try:
-                marker = b"DO_NOT_KEEP_SYNTHETIC_MARKER_ABC_789"
+                marker = b"Synthetic deletion marker for full text indexing 789"
                 ident = store.add("text", marker, marker.decode())
                 self.assertGreater(store.conn.execute(
                     "SELECT COUNT(*) FROM clipmint_fts"
