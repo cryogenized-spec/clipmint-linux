@@ -1,0 +1,119 @@
+"""Archive snapshot security and integrity regression tests.
+
+All values are synthetic; no user credentials or actual clipboard history.
+"""
+from __future__ import annotations
+
+import os
+from pathlib import Path
+import sqlite3
+import stat
+from tempfile import TemporaryDirectory
+import unittest
+
+from nacl import utils
+from nacl.secret import SecretBox
+
+from clipmint.archive_backup import backup_archive, ArchiveBackupError
+from clipmint.store import ClipStore
+from clipmint.secure_history import EncryptedClipStore
+
+
+class ArchiveBackupTests(unittest.TestCase):
+    def test_live_wal_snapshot_and_0600_permissions(self):
+        with TemporaryDirectory() as root:
+            src = ClipStore(Path(root) / "live.sqlite3")
+            target = Path(root) / "archive.sqlite3"
+            try:
+                src.add("text", b"hello archive", "hello archive")
+                src.add_bin("Project")
+                src.add("text", b"project notes", "project notes", "Project")
+                self.assertEqual(backup_archive(src.conn, target), target)
+                self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o600)
+                # A verified single-file backup includes the complete logical
+                # data even if the live source was operating with WAL.
+                reader = sqlite3.connect(target)
+                try:
+                    self.assertEqual(
+                        reader.execute("PRAGMA integrity_check").fetchone()[0], "ok"
+                    )
+                    self.assertEqual(
+                        reader.execute("SELECT COUNT(*) FROM clips").fetchone()[0], 2
+                    )
+                    self.assertEqual(
+                        reader.execute(
+                            "SELECT content FROM clips WHERE bin='Project'"
+                        ).fetchone()[0],
+                        b"project notes",
+                    )
+                finally:
+                    reader.close()
+                src.add("text", b"new after backup", "new after backup")
+                reader = sqlite3.connect(target)
+                try:
+                    self.assertEqual(
+                        reader.execute("SELECT COUNT(*) FROM clips").fetchone()[0], 2
+                    )
+                finally:
+                    reader.close()
+            finally:
+                src.close()
+
+    def test_existing_destination_is_untouched_without_explicit_overwrite(self):
+        with TemporaryDirectory() as root:
+            src = ClipStore(Path(root) / "source.sqlite3")
+            dest = Path(root) / "archive.sqlite3"
+            try:
+                src.add("text", b"fixture", "fixture")
+                dest.write_bytes(b"preexisting user content")
+                with self.assertRaises(FileExistsError):
+                    backup_archive(src.conn, dest)
+                self.assertEqual(dest.read_bytes(), b"preexisting user content")
+                backup_archive(src.conn, dest, overwrite=True)
+                self.assertEqual(stat.S_IMODE(dest.stat().st_mode), 0o600)
+                self.assertEqual(
+                    sqlite3.connect(dest).execute(
+                        "SELECT COUNT(*) FROM clips"
+                    ).fetchone()[0], 1
+                )
+                self.assertFalse(list(Path(root).glob("*.building")))
+            finally:
+                src.close()
+
+    def test_symlink_and_live_source_overwrite_rejected(self):
+        with TemporaryDirectory() as root:
+            src = ClipStore(Path(root) / "history.sqlite3")
+            alias = Path(root) / "redirect.sqlite3"
+            alias.symlink_to(src.path)
+            try:
+                with self.assertRaises(ArchiveBackupError):
+                    backup_archive(src.conn, src.path, overwrite=True)
+                with self.assertRaises(ArchiveBackupError):
+                    backup_archive(src.conn, alias, overwrite=True)
+                self.assertTrue(src.path.exists())
+            finally:
+                src.close()
+
+    def test_encrypted_history_remains_ciphertext_without_key_export(self):
+        with TemporaryDirectory() as root:
+            key = utils.random(SecretBox.KEY_SIZE)
+            src = EncryptedClipStore(Path(root) / "secure.sqlite3", key)
+            dest = Path(root) / "encrypted-archive.sqlite3"
+            try:
+                src.add("text", b"FAKE_PRIVATE_TEST_PAYLOAD_XYZ", "masked")
+                backup_archive(src.conn, dest)
+                self.assertNotIn(b"FAKE_PRIVATE_TEST_PAYLOAD_XYZ",
+                                 dest.read_bytes())
+                reopened = EncryptedClipStore(dest, key)
+                try:
+                    self.assertEqual(
+                        reopened.search()[0].preview, "masked"
+                    )
+                finally:
+                    reopened.close()
+            finally:
+                src.close()
+
+
+if __name__ == "__main__":
+    unittest.main()
