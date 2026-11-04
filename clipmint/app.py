@@ -37,7 +37,8 @@ from .quick_popup import QuickPopup, paste_to_window
 from .productivity import PasteQueue
 from .organizer_ui import TemplatesDialog, TransformDialog
 from .single_instance import InstanceServer, send_command
-from .cinnamon_hotkey import install_shortcut, ShortcutSetupError
+from .cinnamon_hotkey import (install_shortcut, restore_screenshot_takeover,
+                              ShortcutSetupError)
 from .secure_history import (EncryptedClipStore, HistorySecurityError,
                              key_from_secret_service, secure_path)
 
@@ -1107,10 +1108,11 @@ class ClipMintWindow(QMainWindow):
         global_screenshot_group = QGroupBox("Screenshot area · global shortcut")
         global_screenshot_layout = QVBoxLayout(global_screenshot_group)
         global_screenshot_help = QLabel(
-            "Ctrl+Shift+S is initially a ClipMint window-only shortcut. "
-            "Register a separate Cinnamon global shortcut to capture from other "
-            "applications. If another desktop action owns it, resolve that "
-            "conflict under System Settings → Keyboard → Shortcuts first."
+            "Cinnamon owns system-wide shortcuts. Register Ctrl+Shift+S here "
+            "to use ClipMint's region selector even when another app is focused. "
+            "If Cinnamon's built-in screenshot action owns the combination, "
+            "ClipMint will ask before taking it over, preserve its other "
+            "shortcuts and save a reversible backup."
         )
         global_screenshot_help.setWordWrap(True)
         global_screenshot_layout.addWidget(global_screenshot_help)
@@ -1123,7 +1125,29 @@ class ClipMintWindow(QMainWindow):
         screenshot_register.setObjectName("captureAction")
         screenshot_register.clicked.connect(self.register_cinnamon_screenshot_hotkey)
         global_screenshot_layout.addWidget(screenshot_register)
+        restore_screenshot = QPushButton("Restore previous Cinnamon screenshot binding…")
+        restore_screenshot.clicked.connect(self.restore_cinnamon_screenshot_hotkey)
+        global_screenshot_layout.addWidget(restore_screenshot)
         layout.addWidget(global_screenshot_group)
+
+        global_record_group = QGroupBox("Recording area · global shortcut")
+        global_record_layout = QVBoxLayout(global_record_group)
+        global_record_help = QLabel(
+            "Optionally assign Ctrl+Shift+R system-wide to ClipMint's MP4 "
+            "region recorder. Desktop or other custom bindings are not "
+            "silently replaced."
+        )
+        global_record_help.setWordWrap(True)
+        global_record_layout.addWidget(global_record_help)
+        self.global_record_hotkey = QKeySequenceEdit()
+        self.global_record_hotkey.setKeySequence(QKeySequence(str(
+            self.settings.value("capture/global_record_shortcut", "Ctrl+Shift+R")
+        )))
+        global_record_layout.addWidget(self.global_record_hotkey)
+        global_record_button = QPushButton("Register recording shortcut in Cinnamon…")
+        global_record_button.clicked.connect(self.register_cinnamon_recording_hotkey)
+        global_record_layout.addWidget(global_record_button)
+        layout.addWidget(global_record_group)
 
         privacy_group = QGroupBox("Clipboard privacy")
         privacy_layout = QVBoxLayout(privacy_group)
@@ -1976,26 +2000,89 @@ class ClipMintWindow(QMainWindow):
         self.settings.setValue("popup/global_shortcut", sequence)
         self.inform("Cinnamon shortcut", f"Registered {sequence} ({accel})")
 
+    def _clipmint_launcher_command(self, action: str) -> str:
+        """Match the installed app launcher; never shell-expand user content."""
+        executable = (shlex.quote(sys.executable)
+                      if getattr(sys, "frozen", False) else
+                      shlex.quote(sys.executable) + " " +
+                      shlex.quote(str(Path(__file__).resolve().parent.parent / "launcher.py")))
+        return executable + " " + action
+
     def register_cinnamon_screenshot_hotkey(self):
-        """Register a global Cinnamon key without replacing existing bindings."""
         sequence = self.global_screenshot_hotkey.keySequence().toString(
             QKeySequence.SequenceFormat.PortableText
         )
         if not sequence:
             self.error("Cinnamon screenshot shortcut", "Choose a keyboard shortcut first")
             return
-        executable = (shlex.quote(sys.executable)
-                      if getattr(sys, "frozen", False) else
-                      shlex.quote(sys.executable) + " " +
-                      shlex.quote(str(Path(__file__).resolve().parent.parent / "launcher.py")))
-        command = executable + " --screenshot-area"
+        command = self._clipmint_launcher_command("--screenshot-area")
         try:
             accel = install_shortcut(command, sequence, name="ClipMint screenshot area")
         except ShortcutSetupError as exc:
-            self.error("Cinnamon screenshot shortcut", str(exc))
-            return
+            if "Explicit permission" not in str(exc):
+                self.error("Cinnamon screenshot shortcut", str(exc))
+                return
+            reply = QMessageBox.question(
+                self, "Give ClipMint screenshot priority?",
+                "Cinnamon already uses this combination for its own screenshot "
+                "tool. Give this combination to ClipMint instead?\n\n"
+                "Only the conflicting built-in screenshot binding will be "
+                "disabled; its other key combinations will be preserved. "
+                "The original is saved for restoration. This changes your "
+                "desktop shortcut configuration, not ClipMint's window-only keys.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+            try:
+                accel = install_shortcut(
+                    command, sequence, name="ClipMint screenshot area",
+                    take_over_screenshot=True,
+                )
+            except ShortcutSetupError as retry:
+                self.error("Cinnamon screenshot shortcut", str(retry))
+                return
         self.settings.setValue("capture/global_shortcut", sequence)
-        self.inform("Cinnamon screenshot shortcut", f"Registered {sequence} ({accel})")
+        self.inform("Cinnamon shortcut", f"ClipMint screenshot registered: {sequence}")
+
+    def restore_cinnamon_screenshot_hotkey(self):
+        sequence = str(self.settings.value("capture/global_shortcut", "Ctrl+Shift+S"))
+        command = self._clipmint_launcher_command("--screenshot-area")
+        reply = QMessageBox.question(
+            self, "Restore Cinnamon screenshot shortcut?",
+            "Remove ClipMint's registered screenshot key and restore the "
+            "previous built-in screenshot assignment from the local backup? "
+            "Existing user edits will not be overwritten.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            restored = restore_screenshot_takeover(command, sequence)
+        except ShortcutSetupError as exc:
+            self.error("Cinnamon screenshot restoration", str(exc))
+            return
+        self.inform("Cinnamon shortcut",
+                    "Previous screenshot assignment restored"
+                    if restored else "No ClipMint takeover backup found")
+
+    def register_cinnamon_recording_hotkey(self):
+        sequence = self.global_record_hotkey.keySequence().toString(
+            QKeySequence.SequenceFormat.PortableText
+        )
+        if not sequence:
+            self.error("Cinnamon recording shortcut", "Choose a keyboard shortcut first")
+            return
+        command = self._clipmint_launcher_command("--record-area")
+        try:
+            install_shortcut(command, sequence, name="ClipMint record area")
+        except ShortcutSetupError as exc:
+            self.error("Cinnamon recording shortcut", str(exc))
+            return
+        self.settings.setValue("capture/global_record_shortcut", sequence)
+        self.inform("Cinnamon shortcut", f"ClipMint recorder registered: {sequence}")
 
     def toggle_quick_popup(self):
         self.quick_popup.toggle()
@@ -2302,6 +2389,7 @@ def main():
         raise SystemExit("ClipMint currently supports Linux only")
     args = sys.argv[1:]
     command = ("screenshot-area" if "--screenshot-area" in args else
+               "record-area" if "--record-area" in args else
                "toggle" if "--toggle" in args else
                "quit" if "--quit" in args else "show")
     # Every invocation first signals an existing instance. The running daemon
@@ -2324,6 +2412,8 @@ def main():
             window.show_window()
         elif action == "screenshot-area":
             QTimer.singleShot(0, window.choose_screenshot)
+        elif action == "record-area":
+            QTimer.singleShot(0, lambda: window.choose_recording("MP4"))
         elif action == "quit":
             window.quit_app()
     try:
@@ -2333,9 +2423,12 @@ def main():
         return
     if command == "toggle":
         QTimer.singleShot(150, window.toggle_quick_popup)
-    elif command == "screenshot-area":
+    elif command in ("screenshot-area", "record-area"):
         window.show()
-        QTimer.singleShot(150, window.choose_screenshot)
+        if command == "screenshot-area":
+            QTimer.singleShot(150, window.choose_screenshot)
+        else:
+            QTimer.singleShot(150, lambda: window.choose_recording("MP4"))
     else:
         window.show()
     raise SystemExit(app.exec())
