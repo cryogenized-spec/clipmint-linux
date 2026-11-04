@@ -18,7 +18,7 @@ from nacl.secret import SecretBox
 from nacl.exceptions import CryptoError
 
 from .store import ClipStore, Clip
-from .clipboard_formats import bundle_to_bytes, bundle_from_bytes
+from .clipboard_formats import bundle_to_bytes, bundle_from_bytes, sensitive_payload
 
 KEY_SERVICE = "clipmint.secure-history.v1"
 KEY_NAME = "local-history-key"
@@ -99,8 +99,15 @@ class EncryptedClipStore(ClipStore):
         except (CryptoError, UnicodeError) as exc:
             raise HistorySecurityError("Encrypted template failed authentication") from exc
 
+    def _history_payload_is_sealed(self) -> bool:
+        return True
+
     def add(self, kind: str, content: bytes, preview: str, bin_name="Work",
             formats: dict[str, bytes] | None = None):
+        # Sensitive items are excluded entirely, even from encrypted history.
+        # Otherwise caller-supplied text could be persisted inadvertently.
+        if sensitive_payload(kind, content, formats):
+            return None
         # Dedup based on unencrypted content held *only* in process memory.
         row = self.conn.execute(
             "SELECT id,content FROM clips WHERE bin=? ORDER BY id DESC LIMIT 1",
