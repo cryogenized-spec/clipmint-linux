@@ -57,7 +57,19 @@ class CrimsonArchiveTests(unittest.TestCase):
             self.assertIn("Utakata", window.kohaku_roman.text())
             self.assertIn("Transient thoughts", window.kohaku_english.text())
             self.assertIn("Clipboard", window.nav_buttons["Clipboard"].text())
-            self.assertIn("Archive", window.nav_buttons["Screenshots"].text())
+            bilingual = {
+                "Clipboard": ("Clipboard", "クリップボード"),
+                "Screenshots": ("Screenshots", "撮影画像"),
+                "Recordings": ("Recordings", "画面録画"),
+                "Secrets & Variables": ("Vault", "秘密保管庫"),
+                "Autosort": ("Autosort", "自動仕分け"),
+                "Settings": ("Settings", "設定"),
+            }
+            for section, (english, japanese) in bilingual.items():
+                button = window.nav_buttons[section]
+                self.assertIn(english, button.text())
+                self.assertIn(japanese, button.text())
+                self.assertEqual(button.property("dockSubtitle"), japanese)
             self.assertEqual(window.record_button.objectName(), "record")
             for child in (window.manga_dock, window.pages, window.preview_panel, window.dock_panel):
                 self.assertGreater(child.height(), 500)
