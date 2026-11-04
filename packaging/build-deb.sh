@@ -14,6 +14,19 @@ cp -a dist/ClipMint/. "$root/opt/clipmint/"
 install -m 644 packaging/clipmint.desktop "$root/usr/share/applications/clipmint.desktop"
 install -m 644 packaging/clipmint.svg "$root/usr/share/icons/hicolor/scalable/apps/clipmint.svg"
 install -m 644 LICENSE "$root/usr/share/doc/clipmint/LICENSE-ClipMint"
+install -m 644 LICENSES/MIT-legacy.txt "$root/usr/share/doc/clipmint/MIT-legacy.txt"
+install -m 644 THIRD-PARTY-NOTICES.md "$root/usr/share/doc/clipmint/THIRD-PARTY-NOTICES.md"
+# Identify the precise build source rather than just a moving branch.
+source_commit="$(git rev-parse HEAD 2>/dev/null || printf 'unknown')"
+cat > "$root/usr/share/doc/clipmint/SOURCE-CODE.txt" <<EOF
+ClipMint original source code: GNU AGPLv3-only (AGPL-3.0-only).
+Source repository: https://github.com/cryogenized-spec/clipmint-linux
+Build commit: ${source_commit}
+Source tree at this commit: https://github.com/cryogenized-spec/clipmint-linux/tree/${source_commit}
+Corresponding build scripts: packaging/build-deb.sh and .github/workflows/build-linux.yml
+Bundled third-party components retain their own licences and source-availability requirements.
+See THIRD-PARTY-NOTICES.md and FFmpeg-SOURCE.txt in this directory.
+EOF
 install -m 644 vendor/fonts/OFL.txt "$root/usr/share/doc/clipmint/OFL-DotGothic16.txt"
 install -m 644 vendor/fonts/OFL-CormorantGaramond.txt "$root/usr/share/doc/clipmint/OFL-CormorantGaramond.txt"
 cp /usr/share/common-licenses/GPL-3 "$root/usr/share/doc/clipmint/GPL-3-FFmpeg"
