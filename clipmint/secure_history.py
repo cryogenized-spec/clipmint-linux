@@ -245,10 +245,10 @@ class EncryptedClipStore(ClipStore):
             for bin_name in legacy.bins():
                 if bin_name not in secure.bins():
                     secure.add_bin(bin_name)
-            for ident, kind, content, formats, preview, pinned, date, bucket, favorite in \
+            for ident, kind, content, formats, preview, pinned, date, bucket, favorite, touched in \
                     legacy.conn.execute(
-                        "SELECT id,kind,content,formats,preview,pinned,created_at,bin,favorite "
-                        "FROM clips ORDER BY id"
+                        "SELECT id,kind,content,formats,preview,pinned,created_at,"
+                        "bin,favorite,touch_seq FROM clips ORDER BY id"
                     ):
                 sealed = secure._seal(bytes(content), preview,
                         bundle_from_bytes(bytes(formats) if formats else None))
@@ -264,7 +264,7 @@ class EncryptedClipStore(ClipStore):
                         favorite,touch_seq,fingerprint)
                        VALUES(?,?,?,NULL,?,?,?,?,?,?,?)""",
                     (ident, kind, sealed, "🔒 Encrypted history item",
-                     pinned, date, bucket, favorite, ident,
+                     pinned, date, bucket, favorite, touched,
                      sqlite3.Binary(fingerprint)),
                 )
             # Copy organisational metadata and re-seal template bodies. Names
