@@ -5,6 +5,7 @@ from pathlib import Path
 import json
 import os
 import shlex
+import sqlite3
 import subprocess
 import sys
 
@@ -41,6 +42,8 @@ from .single_instance import InstanceServer, send_command
 from .cinnamon_hotkey import install_shortcut, ShortcutSetupError
 from .secure_history import (EncryptedClipStore, HistorySecurityError,
                              key_from_secret_service, secure_path)
+from .archive_backup import backup_archive, ArchiveBackupError
+from .autostart import AutostartError, is_enabled as login_startup_enabled, set_enabled as set_login_startup
 
 
 THEME = """
@@ -146,6 +149,10 @@ class ClipMintWindow(QMainWindow):
         self.setMinimumSize(850, 600)
         self.store = ClipStore()
         self.settings = QSettings("ClipMint", "ClipMint")
+        self._temporary_exit_cleaned = False
+        self._temporary_expiry_timer = QTimer(self)
+        self._temporary_expiry_timer.setInterval(5 * 60 * 1000)
+        self._temporary_expiry_timer.timeout.connect(self.expire_temporary_if_enabled)
         self.history_secure = False
         self.history_security_error = ""
         if self.settings.value("privacy/history_secure", False, type=bool):
@@ -220,6 +227,11 @@ class ClipMintWindow(QMainWindow):
         self.poller.start(300)
         self.open_section(0)
         self._update_manga_visibility()
+        self.update_temporary_expiry_schedule()
+        # Only an explicitly saved enabled setting can trigger cleanup on
+        # startup. An upgrade or an application crash cannot opt users in.
+        if self._temporary_expiry_timer.isActive():
+            QTimer.singleShot(0, self.expire_temporary_if_enabled)
         QTimer.singleShot(400, self.clipboard_changed)
 
     def resizeEvent(self, event):
@@ -1029,6 +1041,56 @@ class ClipMintWindow(QMainWindow):
         self.pause_button = QPushButton("Pause monitoring")
         self.pause_button.clicked.connect(self.toggle_monitoring)
         layout.addWidget(self.pause_button)
+
+        login_group = QGroupBox("Start at login")
+        login_layout = QVBoxLayout(login_group)
+        login_help = QLabel(
+            "Optional and OFF by default. Starts ClipMint quietly in the tray "
+            "on Cinnamon/X11. Requires the installed .deb; if the system tray "
+            "is unavailable, ClipMint opens its window instead."
+        )
+        login_help.setWordWrap(True)
+        login_layout.addWidget(login_help)
+        self.login_startup_toggle = QCheckBox("Launch ClipMint when I log in")
+        self.login_startup_toggle.setChecked(login_startup_enabled())
+        self.login_startup_toggle.toggled.connect(self.set_login_startup_enabled)
+        login_layout.addWidget(self.login_startup_toggle)
+        layout.addWidget(login_group)
+
+        temp_group = QGroupBox("Temporary collection · retention")
+        temp_layout = QVBoxLayout(temp_group)
+        explanation = QLabel(
+            "Both options start OFF. Only unpinned clips in Temporary are "
+            "eligible. Pinned entries, Work, Personal, and snippets survive. "
+            "Closing to the tray, an application update or a crash never "
+            "triggers clear-on-exit."
+        )
+        explanation.setWordWrap(True)
+        temp_layout.addWidget(explanation)
+        self.temporary_expiry_toggle = QCheckBox(
+            "Automatically remove unpinned Temporary clips after 24 hours"
+        )
+        self.temporary_expiry_toggle.setChecked(
+            self.settings.value("temporary/expire_24h", False, type=bool)
+        )
+        self.temporary_expiry_toggle.toggled.connect(
+            self.set_temporary_expiry_enabled
+        )
+        temp_layout.addWidget(self.temporary_expiry_toggle)
+        self.temporary_exit_toggle = QCheckBox(
+            "Clear unpinned Temporary clips when I quit ClipMint"
+        )
+        self.temporary_exit_toggle.setChecked(
+            self.settings.value("temporary/clear_on_quit", False, type=bool)
+        )
+        self.temporary_exit_toggle.toggled.connect(
+            lambda enabled: self.settings.setValue(
+                "temporary/clear_on_quit", enabled
+            )
+        )
+        temp_layout.addWidget(self.temporary_exit_toggle)
+        layout.addWidget(temp_group)
+
         open_files = QPushButton("Open recordings folder")
         open_files.clicked.connect(lambda: self.open_folder(recordings_dir()))
         layout.addWidget(open_files)
@@ -1098,6 +1160,18 @@ class ClipMintWindow(QMainWindow):
         self.secure_history_button.setEnabled(not self.history_secure)
         self.secure_history_button.clicked.connect(self.enable_encrypted_history)
         privacy_layout.addWidget(self.secure_history_button)
+
+        archive_help = QLabel(
+            "Save a consistent local copy of your current clipboard archive, "
+            "including uncheckpointed SQLite WAL changes. Backups have "
+            "owner-only permissions. Plaintext remains plaintext; encrypted "
+            "history stays encrypted and requires your original keyring key."
+        )
+        archive_help.setWordWrap(True)
+        privacy_layout.addWidget(archive_help)
+        archive_backup_button = QPushButton("Backup clipboard archive…")
+        archive_backup_button.clicked.connect(self.backup_clipboard_archive)
+        privacy_layout.addWidget(archive_backup_button)
         layout.addWidget(privacy_group)
 
         screenshot_group = QGroupBox("Screenshot editor")
@@ -1281,6 +1355,15 @@ class ClipMintWindow(QMainWindow):
         if target.is_file():
             self.open_path(target)
 
+    def set_login_startup_enabled(self, enabled: bool) -> None:
+        try:
+            set_login_startup(enabled)
+        except (AutostartError, OSError) as exc:
+            self.login_startup_toggle.blockSignals(True)
+            self.login_startup_toggle.setChecked(login_startup_enabled())
+            self.login_startup_toggle.blockSignals(False)
+            self.error("Start at login", str(exc))
+
     def configure_tray(self):
         self.tray = None
         self.tray_stop = None
@@ -1368,21 +1451,23 @@ class ClipMintWindow(QMainWindow):
                         png = bytes(buffer_bytes)
         entry = from_mime(data, png=png)
         if entry is None:
-            # A likely secret/OTP is deliberately excluded from disk history;
-            # also clear the system clipboard after 30s if it is still the same.
-            # This is best-effort on X11, not secure destruction of other copies.
-            if data.hasText():
+            # Preserve a generic privacy notice. Expire plaintext secrets
+            # only when the clipboard still contains the very same string.
+            if data.hasText() and sensitive_text(data.text()):
                 original = data.text()
-                if sensitive_text(original):
-                    token = self._sensitive_clipboard_token
-                    QTimer.singleShot(
-                        30000,
-                        lambda: self.expire_sensitive_clipboard(token, original),
-                    )
-                    self.statusBar().showMessage(
-                        "Sensitive clipboard item not saved · clears after "
-                        "30 seconds if unchanged", 5500,
-                    )
+                token = self._sensitive_clipboard_token
+                QTimer.singleShot(
+                    30000,
+                    lambda: self.expire_sensitive_clipboard(token, original),
+                )
+                self.statusBar().showMessage(
+                    "Sensitive clipboard content not saved · clears after "
+                    "30 seconds if unchanged", 5500,
+                )
+            elif is_concealed(data):
+                self.statusBar().showMessage(
+                    "Sensitive clipboard content detected · not saved to history", 6000
+                )
             return
         current_bin = self.active_bin()
         full_text = (entry.content.decode("utf-8", "replace")
@@ -1584,6 +1669,7 @@ class ClipMintWindow(QMainWindow):
             mime_from_entry(kind, contents, self.store.get_formats(clip_id))
         )
         QTimer.singleShot(400, lambda: setattr(self, "_ignore_next_clipboard_change", False))
+        self.store.refresh_temporary_copy_time(clip_id)
         return True
 
     def show_templates(self):
@@ -1835,6 +1921,9 @@ class ClipMintWindow(QMainWindow):
             mime_from_entry(kind, contents,
                             self.store.get_formats(item.data(Qt.ItemDataRole.UserRole)))
         )
+        self.store.refresh_temporary_copy_time(
+            item.data(Qt.ItemDataRole.UserRole)
+        )
         self.inform("Copied", "Saved snippet copied to the system clipboard")
 
     def register_cinnamon_hotkey(self):
@@ -1876,6 +1965,7 @@ class ClipMintWindow(QMainWindow):
                 mime_from_entry(kind, content, self.store.get_formats(clip_id))
             )
         QTimer.singleShot(400, lambda: setattr(self, "_ignore_next_clipboard_change", False))
+        self.store.refresh_temporary_copy_time(clip_id)
         if wid and self.settings.value("popup/auto_paste", True, type=bool):
             QTimer.singleShot(150, lambda: self._paste_to_target(wid, klass))
 
@@ -1885,6 +1975,59 @@ class ClipMintWindow(QMainWindow):
             self.statusBar().showMessage(
                 "Copied; automatic paste unavailable. Paste manually.", 7000
             )
+
+    def backup_clipboard_archive(self):
+        """Export a verified snapshot; never overwrite without confirmation."""
+        if self.history_security_error:
+            self.error(
+                "Archive backup unavailable",
+                "Encrypted history could not be unlocked; no plaintext "
+                "fallback backup will be created.",
+            )
+            return
+        destination, _chosen_filter = QFileDialog.getSaveFileName(
+            self, "Back up current clipboard archive",
+            str(Path.home() / "clipmint-history-backup.sqlite3"),
+            "SQLite archive (*.sqlite3)",
+        )
+        if not destination:
+            return
+        target = Path(destination).expanduser()
+        overwrite = False
+        if target.exists() or target.is_symlink():
+            answer = QMessageBox.question(
+                self, "Replace an existing backup?",
+                "A file already exists at that location. Replace it with "
+                "a new verified backup of your current ClipMint archive?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+            overwrite = True
+        if not self.history_secure:
+            answer = QMessageBox.question(
+                self, "Plaintext archive backup",
+                "This history is currently UNENCRYPTED. The backup will also "
+                "contain unencrypted clipboard text and images, protected "
+                "only by your account's file permissions. Continue?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+        try:
+            backup_archive(self.store.conn, target, overwrite=overwrite)
+        except (ArchiveBackupError, FileExistsError, OSError) as exc:
+            self.error("Archive backup", str(exc))
+            return
+        self.inform(
+            "Archive backup complete",
+            "Encrypted archive saved; the desktop keyring key is NOT included."
+            if self.history_secure else
+            "Archive saved with owner-only permissions (0600). "
+            "The contents are NOT encrypted.",
+        )
 
     def enable_encrypted_history(self):
         if self.history_secure:
@@ -1921,6 +2064,89 @@ class ClipMintWindow(QMainWindow):
             "History encrypted",
             "New captures are encrypted. The old plaintext history still exists."
         )
+
+    def update_temporary_expiry_schedule(self):
+        enabled = (not self.history_security_error and
+                   self.settings.value("temporary/expire_24h", False, type=bool))
+        if enabled:
+            self._temporary_expiry_timer.start()
+        else:
+            self._temporary_expiry_timer.stop()
+
+    def set_temporary_expiry_enabled(self, enabled: bool):
+        if enabled:
+            confirmation = QMessageBox.question(
+                self, "Enable Temporary expiry?",
+                "Automatically delete unpinned Temporary items 24 hours after "
+                "they were saved? Any already older than 24 hours will be "
+                "removed immediately. Pinned items and other collections "
+                "will remain untouched.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if confirmation != QMessageBox.StandardButton.Yes:
+                self.temporary_expiry_toggle.blockSignals(True)
+                self.temporary_expiry_toggle.setChecked(False)
+                self.temporary_expiry_toggle.blockSignals(False)
+                return
+        self.settings.setValue("temporary/expire_24h", enabled)
+        self.update_temporary_expiry_schedule()
+        if enabled:
+            self.expire_temporary_if_enabled()
+
+    def invalidate_removed_clip_references(self, removed_ids: list[int]):
+        """Never let queued/popup IDs outlive deleted SQLite history rows."""
+        if not removed_ids:
+            return
+        self.paste_queue.discard_ids(removed_ids)
+        self._refresh_queue_button()
+        if self.quick_popup.isVisible():
+            self.quick_popup.refresh()
+        else:
+            self.quick_popup.items.clear()
+
+    def expire_temporary_if_enabled(self):
+        if (self.history_security_error or not self.settings.value(
+            "temporary/expire_24h", False, type=bool
+        )):
+            return
+        removed_ids: list[int] = []
+        try:
+            removed = self.store.expire_temporary_unpinned(
+                deleted_ids=removed_ids
+            )
+        except (sqlite3.DatabaseError, OSError) as exc:
+            # Deletions may already be committed even if SQLite maintenance
+            # fails. Never let a failure preserve stale queued clipboard IDs.
+            self.invalidate_removed_clip_references(removed_ids)
+            if removed_ids:
+                self.refresh()
+            self._temporary_expiry_timer.stop()
+            self.error("Temporary expiry", str(exc))
+            return
+        if removed:
+            self.invalidate_removed_clip_references(removed_ids)
+            self.refresh()
+            self.statusBar().showMessage(
+                f"Temporary: {removed} expired unpinned clip(s) removed", 5000
+            )
+
+    def clear_temporary_on_normal_exit(self):
+        """Never run for crashes, updates, or close-to-tray actions."""
+        if self._temporary_exit_cleaned:
+            return
+        if self.history_security_error or not self.settings.value(
+            "temporary/clear_on_quit", False, type=bool
+        ):
+            return
+        try:
+            self.store.clear_temporary_unpinned()
+        except (sqlite3.DatabaseError, OSError) as exc:
+            QMessageBox.warning(
+                self, "Temporary cleanup was not completed", str(exc)
+            )
+            return
+        self._temporary_exit_cleaned = True
 
     def toggle_monitoring(self):
         if self.history_security_error:
@@ -2137,6 +2363,7 @@ class ClipMintWindow(QMainWindow):
             self.error("Recording active", "Finish recording before quitting")
             event.ignore()
         else:
+            self.clear_temporary_on_normal_exit()
             self.store.close()
             event.accept()
 
@@ -2150,6 +2377,7 @@ class ClipMintWindow(QMainWindow):
             self.recorder_window = None
         self._closing = True
         self.lock_vault()
+        self.clear_temporary_on_normal_exit()
         self.store.close()
         if self.tray is not None:
             self.tray.hide()
@@ -2159,8 +2387,12 @@ class ClipMintWindow(QMainWindow):
 def main():
     if sys.platform != "linux":
         raise SystemExit("ClipMint currently supports Linux only")
-    command = "toggle" if "--toggle" in sys.argv[1:] else (
-        "quit" if "--quit" in sys.argv[1:] else "show"
+    arguments = sys.argv[1:]
+    hidden = "--hidden" in arguments and not (
+        "--toggle" in arguments or "--quit" in arguments
+    )
+    command = "toggle" if "--toggle" in arguments else (
+        "quit" if "--quit" in arguments else ("ping" if hidden else "show")
     )
     # Every invocation first signals an existing instance. The running daemon
     # owns the clipboard; --toggle never starts a second clipboard watcher.
@@ -2183,12 +2415,18 @@ def main():
         elif action == "quit":
             window.quit_app()
     try:
-        window._instance_server = InstanceServer(on_command, window)
+        window._instance_server = InstanceServer(
+            on_command, window, occupied_command="ping" if hidden else "show"
+        )
     except RuntimeError as exc:
         QMessageBox.warning(None, "ClipMint", str(exc))
         return
     if command == "toggle":
         QTimer.singleShot(150, window.toggle_quick_popup)
+    elif hidden and window.tray is not None:
+        # Login startup stays headless but is reachable through the tray.
+        app.setQuitOnLastWindowClosed(False)
     else:
+        # Never leave a background watcher inaccessible on desktops with no tray.
         window.show()
     raise SystemExit(app.exec())

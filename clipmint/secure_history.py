@@ -116,6 +116,12 @@ class EncryptedClipStore(ClipStore):
         if row:
             old_content, _, old_formats = self._open(bytes(row[1]))
             if old_content == content and old_formats == (formats or {}):
+                self.conn.execute(
+                    "UPDATE clips SET created_at="
+                    "strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?",
+                    (row[0],),
+                )
+                self.conn.commit()
                 return row[0]
         return super().add(kind, self._seal(content, preview, formats),
                            "🔒 Encrypted history item", bin_name)
