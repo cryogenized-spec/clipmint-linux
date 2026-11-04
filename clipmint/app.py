@@ -1874,13 +1874,24 @@ class ClipMintWindow(QMainWindow):
             "temporary/expire_24h", False, type=bool
         )):
             return
+        removed_ids: list[int] = []
         try:
-            removed = self.store.expire_temporary_unpinned()
+            removed = self.store.expire_temporary_unpinned(
+                deleted_ids=removed_ids
+            )
         except (sqlite3.DatabaseError, OSError) as exc:
             self._temporary_expiry_timer.stop()
             self.error("Temporary expiry", str(exc))
             return
         if removed:
+            # These consumers cache clip IDs. Invalidate before another
+            # capture can reuse SQLite's highest deleted integer row ID.
+            self.paste_queue.discard_ids(removed_ids)
+            self._refresh_queue_button()
+            if self.quick_popup.isVisible():
+                self.quick_popup.refresh()
+            else:
+                self.quick_popup.items.clear()
             self.refresh()
             self.statusBar().showMessage(
                 f"Temporary: {removed} expired unpinned clip(s) removed", 5000
