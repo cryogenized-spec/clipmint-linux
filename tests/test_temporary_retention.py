@@ -171,6 +171,45 @@ class TemporaryRetentionTests(unittest.TestCase):
             self.assertNotIn(term.encode(),
                              (Path(root) / "history.sqlite3").read_bytes())
 
+    def test_clip_ids_never_reused_after_ttl_delete_or_restart(self):
+        with TemporaryDirectory() as root:
+            for encrypted in (False, True):
+                with self.subTest(encrypted=encrypted):
+                    path = Path(root) / (
+                        "encrypted-ids.sqlite3" if encrypted
+                        else "plain-ids.sqlite3"
+                    )
+                    key = utils.random(SecretBox.KEY_SIZE) if encrypted else None
+
+                    def reopen():
+                        return (EncryptedClipStore(path, key)
+                                if encrypted else ClipStore(path))
+
+                    store = reopen()
+                    try:
+                        expired = store.add(
+                            "text", b"expired entry", "expired entry", "Temporary"
+                        )
+                        age_item(store, expired, timedelta(days=5))
+                        self.assertEqual(
+                            store.expire_temporary_unpinned(now=NOW), 1
+                        )
+                        later = store.add(
+                            "text", b"another entry", "another entry", "Work"
+                        )
+                        self.assertGreater(later, expired)
+                        store.delete(later)
+                    finally:
+                        store.close()
+                    store = reopen()
+                    try:
+                        newest = store.add(
+                            "text", b"after restart", "after restart", "Personal"
+                        )
+                        self.assertGreater(newest, later)
+                    finally:
+                        store.close()
+
     def test_naive_clock_is_rejected(self):
         with TemporaryDirectory() as root:
             store = ClipStore(Path(root) / "history.sqlite3")
