@@ -1869,6 +1869,17 @@ class ClipMintWindow(QMainWindow):
         if enabled:
             self.expire_temporary_if_enabled()
 
+    def invalidate_removed_clip_references(self, removed_ids: list[int]):
+        """Never let queued/popup IDs outlive deleted SQLite history rows."""
+        if not removed_ids:
+            return
+        self.paste_queue.discard_ids(removed_ids)
+        self._refresh_queue_button()
+        if self.quick_popup.isVisible():
+            self.quick_popup.refresh()
+        else:
+            self.quick_popup.items.clear()
+
     def expire_temporary_if_enabled(self):
         if (self.history_security_error or not self.settings.value(
             "temporary/expire_24h", False, type=bool
@@ -1880,18 +1891,16 @@ class ClipMintWindow(QMainWindow):
                 deleted_ids=removed_ids
             )
         except (sqlite3.DatabaseError, OSError) as exc:
+            # Deletions may already be committed even if SQLite maintenance
+            # fails. Never let a failure preserve stale queued clipboard IDs.
+            self.invalidate_removed_clip_references(removed_ids)
+            if removed_ids:
+                self.refresh()
             self._temporary_expiry_timer.stop()
             self.error("Temporary expiry", str(exc))
             return
         if removed:
-            # These consumers cache clip IDs. Invalidate before another
-            # capture can reuse SQLite's highest deleted integer row ID.
-            self.paste_queue.discard_ids(removed_ids)
-            self._refresh_queue_button()
-            if self.quick_popup.isVisible():
-                self.quick_popup.refresh()
-            else:
-                self.quick_popup.items.clear()
+            self.invalidate_removed_clip_references(removed_ids)
             self.refresh()
             self.statusBar().showMessage(
                 f"Temporary: {removed} expired unpinned clip(s) removed", 5000
