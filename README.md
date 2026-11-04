@@ -294,7 +294,13 @@ last-used timestamp rather than inserting another A. Identity, pinned state,
 favourites and user tags survive. The recency sequence also controls the
 unpinned LRU retention limit and survives reopens and migrations.
 Encrypted history uses keyed HMAC fingerprints; cleartext/hashes of
-possible passwords are not written into its metadata.
+possible passwords are not written into its metadata. Existing encrypted
+archives receive a one-time fingerprint backfill at unlock; a large
+image-heavy archive may take longer to open that first time. Entries that
+fail ciphertext authentication are **preserved but hidden** from ordinary
+search so one corrupted record cannot prevent access to healthy items. A
+visible warning reports detected damaged entries; manual recovery is
+necessary, and no plaintext fallback is enabled.
 
 **Privacy limitation:** SQLite secure-delete, VACUUM and WAL truncation
 reduce remnants inside the active database. None of these can guarantee
