@@ -41,7 +41,11 @@ def _verify_safe_destination_directory(parent: Path) -> None:
         shared_writes = mode & (stat.S_IWGRP | stat.S_IWOTH)
         if not shared_writes:
             continue
-        if not (mode & stat.S_ISVTX) or details.st_uid != owner:
+        # The root account can already access every user's files and is
+        # not a less-privileged attacker. A standard root-owned /tmp with
+        # sticky permissions is safe for a private user-owned child folder.
+        if (not (mode & stat.S_ISVTX)
+                or details.st_uid not in (owner, 0)):
             raise ArchiveBackupError(
                 "Choose a private backup folder in your home directory. "
                 "This destination or an ancestor can be replaced by "
