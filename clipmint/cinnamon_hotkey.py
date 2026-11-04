@@ -49,6 +49,14 @@ def cinnamon_accelerator(sequence: str) -> str:
         prefix = "".join(modifiers[part] for part in parts[:-1])
     except KeyError as exc:
         raise ShortcutSetupError(f"Unsupported shortcut modifier: {exc}") from exc
+    # The kernel/display-manager can own virtual-terminal switching. No
+    # application-level or Cinnamon GSettings registration outranks it.
+    if (re.fullmatch(r"F(?:[1-9]|1[0-2])", key)
+            and "<Primary>" in prefix and "<Alt>" in prefix):
+        raise ShortcutSetupError(
+            "Ctrl+Alt+function-key combinations are reserved for system "
+            "console switching; choose another shortcut."
+        )
     return prefix + key.lower()
 
 
