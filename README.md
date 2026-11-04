@@ -275,3 +275,28 @@ favourites, snippets, transforms, and controlled paste queue are preserved.
 Before merging this PR, upload the exact original PNG at that path and
 confirm all three checks are green. The release remains a development preview
 until actual Cinnamon/X11 field acceptance and security review are complete.
+
+
+## Screenshots gallery visual review (development only)
+
+The separate \`feat/screenshot-gallery-preview\` review branch replaces the
+filename-only Screenshots screen with an in-app PNG thumbnail grid and a
+larger, aspect-preserving preview for the selected screenshot. Dimensions
+and local file size appear below the preview. Double-click still opens the
+file in its normal desktop application, and the selected-image **Open**,
+**Edit** and **OCR** controls reuse the existing behaviours. The existing
+Recordings page remains a filename list but now shares the same burgundy,
+rose-gold and ivory archive styling.
+
+Thumbnails are decoded locally in short batches, with image dimensions and
+file size bounded to avoid unresponsive loading from damaged or enormous
+screenshots. No images are uploaded, copied into clipboard history, or
+changed on disk. Existing PNG files remain in \`~/Pictures/ClipMint\`.
+Large/invalid files may show a preview-unavailable message; they remain
+accessible in their original folder.
+
+**This is a draft UI revision, not an installed update.** The
+\`Review ClipMint screenshot gallery\` workflow runs Qt tests and publishes
+a screenshot of the actual Qt screen using only synthetic image fixtures.
+Review the rendered preview and test with real screenshots on Linux Mint
+before merging or packaging a new release.
