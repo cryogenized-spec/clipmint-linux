@@ -210,6 +210,20 @@ def install_shortcut(
     accelerator = cinnamon_accelerator(sequence)
     current = _list(_run("get", PARENT, "custom-list"))
     conflicts = shortcut_conflicts(sequence)
+    # Do not accumulate multiple global keys for the same ClipMint action
+    # when a preference is changed. The old Cinnamon shortcut must be
+    # unassigned explicitly before a different one is registered.
+    for ident in current:
+        existing_command = _run("get", _custom_schema(ident), "command").strip("'")
+        if existing_command == command:
+            assignments = _list(_run("get", _custom_schema(ident), "binding"))
+            if not any(_canonical(value) == _canonical(accelerator)
+                       for value in assignments if value):
+                raise ShortcutSetupError(
+                    "This ClipMint action already has a different Cinnamon "
+                    "global shortcut. Remove or reassign the previous one in "
+                    "System Settings → Keyboard → Custom Shortcuts first."
+                )
     own = [c for c in conflicts
            if c["source"] == "custom" and c["command"] == command]
     other_custom = [c for c in conflicts

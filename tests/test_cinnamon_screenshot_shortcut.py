@@ -136,6 +136,15 @@ class ShortcutRegistrationTests(unittest.TestCase):
                 h.install_shortcut("some-other-tool", "Ctrl+Shift+S")
         self.assertEqual(writes, [])
 
+    def test_reassigning_does_not_accumulate_duplicate_clipmint_hotkeys(self):
+        run, writes, _vals, _state = self.fake_gsettings(custom=["custom0"])
+        with patch.object(h, "_run", side_effect=run):
+            with self.assertRaisesRegex(h.ShortcutSetupError,
+                                        "already has a different"):
+                h.install_shortcut("/opt/clipmint/ClipMint --screenshot-area",
+                                   "Ctrl+Shift+A")
+        self.assertEqual(writes, [])
+
     def test_failed_registration_rolls_back_system_shortcut(self):
         run, writes, vals, state = self.fake_gsettings(
             bindings={"area-screenshot": ["<Shift><Control>s"]}
