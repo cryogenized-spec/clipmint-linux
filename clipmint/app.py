@@ -40,6 +40,7 @@ from .single_instance import InstanceServer, send_command
 from .cinnamon_hotkey import install_shortcut, ShortcutSetupError
 from .secure_history import (EncryptedClipStore, HistorySecurityError,
                              key_from_secret_service, secure_path)
+from .archive_backup import backup_archive, ArchiveBackupError
 
 
 THEME = """
@@ -1057,6 +1058,18 @@ class ClipMintWindow(QMainWindow):
         self.secure_history_button.setEnabled(not self.history_secure)
         self.secure_history_button.clicked.connect(self.enable_encrypted_history)
         privacy_layout.addWidget(self.secure_history_button)
+
+        archive_help = QLabel(
+            "Save a consistent local copy of your current clipboard archive, "
+            "including uncheckpointed SQLite WAL changes. Backups have "
+            "owner-only permissions. Plaintext remains plaintext; encrypted "
+            "history stays encrypted and requires your original keyring key."
+        )
+        archive_help.setWordWrap(True)
+        privacy_layout.addWidget(archive_help)
+        archive_backup_button = QPushButton("Backup clipboard archive…")
+        archive_backup_button.clicked.connect(self.backup_clipboard_archive)
+        privacy_layout.addWidget(archive_backup_button)
         layout.addWidget(privacy_group)
 
         screenshot_group = QGroupBox("Screenshot editor")
@@ -1808,6 +1821,59 @@ class ClipMintWindow(QMainWindow):
             self.statusBar().showMessage(
                 "Copied; automatic paste unavailable. Paste manually.", 7000
             )
+
+    def backup_clipboard_archive(self):
+        """Export a verified snapshot; never overwrite without confirmation."""
+        if self.history_security_error:
+            self.error(
+                "Archive backup unavailable",
+                "Encrypted history could not be unlocked; no plaintext "
+                "fallback backup will be created.",
+            )
+            return
+        destination, _chosen_filter = QFileDialog.getSaveFileName(
+            self, "Back up current clipboard archive",
+            str(Path.home() / "clipmint-history-backup.sqlite3"),
+            "SQLite archive (*.sqlite3)",
+        )
+        if not destination:
+            return
+        target = Path(destination).expanduser()
+        overwrite = False
+        if target.exists() or target.is_symlink():
+            answer = QMessageBox.question(
+                self, "Replace an existing backup?",
+                "A file already exists at that location. Replace it with "
+                "a new verified backup of your current ClipMint archive?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+            overwrite = True
+        if not self.history_secure:
+            answer = QMessageBox.question(
+                self, "Plaintext archive backup",
+                "This history is currently UNENCRYPTED. The backup will also "
+                "contain unencrypted clipboard text and images, protected "
+                "only by your account's file permissions. Continue?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+        try:
+            backup_archive(self.store.conn, target, overwrite=overwrite)
+        except (ArchiveBackupError, FileExistsError, OSError) as exc:
+            self.error("Archive backup", str(exc))
+            return
+        self.inform(
+            "Archive backup complete",
+            "Encrypted archive saved; the desktop keyring key is NOT included."
+            if self.history_secure else
+            "Archive saved with owner-only permissions (0600). "
+            "The contents are NOT encrypted.",
+        )
 
     def enable_encrypted_history(self):
         if self.history_secure:
