@@ -275,3 +275,25 @@ favourites, snippets, transforms, and controlled paste queue are preserved.
 Before merging this PR, upload the exact original PNG at that path and
 confirm all three checks are green. The release remains a development preview
 until actual Cinnamon/X11 field acceptance and security review are complete.
+
+
+## Verified one-click clipboard archive backup (review branch)
+
+Settings → **Clipboard privacy → Backup clipboard archive…** saves a
+consistent single-file SQLite snapshot of the **currently active** archive
+via Python's built-in SQLite online backup interface. It captures
+committed changes even when the source database is open and using WAL.
+The saved .sqlite3 has owner-only 0600 file permissions and is verified
+using PRAGMA integrity_check before the staged file is placed at the
+selected destination. If a destination already exists, it is *never*
+overwritten without an explicit confirmation. A cancelled or failed backup
+does not modify the original database.
+
+**Plaintext history produces a plaintext backup**, and the app asks you to
+acknowledge this risk before saving. **Encrypted history stays encrypted**
+without copying or exposing its keyring key; a different computer cannot
+read it without the original key. The separately encrypted Vault and the
+application's QSettings are **not** included. This operation is export-only;
+replacing or restoring a live archive requires its own validated restore
+workflow, and is not part of this draft. No cloud sync, shell command, or
+network access is used.
