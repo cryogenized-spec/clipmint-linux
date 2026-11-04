@@ -125,7 +125,11 @@ def looks_random(token: str) -> Confidence:
         any(not c.isalnum() for c in token),
     ))
     if size >= 20 and entropy >= 4.0 and classes >= 3:
-        return Confidence.MEDIUM
+        # Human-written CamelCase identifiers often end in a short number.
+        # Require a stronger token signal to avoid dropping ordinary clips.
+        digit_count = sum(ch.isdigit() for ch in token)
+        if any(not ch.isalnum() for ch in token) or digit_count >= max(4, size // 5):
+            return Confidence.MEDIUM
     if 8 <= size <= 32 and classes >= 3 and entropy >= 3.0:
         if classes == 4 or (size >= 14 and entropy >= 3.3):
             return Confidence.MEDIUM
