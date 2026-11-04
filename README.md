@@ -299,7 +299,13 @@ timestamp. Turning a rule off stops that cleanup without purging anything;
 existing saved settings are preserved on upgrade, and no existing user is
 silently opted in. Deletions remove full-text search entries in ordinary
 history too. Expiry is measured against UTC timestamps, not a guessed local
-clock or application installation date.
+clock or application installation date. Recopying the same newest entry
+refreshes its last-used timestamp (for both ordinary and encrypted history),
+so a recently reused Temporary item is not removed using its older date.
+Expired clip IDs are dropped from the paste queue and quick-popup cache
+before another copy could reuse a SQLite row ID. For plaintext history, a
+cleanup rebuilds FTS5 postings and compacts the SQLite file to reduce old
+search-index remnants; this may briefly use extra CPU on large archives.
 
 **Caution:** These settings deliberately remove eligible history records.
 Enabling the age rule warns before removing previously expired entries.
