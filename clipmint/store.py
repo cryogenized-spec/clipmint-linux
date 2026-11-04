@@ -343,6 +343,22 @@ class ClipStore:
     def count(self, bin_name: str) -> int:
         return self.conn.execute("SELECT COUNT(*) FROM clips WHERE bin=?", (bin_name,)).fetchone()[0]
 
+    def refresh_temporary_copy_time(self, clip_id: int) -> None:
+        """Refresh TTL after a user copies an entry from ClipMint's history.
+
+        Clipboard reinsertion is intentionally suppressed on these paths, so
+        history-copy actions must refresh the original item's retention clock.
+        Pinned clips are also touched, preserving freshness if later unpinned.
+        Other bins remain unaffected.
+        """
+        with self.conn:
+            self.conn.execute(
+                "UPDATE clips SET created_at="
+                "strftime('%Y-%m-%dT%H:%M:%fZ','now') "
+                "WHERE id=? AND bin='Temporary'",
+                (clip_id,),
+            )
+
     def _remove_temporary_unpinned(
         self, cutoff_iso: str | None = None,
         deleted_ids: list[int] | None = None,
