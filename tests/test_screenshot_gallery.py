@@ -105,6 +105,13 @@ class ScreenshotGalleryTests(unittest.TestCase):
                     self.assertEqual(window.selected_screenshot_path(), second)
                     self.assertIn("320 × 240", window.screenshot_details.text())
 
+                    # Newly captured PNGs become the selected gallery preview.
+                    latest = screenshots / "latest.png"
+                    create_png(latest, 1200, 675)
+                    window.refresh_library("Screenshots", select_path=latest)
+                    self.assertEqual(window.selected_screenshot_path(), latest)
+                    self.assertIn("1200 × 675 px", window.screenshot_details.text())
+
                     # The pre-existing recordings list still operates independently.
                     (recordings / "sample.mp4").write_bytes(b"test-only")
                     window.open_section(2)
