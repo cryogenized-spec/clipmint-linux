@@ -81,6 +81,19 @@ API_CONTEXT = re.compile(
     r"private[_ -]?key|secret[_ -]?key|auth(?:orization)?|bearer)\s*"
     r"(?:[\"']?\s*[:=]\s*[\"']?\s*|\s+)(\S{3,})"
 )
+ENV_CREDENTIAL = re.compile(
+    r"(?im)^\s*(?:export\s+)?[\"']?([A-Za-z_][A-Za-z0-9_.-]{2,80})[\"']?"
+    r"\s*[:=]\s*[\"']?([^\s\"']{3,})"
+)
+PRIVATE_ENV_ENDINGS = (
+    "PASSWORD", "PASSWD", "PASSPHRASE", "SECRET", "PRIVATE_KEY",
+    "CLIENT_SECRET", "SECRET_KEY", "MASTER_KEY", "ENCRYPTION_KEY",
+    "SIGNING_KEY", "STATE_KEY", "TOKEN_KEY",
+)
+API_ENV_ENDINGS = (
+    "TOKEN", "API_KEY", "ACCESS_KEY", "ACCESS_TOKEN", "REFRESH_TOKEN",
+    "BEARER_TOKEN",
+)
 KNOWN_API = re.compile(
     r"(?i)\b(?:github_pat_[A-Za-z0-9_]{30,}|gh[pousr]_[A-Za-z0-9_]{30,}|"
     r"glpat-[A-Za-z0-9_-]{20,}|sk-(?:proj-|ant-)?[A-Za-z0-9_-]{20,}|"
@@ -188,6 +201,17 @@ def classify_smart(
     if len(value) > 262144:
         return "plain-text"
     sample = value[:262144]
+    # Named environment variables often carry application-specific prefixes
+    # (e.g. GITHUB_CLIENT_SECRET). Detect the *whole key* rather than matching
+    # only an unprefixed word boundary inside it.
+    for assignment in ENV_CREDENTIAL.finditer(sample):
+        name = assignment.group(1).upper().replace("-", "_").replace(".", "_")
+        if any(name == suffix or name.endswith("_" + suffix)
+               for suffix in PRIVATE_ENV_ENDINGS):
+            return "passwords"
+        if any(name == suffix or name.endswith("_" + suffix)
+               for suffix in API_ENV_ENDINGS):
+            return "api-keys"
     if PAN_CVV.search(sample) or any(_luhn(m.group()) for m in CARD.finditer(sample)):
         return "payment-cards"
     if IBAN.search(sample) or SWIFT_CONTEXT.search(sample):
