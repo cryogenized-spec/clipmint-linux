@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import os
 import re
@@ -299,6 +300,52 @@ class ClipStore:
 
     def count(self, bin_name: str) -> int:
         return self.conn.execute("SELECT COUNT(*) FROM clips WHERE bin=?", (bin_name,)).fetchone()[0]
+
+    def _remove_temporary_unpinned(self, cutoff_iso: str | None = None) -> int:
+        """Delete only unpinned clips in the built-in Temporary collection.
+
+        A cutoff of None is reserved for an explicitly enabled normal-exit
+        cleanup. A timestamp is used for opt-in age-based expiration.
+        Pinned items, reusable templates, and other bins are not touched.
+        """
+        condition = "bin='Temporary' AND pinned=0"
+        parameters: tuple[str, ...] = ()
+        if cutoff_iso is not None:
+            # julianday ignores malformed/unknown timestamps (NULL), so
+            # legacy rows without a valid UTC date are not purged blindly.
+            condition += " AND julianday(created_at) <= julianday(?)"
+            parameters = (cutoff_iso,)
+        identifiers = [int(row[0]) for row in self.conn.execute(
+            "SELECT id FROM clips WHERE " + condition, parameters
+        )]
+        if not identifiers:
+            return 0
+        with self.conn:
+            for ident in identifiers:
+                self.search_index.delete(ident)
+            self.conn.executemany(
+                "DELETE FROM clips WHERE id=? AND bin='Temporary' AND pinned=0",
+                [(ident,) for ident in identifiers],
+            )
+            self.search_index.trim_deleted()
+        # Keep recently removed plaintext from lingering in SQLite's WAL.
+        # This is hygiene, not a forensic erase guarantee.
+        self.conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        return len(identifiers)
+
+    def expire_temporary_unpinned(self, *, now: datetime | None = None) -> int:
+        """Opt-in 24-hour TTL; the caller decides whether it is enabled."""
+        current = datetime.now(timezone.utc) if now is None else now
+        if current.tzinfo is None or current.utcoffset() is None:
+            raise ValueError("Temporary retention requires an aware UTC timestamp")
+        cutoff = current.astimezone(timezone.utc) - timedelta(hours=24)
+        return self._remove_temporary_unpinned(
+            cutoff.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+        )
+
+    def clear_temporary_unpinned(self) -> int:
+        """Run only on deliberate application exit with explicit user opt-in."""
+        return self._remove_temporary_unpinned()
 
     def move(self, clip_id: int, bin_name: str) -> None:
         if bin_name not in self.bins():
