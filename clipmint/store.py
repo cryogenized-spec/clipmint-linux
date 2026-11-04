@@ -2,20 +2,23 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
+import hashlib
 import os
 import re
 import sqlite3
+import stat
 from .clipboard_formats import bundle_to_bytes, bundle_from_bytes
 from .search_index import ClipSearchIndex
 
 DEFAULT_BINS = ("Work", "Personal", "Temporary")
 SORTS = {
-    "Latest first": "id DESC",
-    "Oldest first": "id ASC",
+    "Latest first": "touch_seq DESC, id DESC",
+    "Oldest first": "touch_seq ASC, id ASC",
     "A–Z": "preview COLLATE NOCASE ASC, id DESC",
     "Z–A": "preview COLLATE NOCASE DESC, id DESC",
-    "Numbered list": "id DESC",
+    "Numbered list": "touch_seq DESC, id DESC",
 }
 
 
@@ -51,14 +54,29 @@ def looks_sensitive(text: str) -> bool:
 class ClipStore:
     def __init__(self, path: Path | None = None, max_unpinned: int = 250,
                  index_plaintext: bool = True):
+        path_is_managed = path is None
         if path is None:
             base = Path(os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local/share")))
             path = base / "clipmint" / "history.sqlite3"
         self.path = Path(path)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        if path_is_managed:
+            # This is ClipMint's own directory, not a caller-supplied parent.
+            os.chmod(self.path.parent, 0o700)
+        # os.open() honours the requested 0600 permissions even with a
+        # permissive umask; O_NOFOLLOW rejects symlink redirection.
+        flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
+        fd = os.open(self.path, flags, 0o600)
+        try:
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                raise OSError("Clipboard history path is not a regular file")
+            os.fchmod(fd, 0o600)
+        finally:
+            os.close(fd)
         self.max_unpinned = max_unpinned
         self.closed = False
         self.conn = sqlite3.connect(self.path)
+        self.conn.execute("PRAGMA secure_delete=ON")
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("""CREATE TABLE IF NOT EXISTS clips (
             id INTEGER PRIMARY KEY,
@@ -131,7 +149,25 @@ class ClipStore:
             AFTER DELETE ON clips BEGIN
                 DELETE FROM clip_tags WHERE clip_id=OLD.id;
             END""")
+        # A durable recency sequence allows A → B → A to resurface the
+        # original entry (and keep its ID, pin, favourites and tags).
+        # Legacy entries retain their prior ID-based chronological order.
+        columns = {row[1] for row in self.conn.execute("PRAGMA table_info(clips)")}
+        if "touch_seq" not in columns:
+            self.conn.execute(
+                "ALTER TABLE clips ADD COLUMN touch_seq INTEGER NOT NULL DEFAULT 0"
+            )
+        if "fingerprint" not in columns:
+            self.conn.execute("ALTER TABLE clips ADD COLUMN fingerprint BLOB")
+        self.conn.execute("UPDATE clips SET touch_seq=id WHERE touch_seq=0")
         self.conn.execute("CREATE INDEX IF NOT EXISTS idx_clips_bin_id ON clips(bin,id)")
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_clips_bin_recent ON clips(bin,touch_seq)"
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_clips_bin_fingerprint "
+            "ON clips(bin,fingerprint)"
+        )
         self.conn.commit()
         self.search_index = ClipSearchIndex(self.conn, enabled=index_plaintext)
 
@@ -145,8 +181,61 @@ class ClipStore:
         self.conn.execute("INSERT INTO bins(name,position) VALUES(?,COALESCE((SELECT MAX(position)+1 FROM bins),0))", (name,))
         self.conn.commit()
 
-    def add(self, kind: str, content: bytes, preview: str, bin_name: str = "Work",
-            formats: dict[str, bytes] | None = None) -> int | None:
+    @staticmethod
+    def _fingerprint(kind: str, content: bytes, packed: bytes | None) -> bytes:
+        """Stable content identity for normal plaintext history."""
+        digest = hashlib.sha256()
+        digest.update(kind.encode("ascii") + b"\\0")
+        digest.update(len(content).to_bytes(8, "big"))
+        digest.update(content)
+        digest.update(packed or b"")
+        return digest.digest()
+
+    def _next_touch_seq(self) -> int:
+        return self.conn.execute(
+            "SELECT COALESCE(MAX(touch_seq),0)+1 FROM clips"
+        ).fetchone()[0]
+
+    def _touch_duplicate(self, ident: int, fingerprint: bytes) -> int:
+        self.conn.execute(
+            """UPDATE clips SET touch_seq=?, fingerprint=?,
+                 created_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?""",
+            (self._next_touch_seq(), sqlite3.Binary(fingerprint), ident)
+        )
+        self.conn.commit()
+        return ident
+
+    def _find_plain_duplicate(
+        self, kind: str, content: bytes, packed: bytes | None,
+        bin_name: str, fingerprint: bytes,
+    ) -> int | None:
+        # All new entries have a fingerprint. Pre-upgrade entries have NULL
+        # and are checked byte-for-byte, then lazily receive the fingerprint.
+        for ident, older_content, older_formats in self.conn.execute(
+            "SELECT id,content,formats FROM clips "
+            "WHERE bin=? AND kind=? AND fingerprint=? ORDER BY touch_seq DESC",
+            (bin_name, kind, sqlite3.Binary(fingerprint))
+        ):
+            if bytes(older_content) == content and (
+                bytes(older_formats) if older_formats is not None else None
+            ) == packed:
+                return ident
+        for ident, older_content, older_formats in self.conn.execute(
+            "SELECT id,content,formats FROM clips "
+            "WHERE bin=? AND kind=? AND fingerprint IS NULL",
+            (bin_name, kind)
+        ):
+            if bytes(older_content) == content and (
+                bytes(older_formats) if older_formats is not None else None
+            ) == packed:
+                return ident
+        return None
+
+    def add(
+        self, kind: str, content: bytes, preview: str, bin_name: str = "Work",
+        formats: dict[str, bytes] | None = None, *,
+        _sealed_fingerprint: bytes | None = None,
+    ) -> int | None:
         if kind not in ("text", "image", "files"):
             raise ValueError("Unsupported clipboard type")
         if bin_name not in self.bins():
@@ -154,19 +243,28 @@ class ClipStore:
         if not content:
             return None
         packed = bundle_to_bytes(formats) if formats else None
-        newest = self.conn.execute(
-            "SELECT id,kind,content,formats FROM clips WHERE bin=? ORDER BY id DESC LIMIT 1", (bin_name,)
-        ).fetchone()
-        if newest and newest[1] == kind and newest[2] == content and newest[3] == packed:
-            return newest[0]
+        # EncryptedClipStore performs a keyed comparison on plaintext first.
+        fingerprint = (_sealed_fingerprint if _sealed_fingerprint is not None
+                       else self._fingerprint(kind, content, packed))
+        if _sealed_fingerprint is None:
+            previous = self._find_plain_duplicate(
+                kind, content, packed, bin_name, fingerprint
+            )
+            if previous is not None:
+                return self._touch_duplicate(previous, fingerprint)
         cursor = self.conn.execute(
-            "INSERT INTO clips(kind,content,preview,bin,formats) VALUES(?,?,?,?,?)",
+            """INSERT INTO clips
+               (kind,content,preview,bin,formats,touch_seq,fingerprint)
+               VALUES(?,?,?,?,?,?,?)""",
             (kind, sqlite3.Binary(content), preview[:600], bin_name,
-             sqlite3.Binary(packed) if packed is not None else None)
+             sqlite3.Binary(packed) if packed is not None else None,
+             self._next_touch_seq(), sqlite3.Binary(fingerprint))
         )
-        # Each bin retains its own pinned items and most recent unpinned items.
+        # Keep the most recently used items in each bin, not simply the
+        # highest row IDs; pinned items are exempt from the count limit.
         self.conn.execute("""DELETE FROM clips WHERE bin=? AND pinned=0 AND id NOT IN
-            (SELECT id FROM clips WHERE bin=? AND pinned=0 ORDER BY id DESC LIMIT ?)""",
+            (SELECT id FROM clips WHERE bin=? AND pinned=0
+             ORDER BY touch_seq DESC,id DESC LIMIT ?)""",
             (bin_name, bin_name, self.max_unpinned)
         )
         self.search_index.insert(cursor.lastrowid, kind, content, preview[:600])
@@ -326,8 +424,20 @@ class ClipStore:
         self.search_index.delete(clip_id)
         self.conn.execute("DELETE FROM clips WHERE id=?", (clip_id,))
         self.conn.commit()
+        # Do not leave deleted plaintext indefinitely in this process's WAL.
+        # This cannot erase earlier filesystem snapshots or SSD flash cells.
+        self.conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+
+    def compact_history(self) -> None:
+        """User-initiated compaction; can be expensive on large image histories."""
+        self.conn.commit()
+        self.conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        self.conn.execute("VACUUM")
+        self.conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
     def close(self) -> None:
         if not self.closed:
+            self.conn.commit()
+            self.conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
             self.conn.close()
             self.closed = True
