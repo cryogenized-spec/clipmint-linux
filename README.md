@@ -300,3 +300,81 @@ recorded in \`~/.local/share/clipmint/history.sqlite3\`, previous backups,
 SQLite WAL pages, or the plaintext FTS index. Review old history locally and
 rotate any credentials suspected of exposure; do not paste live secrets into
 GitHub issues, bug reports, or test fixtures.
+
+
+## Temporary collection: optional retention (development review)
+
+**Default: OFF.** Settings → **Temporary collection · retention** exposes
+two independent, opt-in choices:
+
+- **Automatically remove unpinned Temporary clips after 24 hours.** Requires
+  explicit confirmation when enabling; already-expired entries are removed
+  then, and the application checks periodically while running (every five
+  minutes). For an already-enabled setting, expiration also runs on startup.
+- **Clear unpinned Temporary clips when I quit ClipMint.** Runs only on an
+  orderly, deliberate application exit (Quit in the tray or closing when there
+  is no tray), **not** when hiding its window to the tray. An app crash,
+  forced termination or package update does not invoke the exit cleanup.
+
+Both protect **pinned entries**. Neither touches the Work or Personal bins,
+other user-created collections, reusable snippet templates, screenshot files,
+vault data, or other application files. Moving an old item into Temporary
+subjects it to the selected age rule using the item's existing last-copied
+timestamp. Turning a rule off stops that cleanup without purging anything;
+existing saved settings are preserved on upgrade, and no existing user is
+silently opted in. Deletions remove full-text search entries in ordinary
+history too. Expiry is measured against UTC timestamps, not a guessed local
+clock or application installation date. Recopying the same newest entry
+refreshes its last-used timestamp (for both ordinary and encrypted history),
+so a recently reused Temporary item is not removed using its older date.
+Choosing **Copy** in the archive, using the quick-search popup, or copying
+from the Multi-Paste Queue also renews the 24-hour retention clock.
+Expired clip IDs are dropped from the paste queue and quick-popup cache
+before another copy could reuse a SQLite row ID. For plaintext history, a
+cleanup rebuilds FTS5 postings and compacts the SQLite file to reduce old
+search-index remnants; this may briefly use extra CPU on large archives.
+
+**Caution:** These settings deliberately remove eligible history records.
+Enabling the age rule warns before removing previously expired entries.
+SQLite deletion and WAL cleanup reduce recoverable remnants but cannot
+guarantee physical secure erasure on SSDs, backups or OS snapshots. This is
+a draft feature and is not available in the current installed release.
+
+## Verified one-click clipboard archive backup (review branch)
+
+Settings → **Clipboard privacy → Backup clipboard archive…** saves a
+consistent single-file SQLite snapshot of the **currently active** archive
+via Python's built-in SQLite online backup interface. It captures
+committed changes even when the source database is open and using WAL.
+The saved .sqlite3 has owner-only 0600 file permissions and is verified
+using PRAGMA integrity_check before the staged file is placed at the
+selected destination. If a destination already exists, it is *never*
+overwritten without an explicit confirmation. A cancelled or failed backup
+does not modify the original database.
+
+**Plaintext history produces a plaintext backup**, and the app asks you to
+acknowledge this risk before saving. **Encrypted history stays encrypted**
+without copying or exposing its keyring key; a different computer cannot
+read it without the original key. The separately encrypted Vault and the
+application's QSettings are **not** included. This operation is export-only;
+replacing or restoring a live archive requires its own validated restore
+workflow, and is not part of this draft. No cloud sync, shell command, or
+network access is used.
+
+## Optional launch at login (development branch)
+
+Settings → **Start at login → Launch ClipMint when I log in** is **OFF by default**.
+With an installed .deb, enabling it creates only
+`~/.config/autostart/clipmint.desktop` for the current user (mode 0600).
+It starts `/opt/clipmint/ClipMint --hidden` on subsequent Cinnamon/X11 logins.
+If a tray is available, the app stays in the tray; otherwise it opens its
+window so it cannot become an inaccessible background process. Launching
+again does not create another clipboard watcher or force the running window
+to appear. Turning the setting off removes only ClipMint's exact managed
+entry. Existing custom entries and symlinks are never overwritten or removed,
+and the installed executable is checked before enabling. A crash or package
+update cannot opt you into login startup. No system-wide autostart files
+or other users' configuration are changed.
+
+This remains a **review feature** until CI passes and Cinnamon/X11 startup,
+tray and logout behaviour are tested on the HP OMEN.

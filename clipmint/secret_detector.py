@@ -116,7 +116,7 @@ def looks_random(token: str) -> Confidence:
             or URL_OR_PATH.match(token) or token.isalpha() or token.isdigit()):
         return Confidence.NONE
     entropy = shannon_entropy(token)
-    if HEX.fullmatch(token) and size >= 32 and entropy >= 3.2:
+    if HEX.fullmatch(token) and size >= 32 and entropy >= 3.0:
         return Confidence.MEDIUM  # Includes hex keys and hashes: intentional caution
     classes = sum((
         any(c.islower() for c in token),
