@@ -7,6 +7,12 @@ on:
       - "clipmint/app.py"
       - "clipmint/recording_ui.py"
       - ".github/workflows/ui-preview.yml"
+  pull_request:
+    paths:
+      - "tools/render_ui_preview.py"
+      - "clipmint/app.py"
+      - "clipmint/recording_ui.py"
+      - ".github/workflows/ui-preview.yml"
   workflow_dispatch:
 permissions:
   contents: write
@@ -32,15 +38,19 @@ jobs:
           xvfb-run -a -s "-screen 0 1280x850x24" python -m tools.render_ui_preview docs/clipmint-ui-preview.png
           file docs/clipmint-*-preview.png
           for img in docs/clipmint-*-preview.png; do base64 -w 0 "$img" > "$img.b64"; done
-      - name: Commit preview image back to repository
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Commit changed previews on main only
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add docs/clipmint-*-preview.png docs/clipmint-*-preview.png.b64
-          git commit -m "Refresh ClipMint Qt UI screenshots after interface changes"
-          git push
+          if git diff --cached --quiet; then
+            echo "Preview matches committed images; no commit needed."
+          else
+            git commit -m "Refresh ClipMint Qt UI screenshots after interface changes"
+            git pull --rebase origin main
+            git push origin HEAD:main
+          fi
       - uses: actions/upload-artifact@v4
         with:
           name: clipmint-ui-preview
