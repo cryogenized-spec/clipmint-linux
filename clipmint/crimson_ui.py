@@ -514,16 +514,16 @@ def build_crimson_ui(w, image_preview_class):
     nav=QVBoxLayout(dock)
     nav.setContentsMargins(8,12,8,10)
     nav.setSpacing(5)
-    nav.addWidget(make_label("MODULES","dockHeading"))
+    nav.addWidget(make_label("MODULES / 機能","dockHeading"))
     w.nav_buttons={}
-    # Names identify the actual action behind each illustrated dock entry.
-    # The top-level wording follows the approved gothic-archive mockup.
+    # Every item uses an explicit English action and a matching Japanese label.
+    # Short Japanese names keep both lines legible inside the 144px dock.
     for i,(label,icon,display,subtitle) in enumerate((
         ("Clipboard","▤","Clipboard","クリップボード"),
-        ("Screenshots","▣","Archive","SCREENSHOTS"),
-        ("Recordings","◉","Capture","RECORDINGS"),
-        ("Secrets & Variables","♢","Collections","VAULT"),
-        ("Autosort","⇄","Tools","AUTOSORT"),
+        ("Screenshots","▣","Screenshots","撮影画像"),
+        ("Recordings","◉","Recordings","画面録画"),
+        ("Secrets & Variables","♢","Vault","秘密保管庫"),
+        ("Autosort","⇄","Autosort","自動仕分け"),
         ("Settings","⚙","Settings","設定"),
     )):
         btn=QPushButton(f"{icon}   {display}\n      {subtitle}")

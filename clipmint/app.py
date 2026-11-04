@@ -9,7 +9,7 @@ import sqlite3
 import subprocess
 import sys
 
-from PySide6.QtCore import Qt, QByteArray, QBuffer, QIODevice, QTimer, QSettings
+from PySide6.QtCore import Qt, QByteArray, QBuffer, QIODevice, QTimer, QSettings, QSize
 from PySide6.QtGui import QImage, QFont, QPixmap, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QDialog, QFrame, QHBoxLayout, QInputDialog,
@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
     QMenu, QMessageBox, QPushButton, QStyle, QSystemTrayIcon,
     QTabBar, QToolButton, QVBoxLayout, QWidget, QStackedWidget, QSizePolicy,
     QKeySequenceEdit, QGroupBox, QCheckBox, QDialogButtonBox,
-    QFormLayout, QAbstractItemView, QFileDialog, QScrollArea,
+    QFormLayout, QAbstractItemView, QFileDialog, QScrollArea, QListView,
 )
 
 from .branding import ChromaticWordmark, register_display_font
@@ -32,6 +32,7 @@ from .smart_types import (SMART_TYPES, TYPE_BY_KEY, DEFAULT_BINS as SMART_BINS,
 from .vault import Vault, VaultError
 from .screenshot_editor import installed_editors, resolve_editor, open_image_editor
 from .screenshot_notice import ScreenshotNotice
+from .screenshot_gallery import read_screenshot, screenshot_thumbnail_icon, PREVIEW_SIZE
 from .clipboard_formats import from_mime, is_concealed, sensitive_text, mime_from_entry
 from .foreground_privacy import blocked_foreground, DEFAULT_BLOCKED
 from .ocr import OcrWorker
@@ -39,7 +40,8 @@ from .quick_popup import QuickPopup, paste_to_window
 from .productivity import PasteQueue
 from .organizer_ui import TemplatesDialog, TransformDialog
 from .single_instance import InstanceServer, send_command
-from .cinnamon_hotkey import install_shortcut, ShortcutSetupError
+from .cinnamon_hotkey import (install_shortcut, restore_screenshot_takeover,
+                              shortcut_conflicts, ShortcutSetupError)
 from .secure_history import (EncryptedClipStore, HistorySecurityError,
                              key_from_secret_service, secure_path)
 from .archive_backup import backup_archive, ArchiveBackupError
@@ -190,6 +192,7 @@ class ClipMintWindow(QMainWindow):
         self._closing = False
         self._ignore_next_clipboard_change = False
         self._last_screenshot_path = None
+        self._screenshot_thumbnail_generation = 0
         self._ocr_workers = set()
         self._last_tray_notification = None
         self._screenshot_notice_token = 0
@@ -357,24 +360,105 @@ class ClipMintWindow(QMainWindow):
 
     def build_library_page(self, kind: str):
         page = QWidget()
+        page.setObjectName("captureLibraryPage")
         layout = QVBoxLayout(page)
-        heading = QLabel(f"{kind} · saved locally")
+        layout.setContentsMargins(18, 17, 18, 17)
+        layout.setSpacing(10)
+
+        eyebrow = QLabel("ARCHIVE / SCREENSHOTS" if kind == "Screenshots"
+                         else "ARCHIVE / RECORDINGS")
+        eyebrow.setObjectName("captureEyebrow")
+        layout.addWidget(eyebrow)
+        heading = QLabel("Screenshot archive" if kind == "Screenshots"
+                         else "Recording archive")
         heading.setObjectName("sectionTitle")
         layout.addWidget(heading)
+        hint = QLabel("Select an image to inspect it here. Double-click to open it."
+                      if kind == "Screenshots"
+                      else "Your locally recorded MP4 and GIF files.")
+        hint.setObjectName("captureHint")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+
         listing = QListWidget()
         listing.itemDoubleClicked.connect(self.open_saved_file)
         if kind == "Screenshots":
+            listing.setObjectName("screenshotGallery")
+            listing.setViewMode(QListView.ViewMode.IconMode)
+            listing.setResizeMode(QListView.ResizeMode.Adjust)
+            listing.setMovement(QListView.Movement.Static)
+            listing.setWrapping(True)
+            listing.setWordWrap(True)
+            listing.setIconSize(QSize(204, 126))
+            listing.setGridSize(QSize(230, 172))
+            listing.setSpacing(6)
+            listing.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
             listing.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
             listing.customContextMenuRequested.connect(self.screenshot_context_menu)
-        layout.addWidget(listing, 1)
+            listing.currentItemChanged.connect(
+                lambda item, _previous: self.preview_saved_screenshot(item)
+            )
+
+            content = QHBoxLayout()
+            content.setSpacing(12)
+            content.addWidget(listing, 3)
+
+            panel = QFrame()
+            panel.setObjectName("capturePreviewPane")
+            panel.setMinimumWidth(220)
+            panel.setMaximumWidth(410)
+            details = QVBoxLayout(panel)
+            details.setContentsMargins(12, 12, 12, 12)
+            details.setSpacing(9)
+            title = QLabel("SELECTED FRAME / プレビュー")
+            title.setObjectName("captureEyebrow")
+            details.addWidget(title)
+
+            self.screenshot_preview_image = ImagePreviewLabel()
+            self.screenshot_preview_image.setObjectName("screenshotLargePreview")
+            self.screenshot_preview_image.setMinimumHeight(165)
+            details.addWidget(self.screenshot_preview_image, 1)
+            self.screenshot_filename = QLabel("Select a screenshot")
+            self.screenshot_filename.setWordWrap(True)
+            self.screenshot_filename.setObjectName("captureFilename")
+            details.addWidget(self.screenshot_filename)
+            self.screenshot_details = QLabel("No screenshot selected")
+            self.screenshot_details.setObjectName("captureDetails")
+            self.screenshot_details.setWordWrap(True)
+            details.addWidget(self.screenshot_details)
+
+            actions = QHBoxLayout()
+            actions.setSpacing(6)
+            for label, handler in (
+                ("Open", self.open_selected_screenshot),
+                ("Edit", self.edit_selected_screenshot),
+                ("OCR", self.ocr_selected_screenshot),
+            ):
+                button = QPushButton(label)
+                button.setObjectName("captureAction")
+                button.clicked.connect(handler)
+                actions.addWidget(button)
+            details.addLayout(actions)
+            content.addWidget(panel, 2)
+            layout.addLayout(content, 1)
+            self.screenshot_count = QLabel("0 screenshots")
+            self.screenshot_count.setObjectName("captureDetails")
+            layout.addWidget(self.screenshot_count)
+        else:
+            listing.setObjectName("recordingLibrary")
+            layout.addWidget(listing, 1)
+
         path = screenshots_dir() if kind == "Screenshots" else recordings_dir()
         bottom = QHBoxLayout()
-        refresh = QPushButton("Refresh")
+        refresh = QPushButton("Refresh archive")
+        refresh.setObjectName("captureAction")
         refresh.clicked.connect(lambda: self.refresh_library(kind))
         bottom.addWidget(refresh)
         folder = QPushButton("Open folder")
+        folder.setObjectName("captureAction")
         folder.clicked.connect(lambda: self.open_folder(path))
         bottom.addWidget(folder)
+        bottom.addStretch()
         layout.addLayout(bottom)
         if not hasattr(self, "libraries"):
             self.libraries = {}
@@ -605,17 +689,41 @@ class ClipMintWindow(QMainWindow):
                 QLineEdit.EchoMode.Normal if checked else QLineEdit.EchoMode.Password
             )
         )
+        # Copy the full value directly from the unlocked vault, regardless
+        # of cursor position, text selection or masked display state.
+        copy_button = QPushButton("Copy")
+        copy_button.setObjectName("vaultRevealCopy")
+        copy_button.setToolTip("Copy the complete value without revealing it")
+        copy_button.clicked.connect(
+            lambda _checked=False: self.copy_specific_vault_value(
+                entry_id, feedback_button=copy_button
+            )
+        )
         close = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         close.rejected.connect(dialog.reject)
         form.addRow("Value", field)
         form.addRow("", reveal)
+        form.addRow("Clipboard", copy_button)
+        clipboard_note = QLabel("Clipboard clears after 30 seconds if unchanged.")
+        clipboard_note.setObjectName("captureDetails")
+        form.addRow("", clipboard_note)
         form.addRow(close)
         dialog.exec()
         field.clear()
 
-    def copy_vault_value(self):
+    def copy_vault_value(self, *_args):
+        """Copy from the main vault list without relying on selected text."""
         entry_id = self.selected_vault_id()
-        if entry_id is None or not self.vault.unlocked:
+        if entry_id is not None:
+            self.copy_specific_vault_value(
+                entry_id, feedback_button=self.vault_actions.get("copy")
+            )
+
+    def copy_specific_vault_value(
+        self, entry_id: str, *, feedback_button: QPushButton | None = None
+    ) -> None:
+        """Copy the entire decrypted value; never add it to clipboard history."""
+        if not self.vault.unlocked:
             return
         try:
             value = self.vault.get_value(entry_id)
@@ -623,17 +731,32 @@ class ClipMintWindow(QMainWindow):
             self.error("Vault", str(exc))
             return
         self.touch_vault()
-        # Never route a deliberate secret copy through clipboard history.
         self._vault_clipboard_text = value
         self._vault_clipboard_token += 1
         token = self._vault_clipboard_token
         self._ignore_next_clipboard_change = True
         QApplication.clipboard().setText(value)
         QTimer.singleShot(30000, lambda: self.expire_vault_clipboard(token))
-        self.statusBar().showMessage(
-            "Value copied · clipboard will clear after 30 seconds if unchanged",
-            5000,
-        )
+
+        if feedback_button is not None:
+            feedback_button.setText("✓ Copied!")
+            feedback_button.setAccessibleName("Copied!")
+            # A timer owned by the button can't update a closed dialog.
+            timer = getattr(feedback_button, "_clipmint_copy_timer", None)
+            if timer is None:
+                timer = QTimer(feedback_button)
+                timer.setSingleShot(True)
+                timer.timeout.connect(
+                    lambda: self.reset_vault_copy_feedback(feedback_button)
+                )
+                feedback_button._clipmint_copy_timer = timer
+            timer.start(1800)
+        self.statusBar().showMessage("Copied!", 3000)
+
+    @staticmethod
+    def reset_vault_copy_feedback(button: QPushButton) -> None:
+        button.setText("Copy")
+        button.setAccessibleName("Copy full value")
 
     def expire_vault_clipboard(self, token: int):
         if token != self._vault_clipboard_token:
@@ -1128,6 +1251,55 @@ class ClipMintWindow(QMainWindow):
         popup_controls.addWidget(self.popup_paste_choice)
         layout.addWidget(popup_group)
 
+        # The in-window Ctrl+Shift+S cannot replace Cinnamon shortcuts.
+        # Register an independent system-wide command only on explicit request.
+        global_screenshot_group = QGroupBox("Screenshot area · global shortcut")
+        global_screenshot_layout = QVBoxLayout(global_screenshot_group)
+        global_screenshot_help = QLabel(
+            "Cinnamon owns system-wide shortcuts. Register Ctrl+Shift+S here "
+            "to use ClipMint's region selector even when another app is focused. "
+            "If Cinnamon's built-in screenshot action owns the combination, "
+            "ClipMint will ask before taking it over, preserve its other "
+            "shortcuts and save a reversible backup."
+        )
+        global_screenshot_help.setWordWrap(True)
+        global_screenshot_layout.addWidget(global_screenshot_help)
+        self.global_screenshot_hotkey = QKeySequenceEdit()
+        self.global_screenshot_hotkey.setKeySequence(QKeySequence(str(
+            self.settings.value("capture/global_shortcut", "Ctrl+Shift+S")
+        )))
+        global_screenshot_layout.addWidget(self.global_screenshot_hotkey)
+        screenshot_register = QPushButton("Register screenshot shortcut in Cinnamon…")
+        screenshot_register.setObjectName("captureAction")
+        screenshot_register.clicked.connect(self.register_cinnamon_screenshot_hotkey)
+        global_screenshot_layout.addWidget(screenshot_register)
+        restore_screenshot = QPushButton("Restore previous Cinnamon screenshot binding…")
+        restore_screenshot.clicked.connect(self.restore_cinnamon_screenshot_hotkey)
+        global_screenshot_layout.addWidget(restore_screenshot)
+        layout.addWidget(global_screenshot_group)
+
+        global_record_group = QGroupBox("Recording area · global shortcut")
+        global_record_layout = QVBoxLayout(global_record_group)
+        global_record_help = QLabel(
+            "Optionally assign Ctrl+Shift+R system-wide to ClipMint's MP4 "
+            "region recorder. Desktop or other custom bindings are not "
+            "silently replaced."
+        )
+        global_record_help.setWordWrap(True)
+        global_record_layout.addWidget(global_record_help)
+        self.global_record_hotkey = QKeySequenceEdit()
+        self.global_record_hotkey.setKeySequence(QKeySequence(str(
+            self.settings.value("capture/global_record_shortcut", "Ctrl+Shift+R")
+        )))
+        global_record_layout.addWidget(self.global_record_hotkey)
+        global_record_button = QPushButton("Register recording shortcut in Cinnamon…")
+        global_record_button.clicked.connect(self.register_cinnamon_recording_hotkey)
+        global_record_layout.addWidget(global_record_button)
+        layout.addWidget(global_record_group)
+        audit_button = QPushButton("Check Cinnamon hotkey assignments…")
+        audit_button.clicked.connect(self.audit_global_hotkeys)
+        layout.addWidget(audit_button)
+
         privacy_group = QGroupBox("Clipboard privacy")
         privacy_layout = QVBoxLayout(privacy_group)
         privacy_message = QLabel(
@@ -1338,17 +1510,118 @@ class ClipMintWindow(QMainWindow):
         elif index == 0:
             self.refresh()
 
-    def refresh_library(self, kind: str):
+    def refresh_library(self, kind: str, select_path: Path | None = None):
         listing = self.libraries[kind]
+        current = listing.currentItem()
+        selected_path = (str(select_path) if select_path is not None
+                         else current.data(Qt.ItemDataRole.UserRole) if current else None)
+        if kind == "Screenshots":
+            self._screenshot_thumbnail_generation += 1
+            generation = self._screenshot_thumbnail_generation
+        else:
+            generation = -1
+        listing.blockSignals(True)
         listing.clear()
         folder = screenshots_dir() if kind == "Screenshots" else recordings_dir()
         formats = (".png",) if kind == "Screenshots" else (".mp4", ".gif")
-        for path in sorted(folder.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
-            if path.suffix.lower() not in formats or path.name.startswith("."):
+        # Files may disappear mid-refresh (e.g. renamed by the image editor).
+        dated_paths = []
+        for candidate in folder.iterdir():
+            try:
+                if (candidate.suffix.lower() in formats
+                        and not candidate.name.startswith(".")
+                        and candidate.is_file()):
+                    dated_paths.append((candidate.stat().st_mtime, candidate))
+            except OSError:
                 continue
-            item = QListWidgetItem(path.name)
+        dated_paths.sort(key=lambda pair: pair[0], reverse=True)
+        paths = [path for _modified, path in dated_paths]
+        thumbnail_rows = []
+        preferred = None
+        for path in paths:
+            item = QListWidgetItem(path.stem if kind == "Screenshots" else path.name)
             item.setData(Qt.ItemDataRole.UserRole, str(path))
+            item.setToolTip(path.name)
             listing.addItem(item)
+            if kind == "Screenshots":
+                thumbnail_rows.append((item, path))
+            if selected_path == str(path):
+                preferred = item
+        listing.blockSignals(False)
+        if kind == "Screenshots":
+            self.screenshot_count.setText(
+                f"{len(paths)} saved screenshot{'s' if len(paths) != 1 else ''}"
+            )
+            if preferred is None and listing.count():
+                preferred = listing.item(0)
+            if preferred is not None:
+                listing.setCurrentItem(preferred)
+            else:
+                self.preview_saved_screenshot(None)
+            self._paint_screenshot_thumbnails(thumbnail_rows, generation)
+
+    def _paint_screenshot_thumbnails(self, rows, generation: int):
+        """Decode in small event-loop batches so large archives stay responsive."""
+        if generation != self._screenshot_thumbnail_generation:
+            return
+        listing = self.libraries.get("Screenshots")
+        for item, path in rows[:8]:
+            if item.listWidget() is not listing:
+                continue
+            icon = screenshot_thumbnail_icon(path)
+            if icon is not None:
+                item.setIcon(icon)
+        if len(rows) > 8:
+            QTimer.singleShot(0, lambda: self._paint_screenshot_thumbnails(
+                rows[8:], generation
+            ))
+
+    def preview_saved_screenshot(self, item):
+        preview = self.screenshot_preview_image
+        preview.clear_image()
+        if item is None:
+            self.screenshot_filename.setText("Select a screenshot")
+            self.screenshot_details.setText("No screenshot selected")
+            return
+        target = Path(item.data(Qt.ItemDataRole.UserRole))
+        self.screenshot_filename.setText(target.name)
+        result = read_screenshot(target, PREVIEW_SIZE)
+        if result is None:
+            self.screenshot_details.setText("Preview unavailable · use Open folder")
+            return
+        image, dimensions = result
+        preview.show_image(image)
+        try:
+            size_kib = target.stat().st_size / 1024
+        except OSError:
+            size_kib = 0
+        self.screenshot_details.setText(
+            f"{dimensions.width()} × {dimensions.height()} px   ·   {size_kib:,.0f} KiB"
+        )
+
+    def selected_screenshot_path(self) -> Path | None:
+        listing = self.libraries.get("Screenshots")
+        item = listing.currentItem() if listing is not None else None
+        if item is None:
+            return None
+        path = Path(item.data(Qt.ItemDataRole.UserRole))
+        return path if path.is_file() and path.suffix.lower() == ".png" else None
+
+    def open_selected_screenshot(self):
+        path = self.selected_screenshot_path()
+        if path is not None:
+            self.open_path(path)
+
+    def edit_selected_screenshot(self):
+        path = self.selected_screenshot_path()
+        if path is not None:
+            self._last_screenshot_path = path
+            self.edit_last_screenshot()
+
+    def ocr_selected_screenshot(self):
+        path = self.selected_screenshot_path()
+        if path is not None:
+            self.start_ocr_file(path)
 
     def open_saved_file(self, item):
         target = Path(item.data(Qt.ItemDataRole.UserRole))
@@ -1946,6 +2219,128 @@ class ClipMintWindow(QMainWindow):
         self.settings.setValue("popup/global_shortcut", sequence)
         self.inform("Cinnamon shortcut", f"Registered {sequence} ({accel})")
 
+    def _clipmint_launcher_command(self, action: str) -> str:
+        """Match the installed app launcher; never shell-expand user content."""
+        executable = (shlex.quote(sys.executable)
+                      if getattr(sys, "frozen", False) else
+                      shlex.quote(sys.executable) + " " +
+                      shlex.quote(str(Path(__file__).resolve().parent.parent / "launcher.py")))
+        return executable + " " + action
+
+    def register_cinnamon_screenshot_hotkey(self):
+        sequence = self.global_screenshot_hotkey.keySequence().toString(
+            QKeySequence.SequenceFormat.PortableText
+        )
+        if not sequence:
+            self.error("Cinnamon screenshot shortcut", "Choose a keyboard shortcut first")
+            return
+        command = self._clipmint_launcher_command("--screenshot-area")
+        try:
+            accel = install_shortcut(command, sequence, name="ClipMint screenshot area")
+        except ShortcutSetupError as exc:
+            if "Explicit permission" not in str(exc):
+                self.error("Cinnamon screenshot shortcut", str(exc))
+                return
+            reply = QMessageBox.question(
+                self, "Give ClipMint screenshot priority?",
+                "Cinnamon already uses this combination for its own screenshot "
+                "tool. Give this combination to ClipMint instead?\n\n"
+                "Only the conflicting built-in screenshot binding will be "
+                "disabled; its other key combinations will be preserved. "
+                "The original is saved for restoration. This changes your "
+                "desktop shortcut configuration, not ClipMint's window-only keys.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+            try:
+                accel = install_shortcut(
+                    command, sequence, name="ClipMint screenshot area",
+                    take_over_screenshot=True,
+                )
+            except ShortcutSetupError as retry:
+                self.error("Cinnamon screenshot shortcut", str(retry))
+                return
+        self.settings.setValue("capture/global_shortcut", sequence)
+        self.inform("Cinnamon shortcut", f"ClipMint screenshot registered: {sequence}")
+
+    def restore_cinnamon_screenshot_hotkey(self):
+        sequence = str(self.settings.value("capture/global_shortcut", "Ctrl+Shift+S"))
+        command = self._clipmint_launcher_command("--screenshot-area")
+        reply = QMessageBox.question(
+            self, "Restore Cinnamon screenshot shortcut?",
+            "Remove ClipMint's registered screenshot key and restore the "
+            "previous built-in screenshot assignment from the local backup? "
+            "Existing user edits will not be overwritten.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            restored = restore_screenshot_takeover(command, sequence)
+        except ShortcutSetupError as exc:
+            self.error("Cinnamon screenshot restoration", str(exc))
+            return
+        self.inform("Cinnamon shortcut",
+                    "Previous screenshot assignment restored"
+                    if restored else "No ClipMint takeover backup found")
+
+    def register_cinnamon_recording_hotkey(self):
+        sequence = self.global_record_hotkey.keySequence().toString(
+            QKeySequence.SequenceFormat.PortableText
+        )
+        if not sequence:
+            self.error("Cinnamon recording shortcut", "Choose a keyboard shortcut first")
+            return
+        command = self._clipmint_launcher_command("--record-area")
+        try:
+            install_shortcut(command, sequence, name="ClipMint record area")
+        except ShortcutSetupError as exc:
+            self.error("Cinnamon recording shortcut", str(exc))
+            return
+        self.settings.setValue("capture/global_record_shortcut", sequence)
+        self.inform("Cinnamon shortcut", f"ClipMint recorder registered: {sequence}")
+
+    def audit_global_hotkeys(self):
+        """Read-only report of who currently owns our configured global keys."""
+        configured = (
+            ("Screenshot", str(self.settings.value(
+                "capture/global_shortcut", "Ctrl+Shift+S"
+            )), self._clipmint_launcher_command("--screenshot-area")),
+            ("Recording", str(self.settings.value(
+                "capture/global_record_shortcut", "Ctrl+Shift+R"
+            )), self._clipmint_launcher_command("--record-area")),
+            ("Clipboard popup", str(self.settings.value(
+                "popup/global_shortcut", "Ctrl+Alt+V"
+            )), self._clipmint_launcher_command("--toggle")),
+        )
+        report = []
+        for title, sequence, expected_command in configured:
+            try:
+                found = shortcut_conflicts(sequence)
+            except ShortcutSetupError as exc:
+                report.append(f"{title} · {sequence}: cannot inspect ({exc})")
+                continue
+            ours = [x for x in found if x["source"] == "custom"
+                    and x.get("command") == expected_command]
+            others = [x for x in found if x not in ours]
+            if ours and not others:
+                result = "Assigned to ClipMint in Cinnamon"
+            elif others:
+                result = "Conflict · another Cinnamon shortcut is assigned"
+            else:
+                result = "Not registered as a Cinnamon global shortcut"
+            report.append(f"{title} · {sequence}: {result}")
+        QMessageBox.information(
+            self, "ClipMint · Cinnamon hotkeys",
+            "\n".join(report) +
+            "\n\nThis verifies Cinnamon assignments, not whether another "
+            "application, extension or external shortcut daemon intercepts "
+            "the same key. Confirm by pressing each shortcut outside ClipMint.",
+        )
+
     def toggle_quick_popup(self):
         self.quick_popup.toggle()
 
@@ -2212,7 +2607,8 @@ class ClipMintWindow(QMainWindow):
         QApplication.clipboard().setImage(pixmap.toImage())
         self.show_window()
         self.notify_screenshot_captured(path)
-        self.refresh_library("Screenshots")
+        # If the user visits the archive after capturing, preselect the new PNG.
+        self.refresh_library("Screenshots", select_path=path)
 
     def notify_screenshot_captured(self, path: Path):
         """Notify only after a PNG was saved successfully to disk."""
@@ -2388,12 +2784,15 @@ def main():
     if sys.platform != "linux":
         raise SystemExit("ClipMint currently supports Linux only")
     arguments = sys.argv[1:]
+    capture = ("screenshot-area" if "--screenshot-area" in arguments else
+               "record-area" if "--record-area" in arguments else None)
     hidden = "--hidden" in arguments and not (
-        "--toggle" in arguments or "--quit" in arguments
+        capture or "--toggle" in arguments or "--quit" in arguments
     )
-    command = "toggle" if "--toggle" in arguments else (
-        "quit" if "--quit" in arguments else ("ping" if hidden else "show")
-    )
+    command = (capture if capture else
+               "toggle" if "--toggle" in arguments else
+               "quit" if "--quit" in arguments else
+               "ping" if hidden else "show")
     # Every invocation first signals an existing instance. The running daemon
     # owns the clipboard; --toggle never starts a second clipboard watcher.
     app = QApplication([sys.argv[0]])
@@ -2412,6 +2811,10 @@ def main():
             window.toggle_quick_popup()
         elif action == "show":
             window.show_window()
+        elif action == "screenshot-area":
+            QTimer.singleShot(0, window.choose_screenshot)
+        elif action == "record-area":
+            QTimer.singleShot(0, lambda: window.choose_recording("MP4"))
         elif action == "quit":
             window.quit_app()
     try:
@@ -2423,6 +2826,12 @@ def main():
         return
     if command == "toggle":
         QTimer.singleShot(150, window.toggle_quick_popup)
+    elif command in ("screenshot-area", "record-area"):
+        window.show()
+        if command == "screenshot-area":
+            QTimer.singleShot(150, window.choose_screenshot)
+        else:
+            QTimer.singleShot(150, lambda: window.choose_recording("MP4"))
     elif hidden and window.tray is not None:
         # Login startup stays headless but is reachable through the tray.
         app.setQuitOnLastWindowClosed(False)

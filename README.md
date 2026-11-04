@@ -318,6 +318,89 @@ confirm all three checks are green. The release remains a development preview
 until actual Cinnamon/X11 field acceptance and security review are complete.
 
 
+## Screenshots gallery visual review (development only)
+
+The separate \`feat/screenshot-gallery-preview\` review branch replaces the
+filename-only Screenshots screen with an in-app PNG thumbnail grid and a
+larger, aspect-preserving preview for the selected screenshot. Dimensions
+and local file size appear below the preview. Double-click still opens the
+file in its normal desktop application, and the selected-image **Open**,
+**Edit** and **OCR** controls reuse the existing behaviours. The existing
+Recordings page remains a filename list but now shares the same burgundy,
+rose-gold and ivory archive styling.
+
+Thumbnails are decoded locally in short batches, with image dimensions and
+file size bounded to avoid unresponsive loading from damaged or enormous
+screenshots. No images are uploaded, copied into clipboard history, or
+changed on disk. Existing PNG files remain in \`~/Pictures/ClipMint\`.
+Large/invalid files may show a preview-unavailable message; they remain
+accessible in their original folder.
+
+**This is a draft UI revision, not an installed update.** The
+\`Review ClipMint screenshot gallery\` workflow runs Qt tests and publishes
+a screenshot of the actual Qt screen using only synthetic image fixtures.
+Review the rendered preview and test with real screenshots on Linux Mint
+before merging or packaging a new release.
+
+
+### Bilingual sidebar and Cinnamon screenshot keyboard shortcut (review branch)
+
+All six sidebar entries now have a consistent English section name and a
+short corresponding Japanese subtitle: Clipboard / クリップボード,
+Screenshots / 撮影画像, Recordings / 画面録画,
+Vault / 秘密保管庫, Autosort / 自動仕分け, Settings / 設定.
+
+**Ctrl+Shift+S** configured in the old Settings → Keyboard shortcuts is a
+*window-local* Qt shortcut, not an OS-wide replacement. This branch adds
+a separate **Settings → Screenshot area · global shortcut** control.
+Click **Register screenshot shortcut in Cinnamon…** to explicitly bind
+the chosen global key to \`/opt/clipmint/ClipMint --screenshot-area\`.
+The command sends a local \`screenshot-area\` instruction to the existing
+ClipMint process; if ClipMint is not running, it starts ClipMint and opens
+its own area selector. It does **not** launch the default screenshot utility.
+
+ClipMint never silently overrides another shortcut. It checks the Cinnamon
+media-key, window-manager and custom-shortcut registries before registering
+and verifies the final binding afterward. If a **built-in screenshot** action
+owns the desired shortcut, ClipMint explicitly asks whether to give it priority.
+If approved, only the conflicting combination is disabled, all other keys
+remain assigned as before, and a local restoration backup is written to
+`~/.config/clipmint/cinnamon-keybinding-backups.json`. Use **Restore previous
+Cinnamon screenshot binding…** to reverse the takeover (unless an independent
+user edit would be overwritten). Other system or custom shortcut conflicts
+require manual reassignment in **System Settings → Keyboard → Shortcuts**.
+
+The new optional global **recording** shortcut (`Ctrl+Shift+R`) starts MP4
+region selection from outside ClipMint. The clipboard popup global shortcut
+(`Ctrl+Alt+V`) continues to open quick search. In-app search, copy and
+monitoring shortcuts intentionally remain *window-local*: taking global
+ownership of Ctrl+F and Ctrl+C would disrupt other applications.
+
+Use **Check Cinnamon hotkey assignments…** for a read-only report of the
+screenshot, recording and popup shortcuts. A Cinnamon global keybinding
+normally takes precedence over a focused application's local hotkeys, but
+another shortcut daemon or desktop extension may still interfere. Test by
+pressing the keys while another app is focused on your Linux Mint Cinnamon
+X11 desktop. No shortcuts are replaced during installation without approval.
+
+
+### Vault: one-click masked copy (review)
+
+After unlocking the encrypted vault, select an entry and choose **Reveal**.
+The value remains hidden as password dots unless **Show value** is explicitly
+enabled. The dialog now includes its own **Copy** button, which copies the
+**entire** saved value without needing to select any characters, even while
+the value remains masked.
+
+The existing Copy action in the vault list uses the same full-value clipboard
+path. Both show a temporary check mark (\`✓ Copied!\`) on the clicked button
+and the status bar shows only \`Copied!\`. The clipboard is cleared after
+30 seconds **only if its contents are unchanged**; copying from the vault
+never adds the value to the normal ClipMint history or search index.
+The usual X11 clipboard-security limitation still applies while the value
+is available for pasting. These changes do not alter the vault encryption.
+
+
 ## Clipboard secret-detection hardening — review branch
 
 The proposed \`fix/clipboard-secret-detection\` branch adds a single, local detector

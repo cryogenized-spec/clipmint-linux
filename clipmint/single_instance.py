@@ -6,7 +6,7 @@ from PySide6.QtCore import QObject
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 
 SERVER_NAME = "clipmint-single-instance-" + str(os.getuid())
-VALID_COMMANDS = {"toggle", "show", "quit", "ping"}
+VALID_COMMANDS = {"toggle", "show", "quit", "ping", "screenshot-area", "record-area"}
 
 
 def send_command(command: str, timeout_ms: int = 350) -> bool:
