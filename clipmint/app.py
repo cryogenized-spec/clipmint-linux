@@ -1063,6 +1063,29 @@ class ClipMintWindow(QMainWindow):
         popup_controls.addWidget(self.popup_paste_choice)
         layout.addWidget(popup_group)
 
+        # The in-window Ctrl+Shift+S cannot replace Cinnamon shortcuts.
+        # Register an independent system-wide command only on explicit request.
+        global_screenshot_group = QGroupBox("Screenshot area · global shortcut")
+        global_screenshot_layout = QVBoxLayout(global_screenshot_group)
+        global_screenshot_help = QLabel(
+            "Ctrl+Shift+S is initially a ClipMint window-only shortcut. "
+            "Register a separate Cinnamon global shortcut to capture from other "
+            "applications. If another desktop action owns it, resolve that "
+            "conflict under System Settings → Keyboard → Shortcuts first."
+        )
+        global_screenshot_help.setWordWrap(True)
+        global_screenshot_layout.addWidget(global_screenshot_help)
+        self.global_screenshot_hotkey = QKeySequenceEdit()
+        self.global_screenshot_hotkey.setKeySequence(QKeySequence(str(
+            self.settings.value("capture/global_shortcut", "Ctrl+Shift+S")
+        )))
+        global_screenshot_layout.addWidget(self.global_screenshot_hotkey)
+        screenshot_register = QPushButton("Register screenshot shortcut in Cinnamon…")
+        screenshot_register.setObjectName("captureAction")
+        screenshot_register.clicked.connect(self.register_cinnamon_screenshot_hotkey)
+        global_screenshot_layout.addWidget(screenshot_register)
+        layout.addWidget(global_screenshot_group)
+
         privacy_group = QGroupBox("Clipboard privacy")
         privacy_layout = QVBoxLayout(privacy_group)
         privacy_message = QLabel(
@@ -1914,6 +1937,27 @@ class ClipMintWindow(QMainWindow):
         self.settings.setValue("popup/global_shortcut", sequence)
         self.inform("Cinnamon shortcut", f"Registered {sequence} ({accel})")
 
+    def register_cinnamon_screenshot_hotkey(self):
+        """Register a global Cinnamon key without replacing existing bindings."""
+        sequence = self.global_screenshot_hotkey.keySequence().toString(
+            QKeySequence.SequenceFormat.PortableText
+        )
+        if not sequence:
+            self.error("Cinnamon screenshot shortcut", "Choose a keyboard shortcut first")
+            return
+        executable = (shlex.quote(sys.executable)
+                      if getattr(sys, "frozen", False) else
+                      shlex.quote(sys.executable) + " " +
+                      shlex.quote(str(Path(__file__).resolve().parent.parent / "launcher.py")))
+        command = executable + " --screenshot-area"
+        try:
+            accel = install_shortcut(command, sequence, name="ClipMint screenshot area")
+        except ShortcutSetupError as exc:
+            self.error("Cinnamon screenshot shortcut", str(exc))
+            return
+        self.settings.setValue("capture/global_shortcut", sequence)
+        self.inform("Cinnamon screenshot shortcut", f"Registered {sequence} ({accel})")
+
     def toggle_quick_popup(self):
         self.quick_popup.toggle()
 
@@ -2217,9 +2261,10 @@ class ClipMintWindow(QMainWindow):
 def main():
     if sys.platform != "linux":
         raise SystemExit("ClipMint currently supports Linux only")
-    command = "toggle" if "--toggle" in sys.argv[1:] else (
-        "quit" if "--quit" in sys.argv[1:] else "show"
-    )
+    args = sys.argv[1:]
+    command = ("screenshot-area" if "--screenshot-area" in args else
+               "toggle" if "--toggle" in args else
+               "quit" if "--quit" in args else "show")
     # Every invocation first signals an existing instance. The running daemon
     # owns the clipboard; --toggle never starts a second clipboard watcher.
     app = QApplication([sys.argv[0]])
@@ -2238,6 +2283,8 @@ def main():
             window.toggle_quick_popup()
         elif action == "show":
             window.show_window()
+        elif action == "screenshot-area":
+            QTimer.singleShot(0, window.choose_screenshot)
         elif action == "quit":
             window.quit_app()
     try:
@@ -2247,6 +2294,9 @@ def main():
         return
     if command == "toggle":
         QTimer.singleShot(150, window.toggle_quick_popup)
+    elif command == "screenshot-area":
+        window.show()
+        QTimer.singleShot(150, window.choose_screenshot)
     else:
         window.show()
     raise SystemExit(app.exec())
