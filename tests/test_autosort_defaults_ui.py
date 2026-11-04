@@ -3,12 +3,13 @@ from __future__ import annotations
 
 import os
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 import unittest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("XDG_SESSION_TYPE", "x11")
 
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMessageBox
 
 from clipmint.app import ClipMintWindow
 from clipmint.smart_types import DEFAULT_BINS
@@ -78,6 +79,17 @@ class SmartAutosortUiTests(unittest.TestCase):
                 second = None
                 third = ClipMintWindow()
                 self.assertEqual(third.autosort_rules, [])
+                self.assertFalse(third.autosort_enabled)
+                # Existing installations need an explicit, one-click way to
+                # activate the complete recommended preset collection.
+                with patch.object(
+                    QMessageBox, "question",
+                    return_value=QMessageBox.StandardButton.Yes
+                ):
+                    third.restore_autosort_defaults()
+                self.assertTrue(third.autosort_enabled)
+                self.assertTrue(third.autosort_switch.isChecked())
+                self.assertEqual(len(third.autosort_rules), 30)
             finally:
                 for window in (first, second, third):
                     if window:
