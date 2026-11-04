@@ -26,6 +26,29 @@ def _has_sidecars(target: Path) -> bool:
     )
 
 
+def _verify_safe_destination_directory(parent: Path) -> None:
+    """Reject any writable ancestor controlled by an untrusted UID.
+
+    A sticky directory owned by another UID can still be renamed by its
+    *owner*. It is not safe to stage sensitive clipboard content there even
+    when our staging directory itself is 0700. Resolve before use and refuse
+    writable ancestors which other users can replace.
+    """
+    owner = os.geteuid()
+    for ancestor in (parent, *parent.parents):
+        details = ancestor.stat()
+        mode = details.st_mode
+        shared_writes = mode & (stat.S_IWGRP | stat.S_IWOTH)
+        if not shared_writes:
+            continue
+        if not (mode & stat.S_ISVTX) or details.st_uid != owner:
+            raise ArchiveBackupError(
+                "Choose a private backup folder in your home directory. "
+                "This destination or an ancestor can be replaced by "
+                "another account."
+            )
+
+
 def backup_archive(
     active_connection: sqlite3.Connection,
     destination: Path,
@@ -45,14 +68,11 @@ def backup_archive(
     if not target.parent.is_dir():
         raise ArchiveBackupError("The selected destination folder does not exist")
 
-    parent = target.parent.resolve()
-    mode = parent.stat().st_mode
-    if ((mode & (stat.S_IWGRP | stat.S_IWOTH))
-            and not (mode & stat.S_ISVTX)):
-        raise ArchiveBackupError(
-            "Choose a private destination directory. This folder allows "
-            "other users to replace files during a backup."
-        )
+    parent = target.parent.resolve(strict=True)
+    _verify_safe_destination_directory(parent)
+    # Work with canonical directory components after safety validation.
+    # Otherwise a symlinked parent could be swapped before publication.
+    target = parent / target.name
     if active_connection.in_transaction:
         raise ArchiveBackupError(
             "An unfinished database write is blocking the backup. "
