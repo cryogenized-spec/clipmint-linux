@@ -22,6 +22,8 @@ class CinnamonShortcutTests(unittest.TestCase):
             cinnamon_accelerator("V")
         with self.assertRaises(ShortcutSetupError):
             cinnamon_accelerator("Ctrl+Alt+Something")
+        with self.assertRaisesRegex(ShortcutSetupError, "console switching"):
+            cinnamon_accelerator("Ctrl+Alt+F3")
 
     def _fake_gsettings(self, with_conflict=False):
         calls = []
