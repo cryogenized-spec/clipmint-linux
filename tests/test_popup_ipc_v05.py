@@ -53,6 +53,14 @@ class PopUpTests(unittest.TestCase):
                 if messages:
                     break
             self.assertEqual(messages, ["toggle"])
+            # Quiet login startup probes the incumbent instead of showing its UI.
+            with self.assertRaises(RuntimeError):
+                single_instance.InstanceServer(messages.append, occupied_command="ping")
+            for _ in range(15):
+                self.app.processEvents()
+                if len(messages) >= 2:
+                    break
+            self.assertEqual(messages, ["toggle", "ping"])
             server.server.close()
             single_instance.QLocalServer.removeServer(unique)
 
