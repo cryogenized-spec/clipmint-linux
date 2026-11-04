@@ -72,6 +72,9 @@ class EncryptedClipStore(ClipStore):
         self._dedup_key = key
         super().__init__(path, max_unpinned=max_unpinned, index_plaintext=False)
         os.chmod(self.path, 0o600)
+        # One-time upgrade on key unlock, not during each clipboard capture.
+        # Rows without a fingerprint predate this version.
+        self._backfill_legacy_fingerprints()
 
     def _seal(self, data: bytes, preview: str, formats: dict[str, bytes] | None) -> bytes:
         value = {
@@ -112,6 +115,35 @@ class EncryptedClipStore(ClipStore):
                    len(content).to_bytes(8, "big") + content + packed)
         return hmac.digest(self._dedup_key, message, hashlib.sha256)
 
+    def _backfill_legacy_fingerprints(self) -> None:
+        """Backfill old encrypted rows in bounded transactions, once per DB.
+
+        A crash can interrupt a batch safely; the next open resumes with
+        remaining NULL rows. No plaintext enters SQLite/FTS.
+        """
+        while True:
+            identifiers = [ident for (ident,) in self.conn.execute(
+                "SELECT id FROM clips WHERE fingerprint IS NULL LIMIT 32"
+            )]
+            if not identifiers:
+                break
+            with self.conn:
+                for ident in identifiers:
+                    row = self.conn.execute(
+                        "SELECT kind,content FROM clips WHERE id=?", (ident,)
+                    ).fetchone()
+                    if row is None:
+                        continue
+                    kind, sealed = row
+                    content, _preview, formats = self._open(bytes(sealed))
+                    fingerprint = self._encrypted_fingerprint(
+                        kind, content, formats
+                    )
+                    self.conn.execute(
+                        "UPDATE clips SET fingerprint=? WHERE id=?",
+                        (sqlite3.Binary(fingerprint), ident)
+                    )
+
     def _find_encrypted_duplicate(
         self, kind: str, content: bytes, formats: dict[str, bytes] | None,
         bin_name: str, fingerprint: bytes,
@@ -119,19 +151,18 @@ class EncryptedClipStore(ClipStore):
         expected = formats or {}
         # Efficient keyed lookup for new rows, with a lazy fallback for old
         # encrypted databases which do not yet have fingerprint metadata.
-        for where, params in (
-            ("fingerprint=?", (sqlite3.Binary(fingerprint),)),
-            ("fingerprint IS NULL", ()),
-        ):
-            rows = self.conn.execute(
-                "SELECT id,content FROM clips WHERE bin=? AND kind=? AND " + where +
-                " ORDER BY touch_seq DESC",
-                (bin_name, kind, *params)
-            )
-            for ident, sealed in rows:
-                prior_bytes, _preview, prior_formats = self._open(bytes(sealed))
-                if prior_bytes == content and prior_formats == expected:
-                    return ident
+        # A current database has all fingerprints populated, so this indexed
+        # lookup decrypts at most matching candidates, never every old row.
+        rows = self.conn.execute(
+            """SELECT id,content FROM clips
+               WHERE bin=? AND kind=? AND fingerprint=?
+               ORDER BY touch_seq DESC""",
+            (bin_name, kind, sqlite3.Binary(fingerprint))
+        )
+        for ident, sealed in rows:
+            prior_bytes, _preview, prior_formats = self._open(bytes(sealed))
+            if prior_bytes == content and prior_formats == expected:
+                return ident
         return None
 
     def add(self, kind: str, content: bytes, preview: str, bin_name="Work",
@@ -221,11 +252,20 @@ class EncryptedClipStore(ClipStore):
                     ):
                 sealed = secure._seal(bytes(content), preview,
                         bundle_from_bytes(bytes(formats) if formats else None))
+                raw_formats = bundle_from_bytes(
+                    bytes(formats) if formats else None
+                )
+                fingerprint = secure._encrypted_fingerprint(
+                    kind, bytes(content), raw_formats
+                )
                 secure.conn.execute(
                     """INSERT INTO clips
-                       (id,kind,content,formats,preview,pinned,created_at,bin,favorite)
-                       VALUES(?,?,?,NULL,?,?,?,?,?)""",
-                    (ident, kind, sealed, "🔒 Encrypted history item", pinned, date, bucket, favorite),
+                       (id,kind,content,formats,preview,pinned,created_at,bin,
+                        favorite,touch_seq,fingerprint)
+                       VALUES(?,?,?,NULL,?,?,?,?,?,?,?)""",
+                    (ident, kind, sealed, "🔒 Encrypted history item",
+                     pinned, date, bucket, favorite, ident,
+                     sqlite3.Binary(fingerprint)),
                 )
             # Copy organisational metadata and re-seal template bodies. Names
             # remain visible, while template text is encrypted in the target.
