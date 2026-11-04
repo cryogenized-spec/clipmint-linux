@@ -338,6 +338,10 @@ class ClipStore:
                 [(ident,) for ident in identifiers],
             )
             self.search_index.trim_deleted()
+        # Report committed removals before any optional compaction. Even if
+        # SQLite VACUUM fails, consumers must invalidate stale clip IDs.
+        if deleted_ids is not None:
+            deleted_ids.extend(identifiers)
         # FTS5 can retain deleted terms in shadow posting segments even after
         # the MATCH index no longer reports them. Rebuild surviving postings,
         # then reconstruct SQLite pages instead of retaining old free space.
@@ -345,8 +349,6 @@ class ClipStore:
             self.search_index.rebuild_after_purge()
             self.conn.execute("VACUUM")
         self.conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-        if deleted_ids is not None:
-            deleted_ids.extend(identifiers)
         return len(identifiers)
 
     def expire_temporary_unpinned(
