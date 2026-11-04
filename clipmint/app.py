@@ -26,6 +26,8 @@ from .capture import AreaSelector, RegionRecorder, recordings_dir, screenshots_d
 from .recording_ui import RecorderWindow, SaveClipDialog
 from .store import ClipStore, classify, looks_sensitive
 from .autosort import RULE_TYPES, NEVER_CAPTURE, validate_rule, route_clip
+from .smart_types import (SMART_TYPES, TYPE_BY_KEY, DEFAULT_BINS as SMART_BINS,
+                          classify_smart, default_smart_rules)
 from .vault import Vault, VaultError
 from .screenshot_editor import installed_editors, resolve_editor, open_image_editor
 from .screenshot_notice import ScreenshotNotice
@@ -157,6 +159,13 @@ class ClipMintWindow(QMainWindow):
                 self.history_secure = True
             except (HistorySecurityError, OSError) as exc:
                 self.history_security_error = str(exc)
+        # Seed new installations with ready-to-use Smart collections, but do
+        # not alter existing rule sets or overwrite a deliberate disabled state.
+        if (not self.history_security_error
+                and not self.settings.contains("autosort/rules")):
+            for name in SMART_BINS:
+                if name not in self.store.bins():
+                    self.store.add_bin(name)
         self.vault = Vault()
         self._vault_clipboard_text = None
         self._vault_clipboard_token = 0
@@ -705,21 +714,29 @@ class ClipMintWindow(QMainWindow):
             self.error("Vault", str(exc))
 
     def build_autosort_page(self):
-        """Native Qt rule editor. Autosort is OFF unless explicitly enabled."""
+        """Native Qt rule editor with editable first-run smart defaults."""
         page = QWidget()
         layout = QVBoxLayout(page)
         title = QLabel("Autosort · routing rules")
         title.setObjectName("sectionTitle")
         layout.addWidget(title)
         summary = QLabel(
-            "Rules are checked top-to-bottom. The first matching enabled rule "
-            "wins; without a match, clips stay in your selected bin. "
-            "This does not replace manual sorting or delete saved history."
+            "30 editable smart content types are supplied by default and "
+            "enabled on a fresh setup. Sensitive types are never stored in "
+            "ordinary history. Other clips go into grouped collections; "
+            "first matching rule wins. Existing items are not moved."
         )
         summary.setWordWrap(True)
         layout.addWidget(summary)
+        first_setup = not self.settings.contains("autosort/rules")
+        if first_setup:
+            self.settings.setValue(
+                "autosort/rules", json.dumps(default_smart_rules())
+            )
+        if first_setup and not self.settings.contains("autosort/enabled"):
+            self.settings.setValue("autosort/enabled", True)
         self.autosort_enabled = self.settings.value(
-            "autosort/enabled", False, type=bool
+            "autosort/enabled", first_setup, type=bool
         )
         self.autosort_rules = []
         try:
@@ -756,6 +773,7 @@ class ClipMintWindow(QMainWindow):
             ("Remove", self.remove_autosort_rule),
             ("Move up", lambda: self.move_autosort_rule(-1)),
             ("Move down", lambda: self.move_autosort_rule(1)),
+            ("Restore 30 defaults", self.restore_autosort_defaults),
         ):
             button = QPushButton(name)
             button.clicked.connect(callback)
@@ -788,8 +806,11 @@ class ClipMintWindow(QMainWindow):
         self.autosort_list.clear()
         for i, rule in enumerate(self.autosort_rules):
             descriptor = (
-                f"{rule['mode']}: {rule['pattern']}" if rule["mode"] in
-                ("Keyword", "Regex") else rule["mode"]
+                TYPE_BY_KEY[rule["pattern"]].label
+                if rule["mode"] == "Smart"
+                else f"{rule['mode']}: {rule['pattern']}"
+                if rule["mode"] in ("Keyword", "Regex")
+                else rule["mode"]
             )
             item = QListWidgetItem(
                 f"{i + 1:02d}   {descriptor}   →   {rule['target']}"
@@ -833,22 +854,32 @@ class ClipMintWindow(QMainWindow):
         pattern = QLineEdit()
         pattern.setMaxLength(200)
         pattern.setPlaceholderText("Keyword or regular expression")
+        smart_choice = QComboBox()
+        for smart in SMART_TYPES:
+            smart_choice.addItem(smart.label, smart.key)
         destination = QComboBox()
         destination.addItems([*self.store.bins(), NEVER_CAPTURE])
         enabled = QCheckBox("Rule enabled")
         enabled.setChecked(original.get("enabled", True) if original else True)
         form.addRow("Match", mode)
         form.addRow("Keyword / regex", pattern)
+        form.addRow("Smart category", smart_choice)
         form.addRow("Then", destination)
         form.addRow("", enabled)
         if original:
             mode.setCurrentText(original["mode"])
             pattern.setText(original["pattern"])
             destination.setCurrentText(original["target"])
-        mode.currentTextChanged.connect(
-            lambda text: pattern.setEnabled(text in ("Keyword", "Regex"))
-        )
-        pattern.setEnabled(mode.currentText() in ("Keyword", "Regex"))
+            if original["mode"] == "Smart":
+                idx = smart_choice.findData(original["pattern"])
+                smart_choice.setCurrentIndex(max(0, idx))
+
+        def on_mode_changed(current: str) -> None:
+            pattern.setEnabled(current in ("Keyword", "Regex"))
+            smart_choice.setEnabled(current == "Smart")
+
+        mode.currentTextChanged.connect(on_mode_changed)
+        on_mode_changed(mode.currentText())
         actions = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok |
             QDialogButtonBox.StandardButton.Cancel
@@ -860,7 +891,9 @@ class ClipMintWindow(QMainWindow):
             try:
                 return validate_rule({
                     "mode": mode.currentText(),
-                    "pattern": pattern.text(),
+                    "pattern": (smart_choice.currentData()
+                                if mode.currentText() == "Smart"
+                                else pattern.text()),
                     "target": destination.currentText(),
                     "enabled": enabled.isChecked(),
                 }, self.store.bins())
@@ -902,11 +935,34 @@ class ClipMintWindow(QMainWindow):
             self.persist_autosort()
             self.refresh_autosort_list(j)
 
-    def autosort_destination(self, kind: str, text: str, current_bin: str):
+    def restore_autosort_defaults(self):
+        if QMessageBox.question(
+            self, "Restore 30 Autosort defaults?",
+            "Replace your current custom rules with the 30 built-in smart "
+            "classifiers? Saved clips and existing collections will stay "
+            "untouched.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        ) != QMessageBox.StandardButton.Yes:
+            return
+        for name in SMART_BINS:
+            if name not in self.store.bins():
+                self.store.add_bin(name)
+                self.tabs.addTab(name)
+        self.autosort_rules = default_smart_rules()
+        self.persist_autosort()
+        self.refresh_autosort_list()
+        self.statusBar().showMessage("30 Autosort defaults restored", 3500)
+
+    def autosort_destination(
+        self, kind: str, text: str, current_bin: str,
+        formats: dict[str, bytes] | None = None,
+    ):
         if not self.autosort_enabled:
             return current_bin
         return route_clip(
-            self.autosort_rules, kind, text, current_bin, self.store.bins()
+            self.autosort_rules, kind, text, current_bin, self.store.bins(),
+            formats=formats,
         )
 
     def test_autosort(self):
@@ -924,13 +980,19 @@ class ClipMintWindow(QMainWindow):
         if kind == "text" and looks_sensitive(text):
             message = "The privacy filter would exclude this text from history."
         else:
+            formats = self.store.get_formats(
+                item.data(Qt.ItemDataRole.UserRole)
+            )
+            category = classify_smart(kind, text, formats)
             choice = route_clip(
                 self.autosort_rules, kind, text, self.active_bin(),
-                self.store.bins(),
+                self.store.bins(), formats=formats,
             )
+            label = TYPE_BY_KEY[category].label if category else "Unrecognised"
             message = (
-                "This new clip would be excluded from history."
-                if choice is None else f"This new clip would go to: {choice}"
+                f"Detected: {label} · excluded from history."
+                if choice is None else
+                f"Detected: {label} · destination: {choice}"
             )
             if not self.autosort_enabled:
                 message += " (Autosort currently disabled)"
@@ -1280,7 +1342,11 @@ class ClipMintWindow(QMainWindow):
         if entry is None:
             return
         current_bin = self.active_bin()
-        target = self.autosort_destination(entry.kind, entry.preview, current_bin)
+        full_text = (entry.content.decode("utf-8", "replace")
+                     if entry.kind == "text" else entry.preview)
+        target = self.autosort_destination(
+            entry.kind, full_text, current_bin, formats=entry.formats
+        )
         if target is None:
             self.statusBar().showMessage("Clip excluded by Autosort rule", 4000)
             return
@@ -1288,7 +1354,16 @@ class ClipMintWindow(QMainWindow):
         if entry.kind == "image" and png:
             image = QImage.fromData(png, "PNG")
             title = f"Image {image.width()} × {image.height()}"
-        self.store.add(entry.kind, entry.content, title, target, formats=entry.formats)
+        saved_id = self.store.add(
+            entry.kind, entry.content, title, target, formats=entry.formats
+        )
+        if saved_id is not None and self.autosort_enabled:
+            category = classify_smart(entry.kind, full_text, entry.formats)
+            if category:
+                tag = "type_" + category.replace("-", "_")
+                existing = self.store.tags(saved_id)
+                if tag not in existing and len(existing) < 15:
+                    self.store.set_tags(saved_id, [*existing, tag])
         self.refresh()
 
     def refresh(self, *_args):
