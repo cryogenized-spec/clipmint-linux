@@ -38,7 +38,7 @@ from .productivity import PasteQueue
 from .organizer_ui import TemplatesDialog, TransformDialog
 from .single_instance import InstanceServer, send_command
 from .cinnamon_hotkey import (install_shortcut, restore_screenshot_takeover,
-                              ShortcutSetupError)
+                              shortcut_conflicts, ShortcutSetupError)
 from .secure_history import (EncryptedClipStore, HistorySecurityError,
                              key_from_secret_service, secure_path)
 
@@ -1148,6 +1148,9 @@ class ClipMintWindow(QMainWindow):
         global_record_button.clicked.connect(self.register_cinnamon_recording_hotkey)
         global_record_layout.addWidget(global_record_button)
         layout.addWidget(global_record_group)
+        audit_button = QPushButton("Check Cinnamon hotkey assignments…")
+        audit_button.clicked.connect(self.audit_global_hotkeys)
+        layout.addWidget(audit_button)
 
         privacy_group = QGroupBox("Clipboard privacy")
         privacy_layout = QVBoxLayout(privacy_group)
@@ -2083,6 +2086,44 @@ class ClipMintWindow(QMainWindow):
             return
         self.settings.setValue("capture/global_record_shortcut", sequence)
         self.inform("Cinnamon shortcut", f"ClipMint recorder registered: {sequence}")
+
+    def audit_global_hotkeys(self):
+        """Read-only report of who currently owns our configured global keys."""
+        configured = (
+            ("Screenshot", str(self.settings.value(
+                "capture/global_shortcut", "Ctrl+Shift+S"
+            )), self._clipmint_launcher_command("--screenshot-area")),
+            ("Recording", str(self.settings.value(
+                "capture/global_record_shortcut", "Ctrl+Shift+R"
+            )), self._clipmint_launcher_command("--record-area")),
+            ("Clipboard popup", str(self.settings.value(
+                "popup/global_shortcut", "Ctrl+Alt+V"
+            )), self._clipmint_launcher_command("--toggle")),
+        )
+        report = []
+        for title, sequence, expected_command in configured:
+            try:
+                found = shortcut_conflicts(sequence)
+            except ShortcutSetupError as exc:
+                report.append(f"{title} · {sequence}: cannot inspect ({exc})")
+                continue
+            ours = [x for x in found if x["source"] == "custom"
+                    and x.get("command") == expected_command]
+            others = [x for x in found if x not in ours]
+            if ours and not others:
+                result = "Assigned to ClipMint in Cinnamon"
+            elif others:
+                result = "Conflict · another Cinnamon shortcut is assigned"
+            else:
+                result = "Not registered as a Cinnamon global shortcut"
+            report.append(f"{title} · {sequence}: {result}")
+        QMessageBox.information(
+            self, "ClipMint · Cinnamon hotkeys",
+            "\n".join(report) +
+            "\n\nThis verifies Cinnamon assignments, not whether another "
+            "application, extension or external shortcut daemon intercepts "
+            "the same key. Confirm by pressing each shortcut outside ClipMint.",
+        )
 
     def toggle_quick_popup(self):
         self.quick_popup.toggle()
