@@ -1261,10 +1261,11 @@ class ClipMintWindow(QMainWindow):
         elif index == 0:
             self.refresh()
 
-    def refresh_library(self, kind: str):
+    def refresh_library(self, kind: str, select_path: Path | None = None):
         listing = self.libraries[kind]
         current = listing.currentItem()
-        selected_path = current.data(Qt.ItemDataRole.UserRole) if current else None
+        selected_path = (str(select_path) if select_path is not None
+                         else current.data(Qt.ItemDataRole.UserRole) if current else None)
         if kind == "Screenshots":
             self._screenshot_thumbnail_generation += 1
             generation = self._screenshot_thumbnail_generation
@@ -2042,7 +2043,8 @@ class ClipMintWindow(QMainWindow):
         QApplication.clipboard().setImage(pixmap.toImage())
         self.show_window()
         self.notify_screenshot_captured(path)
-        self.refresh_library("Screenshots")
+        # If the user visits the archive after capturing, preselect the new PNG.
+        self.refresh_library("Screenshots", select_path=path)
 
     def notify_screenshot_captured(self, path: Path):
         """Notify only after a PNG was saved successfully to disk."""
