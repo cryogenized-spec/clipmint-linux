@@ -1,19 +1,29 @@
-"""Atomic, owner-only SQLite archive backups for the active ClipMint store.
+"""Atomic, private SQLite online backups of ClipMint's active history store.
 
-Uses SQLite's online backup API so in-flight WAL data is captured consistently.
-Encrypted history stays encrypted: this NEVER decrypts, exports or rewraps
-secrets, and the desktop keyring key is not part of a .sqlite3 backup.
+Uses sqlite3.Connection.backup(), never decrypts history and never exports
+keyring credentials. Rejects unsafe staging directories and destination WAL
+sidecars. The source database is never modified by this operation.
 """
 from __future__ import annotations
 
 import os
 from pathlib import Path
+import shutil
 import sqlite3
+import stat
 import tempfile
+import time
 
 
 class ArchiveBackupError(RuntimeError):
     pass
+
+
+def _has_sidecars(target: Path) -> bool:
+    return any(
+        Path(str(target) + suffix).exists()
+        for suffix in ("-wal", "-shm", "-journal")
+    )
 
 
 def backup_archive(
@@ -21,75 +31,101 @@ def backup_archive(
     destination: Path,
     *,
     overwrite: bool = False,
+    timeout_seconds: float = 8.0,
 ) -> Path:
-    """Create one consistent .sqlite3 backup without modifying the source.
+    """Export a consistent SQLite snapshot to an owner-only file.
 
-    Normal case is no-overwrite: hard-link a finished, private temporary file
-    into place, which fails atomically if the destination appeared meanwhile.
-    Explicit overwrite uses an atomic replace in the same directory.
-
-    Does not back up the separate Vault or keyring; encrypted backups require
-    access to the original encryption key for future reading.
+    No-overwrite publishing uses an atomic hard-link; an explicit overwrite
+    uses an atomic replace only when no active destination sidecars exist.
+    The SQLite staging database lives inside a private 0700 directory.
     """
     target = Path(destination).expanduser()
     if not target.name or target.suffix.lower() != ".sqlite3":
         raise ArchiveBackupError("Choose a .sqlite3 archive backup filename")
     if not target.parent.is_dir():
         raise ArchiveBackupError("The selected destination folder does not exist")
+
+    parent = target.parent.resolve()
+    mode = parent.stat().st_mode
+    if ((mode & (stat.S_IWGRP | stat.S_IWOTH))
+            and not (mode & stat.S_ISVTX)):
+        raise ArchiveBackupError(
+            "Choose a private destination directory. This folder allows "
+            "other users to replace files during a backup."
+        )
+    if active_connection.in_transaction:
+        raise ArchiveBackupError(
+            "An unfinished database write is blocking the backup. "
+            "Finish or cancel the pending operation, or restart ClipMint."
+        )
     if target.is_symlink():
         raise ArchiveBackupError("Refusing to overwrite a symbolic link")
     if target.exists() and not overwrite:
-        raise FileExistsError("A file with that name already exists")
+        raise FileExistsError("A backup with that filename already exists")
     if target.exists() and not target.is_file():
         raise ArchiveBackupError("The destination is not a regular file")
+    if overwrite and _has_sidecars(target):
+        raise ArchiveBackupError(
+            "This existing SQLite file has active WAL/journal sidecars. "
+            "Close the program using it or choose another filename."
+        )
 
-    # Never let the user accidentally overwrite their live archive.
     source_files = [
         Path(filename).resolve()
-        for _, name, filename in active_connection.execute("PRAGMA database_list")
+        for _, name, filename in active_connection.execute(
+            "PRAGMA database_list"
+        )
         if name == "main" and filename
     ]
     if source_files and target.resolve() in source_files:
-        raise ArchiveBackupError("Cannot write a backup over ClipMint's live database")
+        raise ArchiveBackupError(
+            "Cannot write a backup over ClipMint's live database"
+        )
 
-    descriptor, staged_name = tempfile.mkstemp(
-        prefix=f".{target.name}.", suffix=".building", dir=str(target.parent)
-    )
-    staged = Path(staged_name)
-    backup_connection = None
+    stage_dir = Path(tempfile.mkdtemp(
+        prefix=".clipmint-backup-", dir=str(parent)
+    ))
+    staged = stage_dir / "snapshot.sqlite3"
+    writer = None
     try:
-        os.fchmod(descriptor, 0o600)
-        os.close(descriptor)
-        descriptor = -1
-        backup_connection = sqlite3.connect(staged)
-        active_connection.backup(backup_connection, pages=128, sleep=0.05)
-        result = backup_connection.execute("PRAGMA integrity_check").fetchone()
+        os.chmod(stage_dir, 0o700)
+        writer = sqlite3.connect(staged, timeout=2.0)
+        os.chmod(staged, 0o600)
+        start = time.monotonic()
+
+        def progress(_status: int, _remaining: int, _total: int) -> None:
+            if time.monotonic() - start >= timeout_seconds:
+                raise ArchiveBackupError(
+                    "Archive backup took too long. Close other SQLite users "
+                    "or applications and try again."
+                )
+
+        active_connection.backup(
+            writer, pages=128, progress=progress, sleep=0.05
+        )
+        result = writer.execute("PRAGMA integrity_check").fetchone()
         if not result or result[0] != "ok":
             raise ArchiveBackupError("Backup integrity verification did not pass")
-        backup_connection.close()
-        backup_connection = None
-
-        os.chmod(staged, 0o600)
+        writer.close()
+        writer = None
+        if target.is_symlink():
+            raise ArchiveBackupError("The destination became a symbolic link")
         if overwrite:
-            # Explicit overwrite accepted by the user in the UI.
-            if target.is_symlink():
-                raise ArchiveBackupError("Destination became a symbolic link")
+            if _has_sidecars(target):
+                raise ArchiveBackupError(
+                    "Destination SQLite sidecars appeared during backup; "
+                    "the original file was not replaced."
+                )
             os.replace(staged, target)
         else:
-            # Atomic create: never replace an existing file during a race.
+            # Fails atomically if a destination appears while we are building.
             os.link(staged, target)
-            staged.unlink()
         return target
     except (sqlite3.Error, OSError) as exc:
         raise ArchiveBackupError(
             "Could not create a verified local archive backup"
         ) from exc
     finally:
-        if backup_connection is not None:
-            backup_connection.close()
-        if descriptor >= 0:
-            os.close(descriptor)
-        staged.unlink(missing_ok=True)
-        # SQLite might have created temporary sidecars; never leave them.
-        for suffix in ("-wal", "-shm", "-journal"):
-            Path(str(staged) + suffix).unlink(missing_ok=True)
+        if writer is not None:
+            writer.close()
+        shutil.rmtree(stage_dir)
