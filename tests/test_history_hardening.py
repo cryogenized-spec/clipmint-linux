@@ -182,6 +182,57 @@ class HistoryHardeningTests(unittest.TestCase):
                     secure.close()
                 legacy.close()
 
+    def test_corrupt_legacy_encrypted_entry_is_isolated(self):
+        with TemporaryDirectory() as root:
+            path = Path(root) / "old-encrypted.sqlite3"
+            key = utils.random(SecretBox.KEY_SIZE)
+            store = EncryptedClipStore(path, key)
+            try:
+                healthy = store.add("text", b"Healthy item", "Healthy")
+                damaged = store.add("text", b"Corruptible item", "Corruptible")
+                store.conn.execute(
+                    "UPDATE clips SET content=?,fingerprint=NULL WHERE id=?",
+                    (sqlite3.Binary(b"synthetic-corrupt-ciphertext"), damaged)
+                )
+                store.conn.commit()
+            finally:
+                store.close()
+            store = EncryptedClipStore(path, key)
+            try:
+                self.assertIn(damaged, store.corrupt_row_ids)
+                self.assertEqual([item.id for item in store.search()], [healthy])
+                self.assertEqual(store.get(healthy), ("text", b"Healthy item"))
+                new_id = store.add("text", b"New healthy", "New healthy")
+                self.assertEqual([item.id for item in store.search()],
+                                 [new_id, healthy])
+                self.assertEqual(store.conn.execute(
+                    "SELECT COUNT(*) FROM clips"
+                ).fetchone()[0], 3)
+                # The quarantined row remains encrypted/opaque in the DB,
+                # rather than being silently deleted.
+                self.assertIsNotNone(store.conn.execute(
+                    "SELECT content FROM clips WHERE id=?", (damaged,)
+                ).fetchone())
+            finally:
+                store.close()
+
+    def test_encrypted_oldest_first_uses_last_copy_not_original_id(self):
+        with TemporaryDirectory() as root:
+            store = EncryptedClipStore(
+                Path(root) / "secure.sqlite3",
+                utils.random(SecretBox.KEY_SIZE),
+            )
+            try:
+                a = store.add("text", b"First", "First")
+                b = store.add("text", b"Second", "Second")
+                self.assertEqual(store.add("text", b"First", "First"), a)
+                self.assertEqual([x.id for x in store.search()], [a, b])
+                self.assertEqual(
+                    [x.id for x in store.search(sort="Oldest first")], [b, a]
+                )
+            finally:
+                store.close()
+
     def test_delete_checkpoint_and_explicit_compaction(self):
         with TemporaryDirectory() as root:
             path = Path(root) / "history.sqlite3"
