@@ -6,7 +6,7 @@ from pathlib import Path
 import os
 import re
 import sqlite3
-from .clipboard_formats import bundle_to_bytes, bundle_from_bytes
+from .clipboard_formats import bundle_to_bytes, bundle_from_bytes, sensitive_payload
 from .search_index import ClipSearchIndex
 
 DEFAULT_BINS = ("Work", "Personal", "Temporary")
@@ -145,6 +145,10 @@ class ClipStore:
         self.conn.execute("INSERT INTO bins(name,position) VALUES(?,COALESCE((SELECT MAX(position)+1 FROM bins),0))", (name,))
         self.conn.commit()
 
+    def _history_payload_is_sealed(self) -> bool:
+        """EncryptedClipStore overrides this and checks before encrypting."""
+        return False
+
     def add(self, kind: str, content: bytes, preview: str, bin_name: str = "Work",
             formats: dict[str, bytes] | None = None) -> int | None:
         if kind not in ("text", "image", "files"):
@@ -152,6 +156,12 @@ class ClipStore:
         if bin_name not in self.bins():
             raise ValueError("Unknown accumulation bin")
         if not content:
+            return None
+        # Direct insertion must not bypass the clipboard privacy filter.
+        # Encrypted history validates plaintext before sealing; ciphertext
+        # cannot safely be classified by the SQLite base implementation.
+        if (not self._history_payload_is_sealed()
+                and sensitive_payload(kind, content, formats)):
             return None
         packed = bundle_to_bytes(formats) if formats else None
         newest = self.conn.execute(
