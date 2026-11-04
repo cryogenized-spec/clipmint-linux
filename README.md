@@ -302,6 +302,8 @@ history too. Expiry is measured against UTC timestamps, not a guessed local
 clock or application installation date. Recopying the same newest entry
 refreshes its last-used timestamp (for both ordinary and encrypted history),
 so a recently reused Temporary item is not removed using its older date.
+Choosing **Copy** in the archive, using the quick-search popup, or copying
+from the Multi-Paste Queue also renews the 24-hour retention clock.
 Expired clip IDs are dropped from the paste queue and quick-popup cache
 before another copy could reuse a SQLite row ID. For plaintext history, a
 cleanup rebuilds FTS5 postings and compacts the SQLite file to reduce old
