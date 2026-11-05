@@ -63,6 +63,25 @@ class LegacyHistoryCleanupTests(unittest.TestCase):
             finally:
                 encrypted.close()
 
+    def test_changed_creation_metadata_refuses_removal(self):
+        with TemporaryDirectory() as home:
+            path, encrypted, key, ident = self.prepare(Path(home))
+            try:
+                encrypted.conn.execute(
+                    "UPDATE clips SET created_at=? WHERE id=?",
+                    ("2000-01-01T00:00:00Z", ident),
+                )
+                encrypted.conn.commit()
+                with patch("clipmint.legacy_cleanup.key_from_secret_service",
+                           return_value=key):
+                    with self.assertRaisesRegex(
+                        HistorySecurityError, "row metadata"
+                    ):
+                        remove_verified_legacy_history(encrypted)
+                self.assertTrue(path.exists())
+            finally:
+                encrypted.close()
+
     def test_keyring_loss_or_replacement_refuses_removal(self):
         with TemporaryDirectory() as home:
             path, encrypted, _key, _ident = self.prepare(Path(home))
