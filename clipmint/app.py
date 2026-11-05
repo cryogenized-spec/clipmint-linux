@@ -25,6 +25,7 @@ from .manga import CrimsonMaidPortrait
 from .crimson_ui import build_crimson_ui, relative_time, label_type
 from .capture import AreaSelector, RegionRecorder, recordings_dir, screenshots_dir, stamped_filename
 from .recording_ui import RecorderWindow, SaveClipDialog
+from .recording_recovery import pending_recordings, resolve_pending
 from .store import ClipStore, classify, looks_sensitive
 from .autosort import RULE_TYPES, NEVER_CAPTURE, validate_rule, route_clip
 from .smart_types import (SMART_TYPES, TYPE_BY_KEY, DEFAULT_BINS as SMART_BINS,
@@ -36,7 +37,7 @@ from .screenshot_gallery import read_screenshot, screenshot_thumbnail_icon, PREV
 from .clipboard_formats import from_mime, is_concealed, sensitive_text, mime_from_entry
 from .clipboard_guard import OwnClipboardGuard
 from .foreground_privacy import blocked_foreground, DEFAULT_BLOCKED
-from .ocr import OcrWorker
+from .ocr import OcrWorker, validate_language
 from .quick_popup import QuickPopup, paste_to_window
 from .productivity import PasteQueue
 from .organizer_ui import TemplatesDialog, TransformDialog
@@ -248,6 +249,7 @@ class ClipMintWindow(QMainWindow):
         if self._temporary_expiry_timer.isActive():
             QTimer.singleShot(0, self.expire_temporary_if_enabled)
         QTimer.singleShot(400, self.clipboard_changed)
+        QTimer.singleShot(900, self.offer_pending_recordings)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -1254,6 +1256,22 @@ class ClipMintWindow(QMainWindow):
         cap_layout.addWidget(self.history_storage_limit)
         layout.addWidget(cap_group)
 
+        ocr_group = QGroupBox("Offline OCR language")
+        ocr_layout = QVBoxLayout(ocr_group)
+        ocr_help = QLabel(
+            "Select installed Tesseract language data. Examples: eng (English), "
+            "afr (Afrikaans), or eng+afr. Language packs are not downloaded by ClipMint."
+        )
+        ocr_help.setWordWrap(True)
+        ocr_layout.addWidget(ocr_help)
+        self.ocr_language_editor = QLineEdit(
+            str(self.settings.value("ocr/language", "eng"))
+        )
+        self.ocr_language_editor.setPlaceholderText("eng")
+        self.ocr_language_editor.editingFinished.connect(self.save_ocr_language)
+        ocr_layout.addWidget(self.ocr_language_editor)
+        layout.addWidget(ocr_group)
+
         open_files = QPushButton("Open recordings folder")
         open_files.clicked.connect(lambda: self.open_folder(recordings_dir()))
         layout.addWidget(open_files)
@@ -1499,6 +1517,19 @@ class ClipMintWindow(QMainWindow):
             f"Storage limit {'off' if not mb else str(mb) + ' MB'}; "
             f"{removed} unpinned clips pruned", 7500,
         )
+
+    def save_ocr_language(self):
+        value = self.ocr_language_editor.text().strip().lower()
+        try:
+            validate_language(value)
+        except ValueError as exc:
+            self.statusBar().showMessage(str(exc), 6000)
+            self.ocr_language_editor.setText(
+                str(self.settings.value("ocr/language", "eng"))
+            )
+            return
+        self.settings.setValue("ocr/language", value)
+        self.ocr_language_editor.setText(value)
 
     def install_shortcuts(self):
         callbacks = {
@@ -2225,7 +2256,14 @@ class ClipMintWindow(QMainWindow):
         if not png or len(png) > 16 * 1024 * 1024:
             self.error("OCR", "Choose a PNG image smaller than 16 MB")
             return
-        worker = OcrWorker(png, self)
+        try:
+            language = validate_language(str(
+                self.settings.value("ocr/language", "eng")
+            ))
+            worker = OcrWorker(png, self, language=language)
+        except ValueError as exc:
+            self.error("OCR", str(exc))
+            return
         self._ocr_workers.add(worker)
         worker.recognized.connect(self.ocr_recognized)
         worker.failed.connect(lambda message: self.error("OCR", message))
@@ -2733,6 +2771,58 @@ class ClipMintWindow(QMainWindow):
                 "Opening screenshot with the system image application; "
                 "it may be a viewer. Select an editor in Settings.", 8000
             )
+
+    def offer_pending_recordings(self):
+        """Offer recovery on startup; never delete a crashed recording silently."""
+        if self._closing or self.recorder.process is not None:
+            return
+        unfinished = pending_recordings()
+        if not unfinished:
+            return
+        dialog = QMessageBox(self)
+        dialog.setWindowTitle("ClipMint · Unfinished recordings")
+        dialog.setIcon(QMessageBox.Icon.Warning)
+        dialog.setText(f"Found {len(unfinished)} unfinished recording(s) from an earlier session.")
+        dialog.setInformativeText(
+            "Recover will preserve these files under visible 'recovered-' names; "
+            "an interrupted MP4 may be unplayable. Discard deletes the files "
+            "and their FFmpeg logs. Keep for later changes nothing."
+        )
+        dialog.setStandardButtons(
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            | QMessageBox.StandardButton.Cancel
+        )
+        dialog.button(QMessageBox.StandardButton.Yes).setText("Recover files")
+        dialog.button(QMessageBox.StandardButton.No).setText("Discard files")
+        dialog.button(QMessageBox.StandardButton.Cancel).setText("Keep for later")
+        dialog.setDefaultButton(QMessageBox.StandardButton.Cancel)
+        action = dialog.exec()
+        if action == int(QMessageBox.StandardButton.Cancel):
+            return
+        choice = ("recover" if action == int(QMessageBox.StandardButton.Yes)
+                  else "discard" if action == int(QMessageBox.StandardButton.No)
+                  else None)
+        if choice is None:
+            return
+        completed, errors = 0, []
+        for path in unfinished:
+            try:
+                resolve_pending(path, choice)
+                completed += 1
+            except (OSError, ValueError) as exc:
+                errors.append(f"{path.name}: {exc}")
+        self.refresh_library("Recordings")
+        if errors:
+            QMessageBox.warning(
+                self, "Recording recovery incomplete",
+                f"Processed {completed} of {len(unfinished)} files. "
+                "Files that could not be processed were preserved.\n"
+                + "\n".join(errors[:3]),
+            )
+        else:
+            self.inform("Recording recovery",
+                        f"{completed} recording(s) recovered" if choice == "recover"
+                        else f"{completed} unfinished recording(s) discarded")
 
     def choose_recording(self, file_format: str = "MP4"):
         self.capture_format = file_format if file_format in ("MP4", "GIF") else "MP4"
