@@ -9,6 +9,7 @@ import os
 import shutil
 import subprocess
 import unittest
+from unittest.mock import patch
 from time import monotonic
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -75,6 +76,60 @@ class X11ClipboardRoundTripTests(unittest.TestCase):
                 self.assertEqual(stdout, copied)
             finally:
                 store.close()
+
+    def test_hidden_window_captures_external_text_across_x11(self):
+        """The real X11 selection must reach SQLite after the window closes."""
+        from clipmint.app import ClipMintWindow
+
+        previous_data = os.environ.get("XDG_DATA_HOME")
+        previous_config = os.environ.get("XDG_CONFIG_HOME")
+        window = None
+        with TemporaryDirectory() as root:
+            os.environ["XDG_DATA_HOME"] = root
+            os.environ["XDG_CONFIG_HOME"] = str(Path(root) / "config")
+            try:
+                self.app.setQuitOnLastWindowClosed(False)
+                with patch("clipmint.app.blocked_foreground", return_value=False):
+                    window = ClipMintWindow()
+                    if window.tray is not None:
+                        window.tray.hide()
+                        window.tray = None
+                    window.autosort_enabled = False
+                    window.show()
+                    self.app.processEvents()
+                    window.close()
+                    self.app.processEvents()
+                    self.assertFalse(window.isVisible())
+                    self.assertFalse(window.store.closed)
+
+                    sample = b"ClipMint X11 hidden window history sample"
+                    subprocess.run(
+                        ["xclip", "-selection", "clipboard",
+                         "-t", "text/plain", "-in"],
+                        input=sample, check=True, timeout=8,
+                    )
+                    QTest.qWait(450)
+                    matches = window.store.search(
+                        "ClipMint X11 hidden window history sample", "Work"
+                    )
+                    self.assertTrue(matches, "Hidden X11 watcher missed external copy")
+                    self.assertEqual(window.store.get(matches[0].id),
+                                     ("text", sample))
+            finally:
+                if window is not None:
+                    window._closing = True
+                    if not window.store.closed:
+                        window.store.close()
+                    window.close()
+                    window.deleteLater()
+                if previous_data is None:
+                    os.environ.pop("XDG_DATA_HOME", None)
+                else:
+                    os.environ["XDG_DATA_HOME"] = previous_data
+                if previous_config is None:
+                    os.environ.pop("XDG_CONFIG_HOME", None)
+                else:
+                    os.environ["XDG_CONFIG_HOME"] = previous_config
 
     def test_xdotool_can_access_virtual_x11(self):
         if not shutil.which("xdotool"):

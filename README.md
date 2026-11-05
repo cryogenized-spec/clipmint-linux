@@ -20,6 +20,22 @@ Without Tesseract, OCR actions report that the optional tool is missing.
 
 The installer bundles Python, Qt, and FFmpeg. GitHub downloads build-time dependencies on the **GitHub runner**, not on your laptop. The app doesn't run pip/apt or fetch packages on first use.
 
+## Background clipboard history
+
+**Closing the ClipMint window keeps the clipboard watcher running.** New, permitted
+text copies continue to be written to the local SQLite history, even if the
+Cinnamon panel has no compatible tray icon. The installed app launcher opens
+the existing window rather than starting a second watcher. The tray icon,
+when available, also provides a Show command.
+
+In **Settings → Start at login**, you can explicitly opt in to launching the
+hidden watcher after signing into Cinnamon X11. This is **OFF by default**.
+The **Quit ClipMint · stop background monitoring** action in Settings, the
+tray's Quit action, and `ClipMint --quit` intentionally terminate the process
+and stop capture. No clipboard history can be collected while ClipMint is
+actually terminated, the user session is logged out, or the computer is off.
+Potential credentials and concealed MIME payloads are deliberately excluded.
+
 ## Clipboard bins and sorting
 
 Three independent bins — **Work**, **Personal**, and **Temporary** — are provided. Click **+** to create further bins (up to 32-character names). New copied snippets go into the currently selected bin. Right-click an entry to Copy, Pin, Move to another bin, or Delete. Double-click to copy.
