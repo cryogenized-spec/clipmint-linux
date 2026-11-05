@@ -47,16 +47,21 @@ def _verify_rows(encrypted: EncryptedClipStore, legacy: sqlite3.Connection) -> i
         raise HistorySecurityError("Legacy history integrity check failed")
     count = 0
     for row in legacy.execute(
-        "SELECT id,kind,content,formats,preview,pinned,bin,favorite "
-        "FROM clips ORDER BY id"
+        "SELECT id,kind,content,formats,preview,pinned,bin,favorite,"
+        "created_at,touch_seq FROM clips ORDER BY id"
     ):
-        ident, kind, raw, packed, preview, pinned, folder, favorite = row
+        (ident, kind, raw, packed, preview, pinned, folder, favorite,
+         created_at, touch_seq) = row
         sealed = encrypted.conn.execute(
-            "SELECT content,pinned,bin,favorite,kind FROM clips WHERE id=?",
+            "SELECT content,pinned,bin,favorite,kind,created_at,touch_seq "
+            "FROM clips WHERE id=?",
             (ident,),
         ).fetchone()
-        if sealed is None or (sealed[1], sealed[2], sealed[3], sealed[4]) != (
-                pinned, folder, favorite, kind):
+        # Older migrations normalize zero touch sequence values to the ID.
+        expected_touch = touch_seq if touch_seq else ident
+        if sealed is None or (sealed[1], sealed[2], sealed[3], sealed[4],
+                              sealed[5], sealed[6]) != (
+                pinned, folder, favorite, kind, created_at, expected_touch):
             raise HistorySecurityError(
                 "Encrypted history does not match legacy row metadata"
             )
@@ -68,6 +73,15 @@ def _verify_rows(encrypted: EncryptedClipStore, legacy: sqlite3.Connection) -> i
                 "Encrypted history does not match legacy clip content"
             )
         count += 1
+
+    original_bins = {
+        name for (name,) in legacy.execute("SELECT name FROM bins")
+    }
+    encrypted_bins = {
+        name for (name,) in encrypted.conn.execute("SELECT name FROM bins")
+    }
+    if not original_bins.issubset(encrypted_bins):
+        raise HistorySecurityError("Encrypted history is missing legacy bins")
 
     tags = legacy.execute(
         "SELECT clip_id,tag FROM clip_tags ORDER BY clip_id,tag"
