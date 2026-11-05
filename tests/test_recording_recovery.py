@@ -21,15 +21,15 @@ class RecordingRecoveryTests(unittest.TestCase):
             candidate = alias / filename
             candidate.write_bytes(b"still recording")
             process_args = (
-                b"/usr/bin/ffmpeg\\0-y\\0-i\\0:0.0\\0" +
-                os.fsencode(str(candidate)) + b"\\0"
+                b"/usr/bin/ffmpeg\0-y\0-i\0:0.0\0" +
+                os.fsencode(str(candidate)) + b"\0"
             )
             self.assertTrue(_command_writes_recording(process_args, candidate))
             self.assertTrue(_command_writes_recording(
                 process_args, actual / filename
             ))
             self.assertFalse(_command_writes_recording(
-                b"/usr/bin/other\\0" + os.fsencode(str(candidate)) + b"\\0",
+                b"/usr/bin/other\0" + os.fsencode(str(candidate)) + b"\0",
                 candidate,
             ))
 
