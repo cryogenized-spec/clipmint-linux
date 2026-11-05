@@ -9,6 +9,8 @@ from contextlib import closing
 from pathlib import Path
 import sqlite3
 import hmac
+import os
+import stat
 
 from .clipboard_formats import bundle_from_bytes
 from .secure_history import (
@@ -131,6 +133,66 @@ def verify_legacy_history(encrypted: EncryptedClipStore) -> tuple[Path, int]:
     return old, count
 
 
+def _require_no_other_open_handles(old: Path) -> None:
+    """Reject legacy-file users not visible to SQLite's WAL shared locks.
+
+    An SQLite connection that opened the database but has not yet executed
+    a statement does not hold a SHARED lock. Linux /proc exposes its still
+    open file descriptor. Be conservative: no deletion unless this process's
+    one cleanup connection is the sole visible holder of the legacy inode.
+    A missing/restricted process table is a reason to refuse cleanup.
+    """
+    if os.name != "posix" or not Path("/proc/self/fd").is_dir():
+        raise HistorySecurityError("Cannot inspect open SQLite connections")
+    info = old.stat(follow_symlinks=False)
+    if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
+            or stat.S_IMODE(info.st_mode) & 0o077):
+        raise HistorySecurityError(
+            "Legacy database must be a private owner-only regular file"
+        )
+    identity = (info.st_dev, info.st_ino)
+    own = os.getpid()
+    own_handles = 0
+    try:
+        with os.scandir("/proc") as processes:
+            for proc in processes:
+                if not proc.name.isdigit():
+                    continue
+                try:
+                    details = proc.stat(follow_symlinks=False)
+                except FileNotFoundError:
+                    continue
+                # A 0600 database inside a 0700 app directory is private
+                # to the current owner (plus trusted root). Do not fail
+                # because unrelated users' process FDs are inaccessible.
+                if details.st_uid != os.getuid():
+                    continue
+                try:
+                    with os.scandir(f"/proc/{proc.name}/fd") as fds:
+                        for fd in fds:
+                            try:
+                                opened = fd.stat(follow_symlinks=True)
+                            except FileNotFoundError:
+                                continue
+                            if (opened.st_dev, opened.st_ino) != identity:
+                                continue
+                            if int(proc.name) != own:
+                                raise HistorySecurityError(
+                                    "Another process still has legacy history open"
+                                )
+                            own_handles += 1
+                except FileNotFoundError:
+                    continue
+    except OSError as exc:
+        raise HistorySecurityError(
+            "Could not inspect all running app processes; refusing cleanup"
+        ) from exc
+    if own_handles != 1:
+        raise HistorySecurityError(
+            "Another legacy history handle is still open; close old app instances"
+        )
+
+
 def remove_verified_legacy_history(encrypted: EncryptedClipStore) -> int:
     """Only remove a verified WAL archive with *no other SQLite connection*.
 
@@ -158,15 +220,36 @@ def remove_verified_legacy_history(encrypted: EncryptedClipStore) -> int:
                     )
                 count = _verify_rows(encrypted, legacy)
                 _check_persisted_key(encrypted)
+            finally:
+                legacy.execute("ROLLBACK")
+
+            # A crash or filesystem failure between multiple unlinks must
+            # never strand a legacy DB without its only committed WAL rows.
+            # The VFS exclusive lock persists across transactions when
+            # locking_mode=EXCLUSIVE; checkpoint all content into the main DB
+            # and abort if SQLite cannot finish the checkpoint.
+            checkpoint = legacy.execute(
+                "PRAGMA main.wal_checkpoint(TRUNCATE)"
+            ).fetchone()
+            if checkpoint is None or checkpoint[0] != 0:
+                raise HistorySecurityError(
+                    "Legacy WAL could not be fully checkpointed"
+                )
+
+            legacy.execute("BEGIN EXCLUSIVE")
+            try:
+                count = _verify_rows(encrypted, legacy)
+                _check_persisted_key(encrypted)
+                _require_no_other_open_handles(old)
                 for suffix in ("", "-wal", "-shm"):
                     if Path(str(old) + suffix).is_symlink():
                         raise HistorySecurityError(
                             "Refusing to remove a symlinked legacy file"
                         )
-                # Keep the genuine VFS exclusive lock *throughout* unlinks.
-                # This matters for idle SQLite handles, not only writers.
-                # A new SQLite reader cannot access the archived WAL while
-                # the lock is held; no automatic or timer-driven cleanup.
+                # Rechecked under the exclusive lock and a Linux open-file
+                # scan, including SQLite connections with no active query.
+                # If a later unlink fails, fully checkpointed main DB rows
+                # remain recoverable without the WAL sidecar.
                 for suffix in ("-wal", "-shm", ""):
                     Path(str(old) + suffix).unlink(missing_ok=True)
             finally:
