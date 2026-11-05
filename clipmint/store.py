@@ -54,7 +54,7 @@ def looks_sensitive(text: str) -> bool:
 
 class ClipStore:
     def __init__(self, path: Path | None = None, max_unpinned: int = 250,
-                 index_plaintext: bool = True):
+                 index_plaintext: bool = True, max_total_bytes: int | None = None):
         managed_path = path is None
         if path is None:
             base = Path(os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local/share")))
@@ -75,6 +75,7 @@ class ClipStore:
         finally:
             os.close(fd)
         self.max_unpinned = max_unpinned
+        self.max_total_bytes = max_total_bytes  # None means OFF, never prune on upgrade
         self.closed = False
         self.conn = sqlite3.connect(self.path)
         # Match the public classify() rules inside SQL, so category selection
@@ -321,8 +322,45 @@ class ClipStore:
         )
         self.search_index.insert(clip_id, kind, content, preview[:600])
         self.search_index.trim_deleted()
+        self.prune_storage_bytes()
         self.conn.commit()
-        return clip_id
+        return clip_id if self.conn.execute(
+            "SELECT 1 FROM clips WHERE id=?", (clip_id,)
+        ).fetchone() else None
+
+    def payload_bytes(self) -> int:
+        """Approximate stored payload sizes, including MIME and previews."""
+        return int(self.conn.execute(
+            "SELECT COALESCE(SUM(length(content)+COALESCE(length(formats),0)"
+            "+length(CAST(preview AS BLOB))),0) FROM clips"
+        ).fetchone()[0])
+
+    def prune_storage_bytes(self) -> int:
+        """Opt-in LRU pruning; pinned entries are never removed.
+
+        Does not VACUUM or imply that historical pages were physically erased.
+        """
+        limit = self.max_total_bytes
+        if limit is None:
+            return 0
+        if not isinstance(limit, int) or limit <= 0:
+            raise ValueError("Retention byte cap must be a positive integer")
+        removed = 0
+        while self.payload_bytes() > limit:
+            row = self.conn.execute(
+                "SELECT id FROM clips WHERE pinned=0 "
+                "ORDER BY touch_seq ASC,id ASC LIMIT 1"
+            ).fetchone()
+            if row is None:
+                break  # Pinned payloads alone can exceed the selected cap.
+            ident = int(row[0])
+            self.search_index.delete(ident)
+            self.conn.execute("DELETE FROM clips WHERE id=?", (ident,))
+            removed += 1
+        if removed:
+            self.search_index.trim_deleted()
+            self.conn.commit()
+        return removed
 
     def search(
         self, query: str = "", bin_name: str = "Work",
