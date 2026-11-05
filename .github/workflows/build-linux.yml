@@ -163,6 +163,7 @@ jobs:
       - name: Publish GitHub Release with installer and checksums
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         shell: bash
         run: |
           set -euo pipefail
