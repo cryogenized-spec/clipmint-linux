@@ -139,8 +139,9 @@ def _require_no_other_open_handles(old: Path) -> None:
     An SQLite connection that opened the database but has not yet executed
     a statement does not hold a SHARED lock. Linux /proc exposes its still
     open file descriptor. Be conservative: no deletion unless this process's
-    one cleanup connection is the sole visible holder of the legacy inode.
-    A missing/restricted process table is a reason to refuse cleanup.
+    one cleanup connection is the sole *inspectable* holder of the inode.
+    Missing access to own/ClipMint process descriptors refuses cleanup;
+    unrelated sandboxed processes are ignored only where unreadable.
     """
     if os.name != "posix" or not Path("/proc/self/fd").is_dir():
         raise HistorySecurityError("Cannot inspect open SQLite connections")
@@ -207,9 +208,30 @@ def _require_no_other_open_handles(old: Path) -> None:
                             own_handles += 1
                 except FileNotFoundError:
                     continue
+                except PermissionError as exc:
+                    # /proc/<pid>/fd may be hidden even for same-UID
+                    # sandboxed or non-dumpable programs. When this happens,
+                    # reject known ClipMint peers and ourselves; unrelated
+                    # programs cannot be reliably inspected, so SQLite's
+                    # exclusive lock remains the primary writer safeguard.
+                    if int(proc.name) == own:
+                        raise HistorySecurityError(
+                            "Cannot inspect own open file handles"
+                        ) from exc
+                    try:
+                        command = Path(
+                            f"/proc/{proc.name}/cmdline"
+                        ).read_bytes()[:8192].lower()
+                    except OSError:
+                        command = b""
+                    if b"clipmint" in command:
+                        raise HistorySecurityError(
+                            "Cannot inspect another ClipMint process"
+                        ) from exc
+                    continue
     except OSError as exc:
         raise HistorySecurityError(
-            "Could not inspect all running app processes; refusing cleanup"
+            "Could not inspect Linux process descriptors; refusing cleanup"
         ) from exc
     if own_handles != 1:
         raise HistorySecurityError(
