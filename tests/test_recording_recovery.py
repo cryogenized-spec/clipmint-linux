@@ -6,10 +6,33 @@ import time
 from unittest.mock import patch
 import unittest
 
-from clipmint.recording_recovery import pending_recordings, resolve_pending
+from clipmint.recording_recovery import pending_recordings, resolve_pending, _command_writes_recording
 
 
 class RecordingRecoveryTests(unittest.TestCase):
+    def test_symlinked_directory_writer_argument_is_detected(self):
+        with TemporaryDirectory() as home:
+            root = Path(home)
+            actual = root / "real-video-folder"
+            actual.mkdir()
+            alias = root / "Videos"
+            alias.symlink_to(actual, target_is_directory=True)
+            filename = ".pending-recording-20261105-130000-123456.mp4"
+            candidate = alias / filename
+            candidate.write_bytes(b"still recording")
+            process_args = (
+                b"/usr/bin/ffmpeg\\0-y\\0-i\\0:0.0\\0" +
+                os.fsencode(str(candidate)) + b"\\0"
+            )
+            self.assertTrue(_command_writes_recording(process_args, candidate))
+            self.assertTrue(_command_writes_recording(
+                process_args, actual / filename
+            ))
+            self.assertFalse(_command_writes_recording(
+                b"/usr/bin/other\\0" + os.fsencode(str(candidate)) + b"\\0",
+                candidate,
+            ))
+
     def test_discovery_does_not_mutate_or_follow_symlinks(self):
         with TemporaryDirectory() as home:
             folder = Path(home)
