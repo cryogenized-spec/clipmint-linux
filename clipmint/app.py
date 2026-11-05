@@ -25,6 +25,7 @@ from .manga import CrimsonMaidPortrait
 from .crimson_ui import build_crimson_ui, relative_time, label_type
 from .capture import AreaSelector, RegionRecorder, recordings_dir, screenshots_dir, stamped_filename
 from .recording_ui import RecorderWindow, SaveClipDialog
+from .recording_recovery import pending_recordings, resolve_pending
 from .store import ClipStore, classify, looks_sensitive
 from .autosort import RULE_TYPES, NEVER_CAPTURE, validate_rule, route_clip
 from .smart_types import (SMART_TYPES, TYPE_BY_KEY, DEFAULT_BINS as SMART_BINS,
@@ -242,6 +243,7 @@ class ClipMintWindow(QMainWindow):
         if self._temporary_expiry_timer.isActive():
             QTimer.singleShot(0, self.expire_temporary_if_enabled)
         QTimer.singleShot(400, self.clipboard_changed)
+        QTimer.singleShot(900, self.offer_pending_recordings)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -2672,6 +2674,58 @@ class ClipMintWindow(QMainWindow):
                 "Opening screenshot with the system image application; "
                 "it may be a viewer. Select an editor in Settings.", 8000
             )
+
+    def offer_pending_recordings(self):
+        """Offer recovery on startup; never delete a crashed recording silently."""
+        if self._closing or self.recorder.process is not None:
+            return
+        unfinished = pending_recordings()
+        if not unfinished:
+            return
+        dialog = QMessageBox(self)
+        dialog.setWindowTitle("ClipMint · Unfinished recordings")
+        dialog.setIcon(QMessageBox.Icon.Warning)
+        dialog.setText(f"Found {len(unfinished)} unfinished recording(s) from an earlier session.")
+        dialog.setInformativeText(
+            "Recover will preserve these files under visible 'recovered-' names; "
+            "an interrupted MP4 may be unplayable. Discard deletes the files "
+            "and their FFmpeg logs. Keep for later changes nothing."
+        )
+        dialog.setStandardButtons(
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            | QMessageBox.StandardButton.Cancel
+        )
+        dialog.button(QMessageBox.StandardButton.Yes).setText("Recover files")
+        dialog.button(QMessageBox.StandardButton.No).setText("Discard files")
+        dialog.button(QMessageBox.StandardButton.Cancel).setText("Keep for later")
+        dialog.setDefaultButton(QMessageBox.StandardButton.Cancel)
+        action = dialog.exec()
+        if action == int(QMessageBox.StandardButton.Cancel):
+            return
+        choice = ("recover" if action == int(QMessageBox.StandardButton.Yes)
+                  else "discard" if action == int(QMessageBox.StandardButton.No)
+                  else None)
+        if choice is None:
+            return
+        completed, errors = 0, []
+        for path in unfinished:
+            try:
+                resolve_pending(path, choice)
+                completed += 1
+            except (OSError, ValueError) as exc:
+                errors.append(f"{path.name}: {exc}")
+        self.refresh_library("Recordings")
+        if errors:
+            QMessageBox.warning(
+                self, "Recording recovery incomplete",
+                f"Processed {completed} of {len(unfinished)} files. "
+                "Files that could not be processed were preserved.\n"
+                + "\n".join(errors[:3]),
+            )
+        else:
+            self.inform("Recording recovery",
+                        f"{completed} recording(s) recovered" if choice == "recover"
+                        else f"{completed} unfinished recording(s) discarded")
 
     def choose_recording(self, file_format: str = "MP4"):
         self.capture_format = file_format if file_format in ("MP4", "GIF") else "MP4"
