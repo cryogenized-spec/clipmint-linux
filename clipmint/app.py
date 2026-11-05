@@ -2522,6 +2522,7 @@ class ClipMintWindow(QMainWindow):
         except (HistorySecurityError, OSError, ValueError) as exc:
             self.error("Encrypted history", str(exc))
             return
+        secure.max_total_bytes = self.store.max_total_bytes
         self.store.close()
         self.store = secure
         self.quick_popup.store = secure
