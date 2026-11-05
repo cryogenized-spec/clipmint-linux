@@ -174,6 +174,30 @@ def _require_no_other_open_handles(old: Path) -> None:
                                 opened = fd.stat(follow_symlinks=True)
                             except FileNotFoundError:
                                 continue
+                            except PermissionError as exc:
+                                # Linux can deny inspecting unrelated (often
+                                # sandboxed/non-dumpable) same-UID processes'
+                                # terminal/socket FDs. Never ignore denial
+                                # for our own process or a ClipMint process;
+                                # the SQLite VFS lock still guards other
+                                # active database users.
+                                if int(proc.name) == own:
+                                    raise HistorySecurityError(
+                                        "Cannot inspect own open file handles"
+                                    ) from exc
+                                try:
+                                    command = Path(
+                                        f"/proc/{proc.name}/cmdline"
+                                    ).read_bytes()[:8192].lower()
+                                except OSError as problem:
+                                    raise HistorySecurityError(
+                                        "Cannot identify process with unreadable FDs"
+                                    ) from problem
+                                if b"clipmint" in command:
+                                    raise HistorySecurityError(
+                                        "Cannot inspect another ClipMint process"
+                                    ) from exc
+                                continue
                             if (opened.st_dev, opened.st_ino) != identity:
                                 continue
                             if int(proc.name) != own:
