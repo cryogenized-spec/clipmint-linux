@@ -34,6 +34,7 @@ from .screenshot_editor import installed_editors, resolve_editor, open_image_edi
 from .screenshot_notice import ScreenshotNotice
 from .screenshot_gallery import read_screenshot, screenshot_thumbnail_icon, PREVIEW_SIZE
 from .clipboard_formats import from_mime, is_concealed, sensitive_text, mime_from_entry
+from .clipboard_guard import OwnClipboardGuard
 from .foreground_privacy import blocked_foreground, DEFAULT_BLOCKED
 from .ocr import OcrWorker
 from .quick_popup import QuickPopup, paste_to_window
@@ -201,7 +202,7 @@ class ClipMintWindow(QMainWindow):
         self.capture_format = "MP4"
         self._privacy_skipped = 0
         self._closing = False
-        self._ignore_next_clipboard_change = False
+        self._own_clipboard_guard = OwnClipboardGuard()
         self._last_screenshot_path = None
         self._screenshot_thumbnail_generation = 0
         self._ocr_workers = set()
@@ -745,7 +746,7 @@ class ClipMintWindow(QMainWindow):
         self._vault_clipboard_text = value
         self._vault_clipboard_token += 1
         token = self._vault_clipboard_token
-        self._ignore_next_clipboard_change = True
+        self._own_clipboard_guard.note_text(value)
         QApplication.clipboard().setText(value)
         QTimer.singleShot(30000, lambda: self.expire_vault_clipboard(token))
 
@@ -774,7 +775,6 @@ class ClipMintWindow(QMainWindow):
             return
         value = self._vault_clipboard_text
         if value is not None and QApplication.clipboard().text() == value:
-            self._ignore_next_clipboard_change = True
             QApplication.clipboard().clear()
         self._vault_clipboard_text = None
 
@@ -1761,14 +1761,13 @@ class ClipMintWindow(QMainWindow):
         self._sensitive_clipboard_token += 1
 
     def clipboard_changed(self):
-        if (not self.monitoring or self._closing
-                or getattr(self.store, "closed", False)):
-            return
-        if self._ignore_next_clipboard_change:
-            self._ignore_next_clipboard_change = False
-            return
+        # Clear our own-write expectation on every event, even while history
+        # is paused; never carry a stale skip across Pause/Resume.
         data = QApplication.clipboard().mimeData()
-        if data is None:
+        if self._own_clipboard_guard.consume(data):
+            return
+        if (not self.monitoring or self._closing
+                or getattr(self.store, "closed", False) or data is None):
             return
         if is_concealed(data):
             self._privacy_skipped += 1
@@ -1844,7 +1843,6 @@ class ClipMintWindow(QMainWindow):
             return
         clipboard = QApplication.clipboard()
         if clipboard.text() == expected:
-            self._ignore_next_clipboard_change = True
             clipboard.clear()
 
     def refresh(self, *_args):
@@ -2004,9 +2002,8 @@ class ClipMintWindow(QMainWindow):
         self.refresh()
 
     def _copy_plain_text(self, value: str):
-        self._ignore_next_clipboard_change = True
+        self._own_clipboard_guard.note_text(value)
         QApplication.clipboard().setText(value)
-        QTimer.singleShot(400, lambda: setattr(self, "_ignore_next_clipboard_change", False))
         self.statusBar().showMessage("Copied to clipboard · Paste manually", 5000)
 
     def _copy_entry_by_id(self, clip_id: int) -> bool:
@@ -2014,11 +2011,10 @@ class ClipMintWindow(QMainWindow):
         if entry is None:
             return False
         kind, contents = entry
-        self._ignore_next_clipboard_change = True
+        self._own_clipboard_guard.note_entry(kind, contents)
         QApplication.clipboard().setMimeData(
             mime_from_entry(kind, contents, self.store.get_formats(clip_id))
         )
-        QTimer.singleShot(400, lambda: setattr(self, "_ignore_next_clipboard_change", False))
         self.store.refresh_temporary_copy_time(clip_id)
         return True
 
@@ -2241,9 +2237,8 @@ class ClipMintWindow(QMainWindow):
         if not text.strip():
             self.inform("OCR", "No readable text detected")
             return
-        self._ignore_next_clipboard_change = True
+        self._own_clipboard_guard.note_text(text)
         QApplication.clipboard().setText(text)
-        QTimer.singleShot(400, lambda: setattr(self, "_ignore_next_clipboard_change", False))
         if (not sensitive_text(text) and not looks_sensitive(text)
                 and self.monitoring and not self.history_security_error):
             data = text.encode("utf-8")
@@ -2265,8 +2260,7 @@ class ClipMintWindow(QMainWindow):
         if value is None:
             return
         kind, contents = value
-        self._ignore_next_clipboard_change = True
-        QTimer.singleShot(400, lambda: setattr(self, "_ignore_next_clipboard_change", False))
+        self._own_clipboard_guard.note_entry(kind, contents)
         QApplication.clipboard().setMimeData(
             mime_from_entry(kind, contents,
                             self.store.get_formats(item.data(Qt.ItemDataRole.UserRole)))
@@ -2429,14 +2423,15 @@ class ClipMintWindow(QMainWindow):
         if plain and kind != "text":
             self.inform("Quick paste", "Plain paste works with text clips only")
             return
-        self._ignore_next_clipboard_change = True
         if plain:
-            QApplication.clipboard().setText(content.decode("utf-8", "replace"))
+            value = content.decode("utf-8", "replace")
+            self._own_clipboard_guard.note_text(value)
+            QApplication.clipboard().setText(value)
         else:
+            self._own_clipboard_guard.note_entry(kind, content)
             QApplication.clipboard().setMimeData(
                 mime_from_entry(kind, content, self.store.get_formats(clip_id))
             )
-        QTimer.singleShot(400, lambda: setattr(self, "_ignore_next_clipboard_change", False))
         self.store.refresh_temporary_copy_time(clip_id)
         if wid and self.settings.value("popup/auto_paste", True, type=bool):
             QTimer.singleShot(150, lambda: self._paste_to_target(wid, klass))
