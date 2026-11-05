@@ -92,6 +92,24 @@ class IndexedHistoryTests(unittest.TestCase):
             self.db.save_template("Dispatch", "a")
             self.db.save_template("dispatch", "b")
 
+    def test_category_filter_applies_before_result_limit(self):
+        # Older URLs must not disappear behind the 1,000 latest plain-text
+        # records. The same filter is shared with classify() to avoid drift.
+        original_urls = [
+            self.db.add("text", f"https://example.org/item/{i}".encode(),
+                        f"https://example.org/item/{i}")
+            for i in range(3)
+        ]
+        for i in range(1003):
+            self.db.add("text", f"plain note number {i}".encode(),
+                        f"plain note number {i}")
+        self.assertEqual(
+            [item.id for item in self.db.search(category="URLs")],
+            list(reversed(original_urls)),
+        )
+        self.assertEqual(len(self.db.search(category="Text")), 1000)
+        self.assertEqual(len(self.db.search(category="Images")), 0)
+
     def test_index_search_large_corpus(self):
         for i in range(400):
             self.db.add("text", f"sample test document {i}".encode(), f"Entry {i}")
