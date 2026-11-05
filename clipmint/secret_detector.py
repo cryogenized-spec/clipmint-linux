@@ -198,7 +198,13 @@ def detect_secret(
             result._add(Confidence.MEDIUM, "credential environment variable")
             break
     for candidate in IBAN_CANDIDATE.finditer(text.upper()):
-        if valid_iban(candidate.group()):
+        # A note may append ordinary words after a valid IBAN on one line.
+        # Check complete whitespace-separated prefixes rather than treating
+        # the entire greedy match as one bank identifier.
+        words = candidate.group().split()
+        variants = (["".join(words[:i]) for i in range(1, len(words) + 1)]
+                    if len(words) > 1 else [candidate.group()])
+        if any(valid_iban(value) for value in variants):
             result._add(Confidence.HIGH, "IBAN bank account checksum")
             break
     for candidate in CARD_CANDIDATE.finditer(text):
