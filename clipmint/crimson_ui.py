@@ -645,7 +645,7 @@ def build_archive_page(w):
         'QLineEdit:focus {background:transparent;border:0;color:#FFF4E7;}'
     )
     w.search.setPlaceholderText("Search the archive…")
-    w.search.textChanged.connect(w.refresh)
+    w.search.textChanged.connect(w._schedule_history_search)
     search_row.addWidget(w.search,1)
     layout.addWidget(search_shell)
     controls=QHBoxLayout()

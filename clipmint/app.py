@@ -196,6 +196,12 @@ class ClipMintWindow(QMainWindow):
         self._vault_lock_timer.setSingleShot(True)
         self._vault_lock_timer.timeout.connect(self.lock_vault)
         self.recorder = RegionRecorder()
+        # Decryption is deliberately synchronous and ephemeral. Debounce
+        # rapid text edits to avoid decrypting up to 1,000 rows per keystroke.
+        self._history_search_timer = QTimer(self)
+        self._history_search_timer.setSingleShot(True)
+        self._history_search_timer.setInterval(180)
+        self._history_search_timer.timeout.connect(self.refresh)
         self.monitoring = not bool(self.history_security_error)
         self.selector: AreaSelector | None = None
         self.recorder_window: RecorderWindow | None = None
@@ -314,7 +320,7 @@ class ClipMintWindow(QMainWindow):
         layout.addLayout(bins)
         self.search = QLineEdit()
         self.search.setPlaceholderText("Search clips in this bin…")
-        self.search.textChanged.connect(self.refresh)
+        self.search.textChanged.connect(self._schedule_history_search)
         layout.addWidget(self.search)
         sorts = QHBoxLayout()
         sorts.addWidget(QLabel("View:"))
@@ -324,7 +330,7 @@ class ClipMintWindow(QMainWindow):
         sorts.addWidget(self.category)
         sorts.addWidget(QLabel("Sort:"))
         self.sort_combo = QComboBox()
-        self.sort_combo.addItems(["Latest first", "Oldest first", "A–Z", "Z–A", "Numbered list"])
+        self.sort_combo.addItems(["Latest first", "Oldest first", "A–Z", "Z–A", "Best match", "Numbered list"])
         self.sort_combo.currentIndexChanged.connect(self.refresh)
         sorts.addWidget(self.sort_combo)
         sorts.addStretch()
@@ -1881,7 +1887,11 @@ class ClipMintWindow(QMainWindow):
         if clipboard.text() == expected:
             clipboard.clear()
 
+    def _schedule_history_search(self, *_args):
+        self._history_search_timer.start()
+
     def refresh(self, *_args):
+        self._history_search_timer.stop()
         if not hasattr(self, "history"):
             return
         previous = self.selected_id()

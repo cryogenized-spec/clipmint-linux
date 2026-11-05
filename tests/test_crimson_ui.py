@@ -9,6 +9,7 @@ os.environ.setdefault("XDG_SESSION_TYPE", "x11")
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtTest import QTest
 from clipmint.app import ClipMintWindow
 
 
@@ -140,10 +141,16 @@ class CrimsonArchiveTests(unittest.TestCase):
             window.toggle_pin_selected()
             self.assertTrue(window.store.pinned(a))
             self.assertEqual(window.pin_action.text(), "UNPIN")
+            # This assertion tests delayed search repaint, not asynchronous
+            # background clipboard ingestion during the Qt event-loop wait.
+            window.monitoring = False
             window.search.setText("non-matching")
+            self.assertTrue(window._history_search_timer.isActive())
+            QTest.qWait(220)  # Searches are now intentionally debounced.
             self.assertEqual(window.history.count(), 0)
             self.assertFalse(window.copy_action.isEnabled())
             window.search.clear()
+            QTest.qWait(220)
             self.assertEqual(window.history.count(), 2)
             window.history.setCurrentRow(0)
             with patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.No):
