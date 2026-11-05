@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import math
 import re
+from datetime import date
 from collections import Counter
 from dataclasses import dataclass, field
 from enum import IntEnum
@@ -84,6 +85,7 @@ HEX = re.compile(r"^[0-9a-fA-F]+$")
 URL_OR_PATH = re.compile(r"^(?:[a-z][a-z0-9+.-]*://|/|~/|\.{1,2}/|[A-Za-z]:\\)", re.I)
 EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 IPV4 = re.compile(r"^\d{1,3}(?:\.\d{1,3}){3}$")
+IBAN_CANDIDATE = re.compile(r"\b[A-Z]{2}[0-9]{2}[A-Z0-9 ]{11,40}\b")
 
 
 def luhn_ok(value: str) -> bool:
@@ -97,6 +99,37 @@ def luhn_ok(value: str) -> bool:
             number = number * 2 - 9 if number > 4 else number * 2
         total += number
     return total % 10 == 0
+
+
+def south_african_id(value: str) -> bool:
+    """Validate the date, citizenship marker and Luhn check digit."""
+    if not re.fullmatch(r"[0-9]{13}", value) or not luhn_ok(value):
+        return False
+    yy, month, day = int(value[:2]), int(value[2:4]), int(value[4:6])
+    if value[10] not in "01":
+        return False
+    for year in (1900 + yy, 2000 + yy):
+        try:
+            date(year, month, day)
+            return True
+        except ValueError:
+            continue
+    return False
+
+
+def valid_iban(value: str) -> bool:
+    """ISO 13616 check digits, not merely a bank-account-looking string."""
+    cleaned = re.sub(r"\s+", "", value).upper()
+    if not (15 <= len(cleaned) <= 34 and
+            re.fullmatch(r"[A-Z]{2}[0-9]{2}[A-Z0-9]+", cleaned)):
+        return False
+    reordered = cleaned[4:] + cleaned[:4]
+    remainder = 0
+    for ch in reordered:
+        part = str(ord(ch) - 55) if ch.isalpha() else ch
+        for digit in part:
+            remainder = (remainder * 10 + int(digit)) % 97
+    return remainder == 1
 
 
 def shannon_entropy(value: str) -> float:
@@ -164,7 +197,15 @@ def detect_secret(
                for suffix in SENSITIVE_ENV_ENDINGS):
             result._add(Confidence.MEDIUM, "credential environment variable")
             break
+    for candidate in IBAN_CANDIDATE.finditer(text.upper()):
+        if valid_iban(candidate.group()):
+            result._add(Confidence.HIGH, "IBAN bank account checksum")
+            break
     for candidate in CARD_CANDIDATE.finditer(text):
+        digits = re.sub(r"\D", "", candidate.group())
+        if south_african_id(digits):
+            result._add(Confidence.HIGH, "South African identity number")
+            continue
         if luhn_ok(candidate.group()):
             result._add(Confidence.HIGH, "payment card checksum")
             break
