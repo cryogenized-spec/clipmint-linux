@@ -5,7 +5,7 @@ copies. Never run as part of automatic encrypted-history migration.
 """
 from __future__ import annotations
 
-import os
+from contextlib import closing
 from pathlib import Path
 import sqlite3
 
@@ -44,7 +44,7 @@ def verify_legacy_history(encrypted: EncryptedClipStore) -> tuple[Path, int]:
     uri = "file:" + quote(str(old), safe="/") + "?mode=ro"
     count = 0
     try:
-        with sqlite3.connect(uri, uri=True, timeout=1) as legacy:
+        with closing(sqlite3.connect(uri, uri=True, timeout=1)) as legacy:
             if legacy.execute("PRAGMA quick_check").fetchone() != ("ok",):
                 raise HistorySecurityError("Legacy history integrity check failed")
             for row in legacy.execute(
