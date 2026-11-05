@@ -7,6 +7,7 @@ import os
 import shutil
 import subprocess
 import sys
+from time import monotonic
 
 from PySide6.QtCore import Qt, QRect, QPoint, Signal
 from PySide6.QtGui import QColor, QPainter, QPen, QPixmap
@@ -145,6 +146,11 @@ def ffmpeg_binary() -> str:
 class RegionRecorder:
     """FFmpeg X11 recorder. Captures to a temporary file until user confirms saving."""
 
+    # The UI polls finished() every 300 ms. Never block the Qt thread waiting
+    # for FFmpeg: request a clean MP4 trailer, then escalate only if it hangs.
+    STOP_GRACE_SECONDS = 5.0
+    TERMINATE_GRACE_SECONDS = 2.0
+
     QUALITY = {
         "High": (30, 20, 450_000),
         "Medium": (25, 25, 230_000),
@@ -156,6 +162,9 @@ class RegionRecorder:
         self.output: Path | None = None
         self.log = None
         self.stopping = False
+        self.stop_requested_at: float | None = None
+        self.terminate_sent_at: float | None = None
+        self.kill_sent = False
         self.format = "MP4"
         self.quality = "High"
         self.estimated_bytes_per_second = 450_000
@@ -212,26 +221,50 @@ class RegionRecorder:
             raise
         self.output = path
         self.stopping = False
+        self.stop_requested_at = None
+        self.terminate_sent_at = None
+        self.kill_sent = False
         return path
 
     def stop(self) -> bool:
         if not self.active or self.stopping:
             return False
         self.stopping = True
+        self.stop_requested_at = monotonic()
         try:
             assert self.process is not None and self.process.stdin is not None
             self.process.stdin.write(b"q\n")
             self.process.stdin.flush()
             self.process.stdin.close()
-        except (OSError, BrokenPipeError):
+        except (OSError, BrokenPipeError, ValueError):
+            # A closed pipe can mean FFmpeg has already exited; polling will
+            # collect its exit status or escalate without freezing the UI.
             pass
         return True
 
     def finished(self) -> tuple[int, Path | None] | None:
+        """Nonblocking poll with bounded graceful shutdown for stalled FFmpeg."""
         if self.process is None:
             return None
         status = self.process.poll()
         if status is None:
+            if self.stopping and self.stop_requested_at is not None:
+                now = monotonic()
+                if (self.terminate_sent_at is None
+                        and now - self.stop_requested_at >= self.STOP_GRACE_SECONDS):
+                    try:
+                        self.process.terminate()
+                    except ProcessLookupError:
+                        pass
+                    self.terminate_sent_at = now
+                elif (self.terminate_sent_at is not None
+                      and not self.kill_sent
+                      and now - self.terminate_sent_at >= self.TERMINATE_GRACE_SECONDS):
+                    try:
+                        self.process.kill()
+                    except ProcessLookupError:
+                        pass
+                    self.kill_sent = True
             return None
         self.process = None
         if self.log is not None:
@@ -240,6 +273,9 @@ class RegionRecorder:
         path = self.output
         self.output = None
         self.stopping = False
+        self.stop_requested_at = None
+        self.terminate_sent_at = None
+        self.kill_sent = False
         return status, path
 
     @staticmethod
