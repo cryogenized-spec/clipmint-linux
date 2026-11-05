@@ -141,6 +141,9 @@ class CrimsonArchiveTests(unittest.TestCase):
             window.toggle_pin_selected()
             self.assertTrue(window.store.pinned(a))
             self.assertEqual(window.pin_action.text(), "UNPIN")
+            # This assertion tests delayed search repaint, not asynchronous
+            # background clipboard ingestion during the Qt event-loop wait.
+            window.monitoring = False
             window.search.setText("non-matching")
             self.assertTrue(window._history_search_timer.isActive())
             QTest.qWait(220)  # Searches are now intentionally debounced.
