@@ -15,6 +15,31 @@ from .capture import recordings_dir
 _PENDING = re.compile(r"^\.pending-recording-\d{8}-\d{6}-\d{6}\.(?:mp4|gif)$")
 
 
+def _command_writes_recording(command: bytes, path: Path) -> bool:
+    """Compare FFmpeg output arguments by file identity, including symlink parents.
+
+    /proc/<pid>/cmdline is NUL-delimited. Only absolute arguments matching
+    the exact recording filename are considered; a substring match alone
+    could suppress recovery for an unrelated path.
+    """
+    args = [os.fsdecode(arg) for arg in command.split(b"\0") if arg]
+    if not args or "ffmpeg" not in Path(args[0]).name.lower():
+        return False
+    target = path.resolve()
+    for argument in args[1:]:
+        if not argument.startswith("/") or Path(argument).name != path.name:
+            continue
+        try:
+            if Path(argument).resolve() == target:
+                return True
+        except (OSError, RuntimeError):
+            # An inaccessible path that exactly matches our spelled pathname
+            # remains ambiguous; refuse to mutate it.
+            if argument == str(path):
+                return True
+    return False
+
+
 def _writer_may_be_active(path: Path) -> bool:
     """Conservatively detect a surviving FFmpeg writer on Linux.
 
@@ -28,7 +53,6 @@ def _writer_may_be_active(path: Path) -> bool:
         proc = Path("/proc")
         if not proc.is_dir():
             return True  # Fail closed if process inspection is unavailable.
-        target = os.fsencode(str(path.resolve()))
         for entry in proc.iterdir():
             if not entry.name.isdigit():
                 continue
@@ -40,7 +64,7 @@ def _writer_may_be_active(path: Path) -> bool:
                 # A same-user process we cannot inspect is ambiguous.
                 # Do not perform a destructive operation on uncertainty.
                 return True
-            if b"ffmpeg" in command.lower() and target in command:
+            if _command_writes_recording(command, path):
                 return True
     except (OSError, PermissionError):
         return True
