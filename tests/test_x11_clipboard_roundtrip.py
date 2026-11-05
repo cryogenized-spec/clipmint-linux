@@ -21,8 +21,10 @@ from clipmint.store import ClipStore
 
 
 @unittest.skipUnless(
-    os.environ.get("DISPLAY") and shutil.which("xclip"),
-    "Needs an isolated X11 display and xclip",
+    os.environ.get("CLIPMINT_X11_TEST") == "1"
+    and os.environ.get("QT_QPA_PLATFORM") == "xcb"
+    and os.environ.get("DISPLAY") and shutil.which("xclip"),
+    "Explicit isolated X11 test opt-in, xcb backend and xclip required",
 )
 class X11ClipboardRoundTripTests(unittest.TestCase):
     @classmethod
