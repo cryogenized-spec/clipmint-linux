@@ -9,6 +9,7 @@ import os
 import shutil
 import subprocess
 import unittest
+from time import monotonic
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -54,11 +55,22 @@ class X11ClipboardRoundTripTests(unittest.TestCase):
                     mime_from_entry(kind, original, store.get_formats(ident))
                 )
                 QTest.qWait(160)
-                reply = subprocess.run(
+                # Qt is the clipboard *owner* here: it must process X11
+                # selection requests while xclip reads in another process.
+                reply = subprocess.Popen(
                     ["xclip", "-selection", "clipboard", "-o"],
-                    capture_output=True, check=True, timeout=8,
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 )
-                self.assertEqual(reply.stdout, copied)
+                deadline = monotonic() + 8
+                while reply.poll() is None and monotonic() < deadline:
+                    QTest.qWait(20)
+                if reply.poll() is None:
+                    reply.kill()
+                    reply.communicate()
+                    self.fail("X11 clipboard readback timed out")
+                stdout, stderr = reply.communicate(timeout=2)
+                self.assertEqual(reply.returncode, 0, stderr)
+                self.assertEqual(stdout, copied)
             finally:
                 store.close()
 
