@@ -77,6 +77,13 @@ class ClipStore:
         self.max_unpinned = max_unpinned
         self.closed = False
         self.conn = sqlite3.connect(self.path)
+        # Match the public classify() rules inside SQL, so category selection
+        # happens before the result limit rather than dropping old matches.
+        self.conn.create_function(
+            "clipmint_category", 2,
+            lambda kind, preview: classify(Clip(0, kind, preview, False, "")),
+            deterministic=True,
+        )
         self.conn.execute("PRAGMA secure_delete=ON")
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("""CREATE TABLE IF NOT EXISTS clips (
@@ -344,6 +351,9 @@ class ClipStore:
             else:
                 where.append("instr(lower(preview),lower(?)) > 0")
                 params.append(query)
+        if category != "All":
+            where.append("clipmint_category(kind,preview)=?")
+            params.append(category)
         if favorites_only:
             where.append("favorite=1")
         if tag:
@@ -356,8 +366,6 @@ class ClipStore:
             params
         ).fetchall()
         clips = [Clip(r[0],r[1],r[2],bool(r[3]),r[4],r[5],bool(r[6])) for r in rows]
-        if category != "All":
-            clips = [clip for clip in clips if classify(clip) == category]
         if sort == "Best match" and query:
             relevance = {ident: i for i, ident in enumerate(matched_ids)}
             clips.sort(key=lambda c: (relevance.get(c.id, 10**7), -c.id))

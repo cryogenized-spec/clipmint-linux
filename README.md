@@ -11,6 +11,13 @@ A mouse-first clipboard manager, screenshot tool, and dedicated MP4/GIF recorder
 3. Double-click the file in Nemo and choose **Install Package**.
 4. Open **ClipMint** from the application menu. No terminal remains open.
 
+For developers working from a source checkout, run `./install.sh --dev` once
+to create a local `.venv` and install Python dependencies, then start with
+`./run.sh`. This is separate from the standalone installer and intentionally
+requires an explicit developer opt-in. OCR is optional: Tesseract and the
+English language pack are recommended, but not required to run ClipMint.
+Without Tesseract, OCR actions report that the optional tool is missing.
+
 The installer bundles Python, Qt, and FFmpeg. GitHub downloads build-time dependencies on the **GitHub runner**, not on your laptop. The app doesn't run pip/apt or fetch packages on first use.
 
 ## Clipboard bins and sorting
