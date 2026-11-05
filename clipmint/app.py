@@ -2546,7 +2546,8 @@ class ClipMintWindow(QMainWindow):
             self, "Encrypt clipboard history",
             "This creates a separate encrypted SQLite database using your unlocked "
             "desktop Secret Service keyring. The original plaintext database is "
-            "preserved for recovery, and will still require manual removal. Continue?",
+            "preserved for recovery. After verification, you may optionally remove "
+            "the old plaintext database in Settings. Continue?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
