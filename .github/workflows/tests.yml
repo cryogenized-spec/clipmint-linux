@@ -18,7 +18,7 @@ jobs:
       - name: Install Qt system interfaces on GitHub runner
         run: |
           sudo apt-get update
-          sudo apt-get install -y libegl1 libopengl0 libxcb-cursor0 libxkbcommon-x11-0 tesseract-ocr tesseract-ocr-eng
+          sudo apt-get install -y libegl1 libopengl0 libxcb-cursor0 libxkbcommon-x11-0 libxcb-icccm4 libxcb-shape0 libxcb-keysyms1 libxcb-image0 libxcb-randr0 libxcb-render-util0 libxcb-xfixes0 libxcb-xkb1 tesseract-ocr tesseract-ocr-eng xvfb xclip xdotool
       - name: Install application dependencies
         run: python -m pip install -r requirements.txt
       - name: Fetch and verify open-licensed DotGothic16 on GitHub runner only
@@ -50,3 +50,10 @@ jobs:
         run: python -m compileall -q clipmint tests
       - name: SQLite and offscreen Qt smoke tests
         run: python -m unittest discover -s tests -v
+      - name: Cross-process clipboard round-trip on Xvfb
+        env:
+          QT_QPA_PLATFORM: xcb
+          CLIPMINT_X11_TEST: "1"
+        run: |
+          xvfb-run -a -s "-screen 0 1280x800x24" \
+            python -m unittest discover -s tests -p test_x11_clipboard_roundtrip.py -v
