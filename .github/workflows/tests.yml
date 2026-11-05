@@ -53,6 +53,7 @@ jobs:
       - name: Cross-process clipboard round-trip on Xvfb
         env:
           QT_QPA_PLATFORM: xcb
+          CLIPMINT_X11_TEST: "1"
         run: |
           xvfb-run -a -s "-screen 0 1280x800x24" \
             python -m unittest discover -s tests -p test_x11_clipboard_roundtrip.py -v
