@@ -1,5 +1,8 @@
 name: Build ClipMint v0.6 integration preview (no auto release)
 on:
+  push:
+    tags:
+      - 'v[0-9]*.[0-9]*.[0-9]*'
   pull_request:
     branches: [main]
     paths:
@@ -107,17 +110,64 @@ jobs:
           code=$?
           set -e
           if [[ "$code" -ne 124 ]]; then echo "Unexpected app exit status: $code"; exit 1; fi
-      - name: Create isolated v0.6 preview Debian package
+      - name: Select preview or tagged Debian version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+              echo "Refusing invalid release version: $GITHUB_REF_NAME" >&2
+              exit 1
+            }
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="0.6.0~preview1"
+          fi
+          echo "package_version=$version" >> "$GITHUB_OUTPUT"
+      - name: Create Debian package (preview or verified tag)
         env:
-          CLIPMINT_VERSION: 0.6.0~preview1
+          CLIPMINT_VERSION: ${{ steps.version.outputs.package_version }}
         run: bash packaging/build-deb.sh
-      - name: Verify and smoke-test draft installer (CI runner only)
+      - name: Verify and smoke-test installer (CI runner only)
         env:
-          CLIPMINT_VERSION: 0.6.0~preview1
-        run: bash packaging/verify-field-package.sh dist-packages/clipmint_0.6.0~preview1_amd64.deb
+          CLIPMINT_VERSION: ${{ steps.version.outputs.package_version }}
+        run: bash packaging/verify-field-package.sh "dist-packages/clipmint_${CLIPMINT_VERSION}_amd64.deb"
       - uses: actions/upload-artifact@v4
         with:
           name: ClipMint-v0.6-main-integration-preview
           path: dist-packages/
           if-no-files-found: error
           retention-days: 14
+
+  publish-release:
+    # Only an explicit version-tag push can publish. PRs and manual preview
+    # builds never publish a release or gain contents:write permission.
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ClipMint-v0.6-main-integration-preview
+          path: dist-packages
+      - name: Check artifact checksum and expected version
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist-packages
+          sha256sum --check SHA256SUMS
+          test -f "clipmint_${GITHUB_REF_NAME#v}_amd64.deb"
+      - name: Publish GitHub Release with installer and checksums
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release create "$GITHUB_REF_NAME" \
+            "dist-packages/clipmint_${GITHUB_REF_NAME#v}_amd64.deb" \
+            dist-packages/SHA256SUMS \
+            --title "ClipMint ${GITHUB_REF_NAME#v}" \
+            --generate-notes --verify-tag
