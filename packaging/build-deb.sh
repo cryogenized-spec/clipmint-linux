@@ -50,4 +50,5 @@ Description: Clipboard manager, screenshot tool, and screen recorder
 EOF
 dpkg-deb --root-owner-group --build "$root" "dist-packages/clipmint_${version}_amd64.deb"
 dpkg-deb --info "dist-packages/clipmint_${version}_amd64.deb"
-sha256sum "dist-packages/clipmint_${version}_amd64.deb" > "dist-packages/SHA256SUMS"
+# Relative filenames let users verify .deb and SHA256SUMS side by side.
+(cd dist-packages && sha256sum "clipmint_${version}_amd64.deb" > SHA256SUMS)
