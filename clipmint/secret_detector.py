@@ -197,7 +197,13 @@ def detect_secret(
                for suffix in SENSITIVE_ENV_ENDINGS):
             result._add(Confidence.MEDIUM, "credential environment variable")
             break
-    for candidate in IBAN_CANDIDATE.finditer(text.upper()):
+    upper = text.upper()
+    # Look ahead to every possible bank-account start. Nonoverlapping greedy
+    # matches can otherwise swallow a real IBAN after an account-like reference.
+    for start in re.finditer(r"(?=\b[A-Z]{2}[0-9]{2})", upper):
+        candidate = IBAN_CANDIDATE.match(upper, start.start())
+        if candidate is None:
+            continue
         # A note may append ordinary words after a valid IBAN on one line.
         # Check complete whitespace-separated prefixes rather than treating
         # the entire greedy match as one bank identifier.
