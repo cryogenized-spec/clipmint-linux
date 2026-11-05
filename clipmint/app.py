@@ -47,6 +47,7 @@ from .cinnamon_hotkey import (install_shortcut, restore_screenshot_takeover,
 from .secure_history import (EncryptedClipStore, HistorySecurityError,
                              key_from_secret_service, secure_path)
 from .archive_backup import backup_archive, ArchiveBackupError
+from .legacy_cleanup import verify_legacy_history, remove_verified_legacy_history
 from .autostart import AutostartError, is_enabled as login_startup_enabled, set_enabled as set_login_startup
 
 
@@ -1403,6 +1404,15 @@ class ClipMintWindow(QMainWindow):
         self.secure_history_button.setEnabled(not self.history_secure)
         self.secure_history_button.clicked.connect(self.enable_encrypted_history)
         privacy_layout.addWidget(self.secure_history_button)
+        self.remove_legacy_button = QPushButton(
+            "Verify and remove old plaintext history…"
+        )
+        self.remove_legacy_button.setEnabled(
+            self.history_secure and
+            (self.store.path.with_name("history.sqlite3").exists())
+        )
+        self.remove_legacy_button.clicked.connect(self.remove_old_plaintext_history)
+        privacy_layout.addWidget(self.remove_legacy_button)
 
         archive_help = QLabel(
             "Save a consistent local copy of your current clipboard archive, "
@@ -2551,6 +2561,39 @@ class ClipMintWindow(QMainWindow):
             "The contents are NOT encrypted.",
         )
 
+    def remove_old_plaintext_history(self):
+        """Only delete legacy data after read-back, user confirmation and recheck."""
+        if not self.history_secure or not isinstance(self.store, EncryptedClipStore):
+            self.error("Encrypted history", "Unlock encrypted history first")
+            return
+        try:
+            old_path, checked = verify_legacy_history(self.store)
+        except (HistorySecurityError, OSError, ValueError) as exc:
+            self.error("Legacy history", str(exc))
+            return
+        answer = QMessageBox.question(
+            self, "Remove verified plaintext history?",
+            f"Verified {checked} original clipboard entries in the encrypted archive.\n\n"
+            "Permanently remove the old plaintext SQLite database and its WAL "
+            "sidecars? This cannot be undone. Any separate backups, disk "
+            "snapshots or SSD remnant data may still contain plaintext; this "
+            "is NOT a forensic secure erase. Make sure your encrypted archive "
+            "and keyring key are backed up first.\n\n"
+            f"File: {old_path}",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            removed = remove_verified_legacy_history(self.store)
+        except (HistorySecurityError, OSError, ValueError) as exc:
+            self.error("Legacy history", str(exc))
+            return
+        self.remove_legacy_button.setEnabled(False)
+        self.inform("Legacy history removed",
+                    f"Removed old plaintext database after verifying {removed} entries")
+
     def enable_encrypted_history(self):
         if self.history_secure:
             return
@@ -2558,7 +2601,8 @@ class ClipMintWindow(QMainWindow):
             self, "Encrypt clipboard history",
             "This creates a separate encrypted SQLite database using your unlocked "
             "desktop Secret Service keyring. The original plaintext database is "
-            "preserved for recovery, and will still require manual removal. Continue?",
+            "preserved for recovery. After verification, you may optionally remove "
+            "the old plaintext database in Settings. Continue?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
@@ -2582,6 +2626,7 @@ class ClipMintWindow(QMainWindow):
         self.settings.setValue("privacy/history_secure", True)
         self.secure_history_button.setText("Encrypted history active")
         self.secure_history_button.setEnabled(False)
+        self.remove_legacy_button.setEnabled(True)
         self.refresh()
         self.inform(
             "History encrypted",
