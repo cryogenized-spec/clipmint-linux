@@ -174,6 +174,11 @@ class ClipMintWindow(QMainWindow):
                     )
             except (HistorySecurityError, OSError) as exc:
                 self.history_security_error = str(exc)
+        history_mb = self.settings.value("history/max_total_mb", 0, type=int)
+        self.store.max_total_bytes = (
+            history_mb * 1024 * 1024
+            if history_mb in (128, 256, 512, 1024) else None
+        )
         # Seed new installations with ready-to-use Smart collections, but do
         # not alter existing rule sets or overwrite a deliberate disabled state.
         if (not self.history_security_error
@@ -1220,6 +1225,35 @@ class ClipMintWindow(QMainWindow):
         temp_layout.addWidget(self.temporary_exit_toggle)
         layout.addWidget(temp_group)
 
+        cap_group = QGroupBox("History payload storage limit · optional")
+        cap_layout = QVBoxLayout(cap_group)
+        cap_help = QLabel(
+            "OFF by default. Enabling a limit can remove oldest unpinned "
+            "history entries across collections, but NEVER pins. This limits "
+            "stored payload bytes, not the physical SQLite file size; normal "
+            "updates and crashes never opt you into deleting clips."
+        )
+        cap_help.setWordWrap(True)
+        cap_layout.addWidget(cap_help)
+        self.history_storage_limit = QComboBox()
+        for name, value in (
+            ("Off · no automatic byte pruning", 0),
+            ("128 MB", 128),
+            ("256 MB", 256),
+            ("512 MB", 512),
+            ("1 GB", 1024),
+        ):
+            self.history_storage_limit.addItem(name, value)
+        saved_mb = int(self.settings.value("history/max_total_mb", 0, type=int))
+        self.history_storage_limit.setCurrentIndex(
+            max(0, self.history_storage_limit.findData(saved_mb))
+        )
+        self.history_storage_limit.currentIndexChanged.connect(
+            self.set_history_storage_limit
+        )
+        cap_layout.addWidget(self.history_storage_limit)
+        layout.addWidget(cap_group)
+
         open_files = QPushButton("Open recordings folder")
         open_files.clicked.connect(lambda: self.open_folder(recordings_dir()))
         layout.addWidget(open_files)
@@ -1434,6 +1468,37 @@ class ClipMintWindow(QMainWindow):
         scroll.setWidget(page)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         self.pages.addWidget(scroll)
+
+    def set_history_storage_limit(self, _index):
+        mb = int(self.history_storage_limit.currentData() or 0)
+        old_mb = int(self.settings.value("history/max_total_mb", 0, type=int))
+        if mb == old_mb:
+            return
+        if mb:
+            answer = QMessageBox.question(
+                self, "Apply history storage limit?",
+                f"Limit clipboard history payloads to {mb} MB?\n"
+                "If current storage exceeds that, this will permanently "
+                "remove the oldest UNPINNED history entries now. "
+                "Pinned entries will always survive.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                self.history_storage_limit.blockSignals(True)
+                self.history_storage_limit.setCurrentIndex(
+                    max(0, self.history_storage_limit.findData(old_mb))
+                )
+                self.history_storage_limit.blockSignals(False)
+                return
+        self.store.max_total_bytes = mb * 1024 * 1024 if mb else None
+        removed = self.store.prune_storage_bytes()
+        self.settings.setValue("history/max_total_mb", mb)
+        self.refresh()
+        self.statusBar().showMessage(
+            f"Storage limit {'off' if not mb else str(mb) + ' MB'}; "
+            f"{removed} unpinned clips pruned", 7500,
+        )
 
     def install_shortcuts(self):
         callbacks = {
