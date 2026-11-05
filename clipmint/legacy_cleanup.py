@@ -118,20 +118,30 @@ def verify_legacy_history(encrypted: EncryptedClipStore) -> tuple[Path, int]:
 
 
 def remove_verified_legacy_history(encrypted: EncryptedClipStore) -> int:
-    """Verify and unlink original SQLite files while excluding all writers.
+    """Only remove a verified WAL archive with *no other SQLite connection*.
 
-    BEGIN EXCLUSIVE retains the WAL writer lock from the final verification
-    until after unlink. SQLite does not rely on advisory fcntl/flock locks.
+    SQLite's WAL BEGIN EXCLUSIVE alone holds a writer lock, so idle readers
+    can survive and later write to unlinked files. Setting locking_mode to
+    EXCLUSIVE *before the first database access* acquires a true exclusive
+    VFS lock and fails closed when even an idle connection is attached.
+    Keep that lock until the unlink is complete.
     """
     old = _legacy_path(encrypted)
     _check_persisted_key(encrypted)
     try:
         with closing(_connect_legacy(old, "rw")) as legacy:
-            # Other readers are acceptable, but no writer may race the scan.
-            # Under WAL, BEGIN EXCLUSIVE obtains the same writer lock as
-            # BEGIN IMMEDIATE. Fail closed if it is held elsewhere.
+            # IMPORTANT: WAL BEGIN EXCLUSIVE by itself is equivalent to a
+            # writer lock and DOES NOT exclude idle open readers. All normal
+            # WAL clients hold SQLITE_LOCK_SHARED even outside a transaction.
+            # A true exclusive VFS lock rejects any such existing connection.
+            if legacy.execute("PRAGMA main.locking_mode=EXCLUSIVE").fetchone() != ("exclusive",):
+                raise HistorySecurityError("Cannot obtain exclusive SQLite access")
             legacy.execute("BEGIN EXCLUSIVE")
             try:
+                if legacy.execute("PRAGMA main.journal_mode").fetchone() != ("wal",):
+                    raise HistorySecurityError(
+                        "Unexpected legacy journal mode; refusing removal"
+                    )
                 count = _verify_rows(encrypted, legacy)
                 _check_persisted_key(encrypted)
                 for suffix in ("", "-wal", "-shm"):
@@ -139,8 +149,10 @@ def remove_verified_legacy_history(encrypted: EncryptedClipStore) -> int:
                         raise HistorySecurityError(
                             "Refusing to remove a symlinked legacy file"
                         )
-                # Keep the writer lock *throughout* all unlinks. On POSIX
-                # unlinking the open inode is safe; no unlocked read/erase gap.
+                # Keep the genuine VFS exclusive lock *throughout* unlinks.
+                # This matters for idle SQLite handles, not only writers.
+                # A new SQLite reader cannot access the archived WAL while
+                # the lock is held; no automatic or timer-driven cleanup.
                 for suffix in ("-wal", "-shm", ""):
                     Path(str(old) + suffix).unlink(missing_ok=True)
             finally:
