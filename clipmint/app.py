@@ -1179,9 +1179,11 @@ class ClipMintWindow(QMainWindow):
         login_group = QGroupBox("Start at login")
         login_layout = QVBoxLayout(login_group)
         login_help = QLabel(
-            "Optional and OFF by default. Starts ClipMint quietly in the tray "
-            "on Cinnamon/X11. Requires the installed .deb; if the system tray "
-            "is unavailable, ClipMint opens its window instead."
+            "Optional and OFF by default. Starts the clipboard watcher quietly "
+            "when you sign in to Cinnamon/X11. Closing the window keeps history "
+            "capture active in the background, even without a tray icon. "
+            "Open ClipMint again from the application menu to show the window. "
+            "Use Quit ClipMint to stop monitoring completely."
         )
         login_help.setWordWrap(True)
         login_layout.addWidget(login_help)
@@ -1189,6 +1191,9 @@ class ClipMintWindow(QMainWindow):
         self.login_startup_toggle.setChecked(login_startup_enabled())
         self.login_startup_toggle.toggled.connect(self.set_login_startup_enabled)
         login_layout.addWidget(self.login_startup_toggle)
+        quit_background_button = QPushButton("Quit ClipMint · stop background monitoring")
+        quit_background_button.clicked.connect(self.quit_app)
+        login_layout.addWidget(quit_background_button)
         layout.addWidget(login_group)
 
         temp_group = QGroupBox("Temporary collection · retention")
@@ -2825,16 +2830,13 @@ class ClipMintWindow(QMainWindow):
         self.lock_vault()
         if self._closing:
             event.accept()
-        elif self.tray is not None:
-            self.hide()
-            event.ignore()
-        elif self.recorder.process is not None:
-            self.error("Recording active", "Finish recording before quitting")
-            event.ignore()
-        else:
-            self.clear_temporary_on_normal_exit()
-            self.store.close()
-            event.accept()
+            return
+        # The X button closes the interface, not the clipboard watcher.
+        # System tray availability is not reliable on every Cinnamon panel.
+        # The single-instance socket makes the hidden window reachable again
+        # through the normal launcher, including on desktops without a tray.
+        self.hide()
+        event.ignore()
 
     def quit_app(self):
         if self.recorder.process is not None:
@@ -2870,6 +2872,9 @@ def main():
     # owns the clipboard; --toggle never starts a second clipboard watcher.
     app = QApplication([sys.argv[0]])
     app.setApplicationName("ClipMint")
+    # The Qt event loop and clipboard signals must remain alive after *all*
+    # windows are hidden. Only explicit Quit/--quit ends the watcher.
+    app.setQuitOnLastWindowClosed(False)
     if send_command(command):
         return
     if command == "quit":
@@ -2905,10 +2910,10 @@ def main():
             QTimer.singleShot(150, window.choose_screenshot)
         else:
             QTimer.singleShot(150, lambda: window.choose_recording("MP4"))
-    elif hidden and window.tray is not None:
-        # Login startup stays headless but is reachable through the tray.
-        app.setQuitOnLastWindowClosed(False)
+    elif hidden:
+        # Login startup runs headlessly regardless of the desktop's tray
+        # support. Reopen through the app launcher (single-instance 'show').
+        pass
     else:
-        # Never leave a background watcher inaccessible on desktops with no tray.
         window.show()
     raise SystemExit(app.exec())
