@@ -82,6 +82,9 @@ class SecretDetectorTests(unittest.TestCase):
         self.assertTrue(detect_secret(
             "IBAN: GB82 WEST 1234 5698 7654 32 please pay today"
         ).is_secret)
+        self.assertTrue(detect_secret(
+            "Reference AB12 GB82 WEST 1234 5698 7654 32"
+        ).is_secret)
         self.assertFalse(detect_secret("GB82 WEST 1234 5698 7654 33").is_secret)
         # Bare SHA1 and 40-hex credentials cannot be distinguished safely.
         # Maintain conservative redaction rather than silently allow keys.
