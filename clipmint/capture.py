@@ -33,6 +33,19 @@ def physical_rect(rect: QRect, scale_x: float, scale_y: float | None = None) -> 
     return QRect(x0, y0, max(0, x1 - x0), max(0, y1 - y0))
 
 
+def global_physical_rect(rect: QRect, scale_x: float, scale_y: float,
+                         screen_origin: QPoint) -> QRect:
+    """Scale relative to the selected display, then restore its native origin.
+
+    Qt uses device-independent sizes but preserves screen positions in the
+    virtual desktop coordinate system; scaling global X/Y directly would move
+    captures on an offset primary display.
+    """
+    local = rect.translated(-screen_origin.x(), -screen_origin.y())
+    pixels = physical_rect(local, scale_x, scale_y)
+    return pixels.translated(screen_origin)
+
+
 def recordings_dir() -> Path:
     folder = Path.home() / "Videos" / "ClipMint"
     folder.mkdir(parents=True, exist_ok=True)
@@ -200,7 +213,8 @@ class RegionRecorder:
         return self.process is not None and self.process.poll() is None
 
     def start(self, rect: QRect, quality: str = "High", file_format: str = "MP4",
-              pixel_scale: tuple[float, float] | None = None) -> Path:
+              pixel_scale: tuple[float, float] | None = None,
+              screen_origin: QPoint | None = None) -> Path:
         if self.process is not None:
             raise RuntimeError("A previous recording is still running or finalizing")
         if os.environ.get("XDG_SESSION_TYPE", "x11").lower() != "x11":
@@ -211,11 +225,13 @@ class RegionRecorder:
             raise RuntimeError("DISPLAY is unset; an X11 desktop is required")
         if quality not in self.QUALITY or file_format not in ("MP4", "GIF"):
             raise ValueError("Unsupported recording options")
+        screen = QApplication.primaryScreen()
         if pixel_scale is None:
-            screen = QApplication.primaryScreen()
             ratio = screen.devicePixelRatio() if screen is not None else 1.0
             pixel_scale = (ratio, ratio)
-        capture = physical_rect(rect, *pixel_scale)
+        if screen_origin is None:
+            screen_origin = screen.geometry().topLeft() if screen is not None else QPoint()
+        capture = global_physical_rect(rect, *pixel_scale, screen_origin)
         width, height = capture.width() // 2 * 2, capture.height() // 2 * 2
         if width < 10 or height < 10:
             raise RuntimeError("Selected area is too small")
