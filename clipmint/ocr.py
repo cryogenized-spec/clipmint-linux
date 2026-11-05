@@ -6,21 +6,31 @@ temporary directory. Keep the result bounded to avoid accidental huge clips.
 from __future__ import annotations
 import shutil
 import subprocess
+import re
 from PySide6.QtCore import QThread, Signal
 
 MAX_IMAGE = 16 * 1024 * 1024
 MAX_TEXT = 2 * 1024 * 1024
 
 
-def extract_text(png: bytes, executable: str | None = None) -> str:
+def validate_language(value: str) -> str:
+    """Tesseract 3-letter language codes, optionally combined with '+'."""
+    if not re.fullmatch(r"[a-z]{3}(?:\+[a-z]{3}){0,3}", value):
+        raise ValueError("OCR language must use codes like eng, afr or eng+afr")
+    return value
+
+
+def extract_text(png: bytes, executable: str | None = None,
+                 language: str = "eng") -> str:
     if not png or len(png) > MAX_IMAGE or not png.startswith(b"\x89PNG\r\n\x1a\n"):
         raise ValueError("Please select a valid PNG image smaller than 16 MB")
+    language = validate_language(language)
     binary = executable or shutil.which("tesseract")
     if not binary:
         raise RuntimeError("OCR requires Tesseract. Install tesseract-ocr and tesseract-ocr-eng.")
     try:
         proc = subprocess.run(
-            [binary, "stdin", "stdout", "-l", "eng"],
+            [binary, "stdin", "stdout", "-l", language],
             input=png, capture_output=True, timeout=35, check=False,
         )
     except subprocess.TimeoutExpired as exc:
@@ -37,13 +47,14 @@ class OcrWorker(QThread):
     recognized = Signal(str)
     failed = Signal(str)
 
-    def __init__(self, png: bytes, parent=None):
+    def __init__(self, png: bytes, parent=None, language: str = "eng"):
         super().__init__(parent)
         self.png = png
+        self.language = validate_language(language)
 
     def run(self):
         try:
-            text = extract_text(self.png)
+            text = extract_text(self.png, language=self.language)
         except (RuntimeError, ValueError, OSError) as exc:
             self.failed.emit(str(exc))
         else:
