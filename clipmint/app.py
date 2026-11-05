@@ -206,6 +206,8 @@ class ClipMintWindow(QMainWindow):
         self.selector: AreaSelector | None = None
         self.recorder_window: RecorderWindow | None = None
         self.capture_rect = None
+        self.capture_scale = None
+        self.capture_origin = None
         self.capture_format = "MP4"
         self._privacy_skipped = 0
         self._closing = False
@@ -2844,6 +2846,10 @@ class ClipMintWindow(QMainWindow):
         self.select_area("video")
 
     def start_video(self, rect, _pixmap):
+        # Retain the selection's actual screenshot-to-logical pixel ratio so
+        # FFmpeg records exactly the same area shown by the selection overlay.
+        self.capture_scale = self.selector.pixel_scale if self.selector else None
+        self.capture_origin = self.selector.screen_rect.topLeft() if self.selector else None
         QTimer.singleShot(0, self.clear_selection)
         self.capture_rect = rect
         # Main ClipMint remains hidden, and the selection overlay has exited.
@@ -2864,7 +2870,11 @@ class ClipMintWindow(QMainWindow):
 
     def launch_recorder(self, quality: str, file_format: str):
         try:
-            path = self.recorder.start(self.capture_rect, quality, file_format)
+            path = self.recorder.start(
+                self.capture_rect, quality, file_format,
+                pixel_scale=self.capture_scale,
+                screen_origin=self.capture_origin,
+            )
         except Exception as exc:
             if self.recorder_window:
                 self.recorder_window.start_failed()

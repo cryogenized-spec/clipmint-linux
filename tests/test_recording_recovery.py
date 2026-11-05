@@ -43,7 +43,12 @@ class RecordingRecoveryTests(unittest.TestCase):
             log.write_text("diagnostics")
             (folder / "unrelated.mp4").write_bytes(b"keep")
             (folder / ".pending-recording-20261105-130000-123457.gif").symlink_to(clip)
-            self.assertEqual(pending_recordings(folder), [clip])
+            # Discovery filtering is tested here; live /proc inspection is
+            # deliberately isolated because same-user CI runner processes can
+            # disappear or deny cmdline reads at arbitrary points in the scan.
+            # Production writer detection remains fail-closed and unchanged.
+            with patch("clipmint.recording_recovery._writer_may_be_active", return_value=False):
+                self.assertEqual(pending_recordings(folder), [clip])
             self.assertTrue(log.is_file())
             self.assertEqual(clip.read_bytes(), b"unfinished")
 
