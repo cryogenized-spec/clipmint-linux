@@ -137,6 +137,52 @@ class LegacyHistoryCleanupTests(unittest.TestCase):
                 idle.close()
                 encrypted.close()
 
+    def test_unqueried_connection_refuses_removal(self):
+        """SQLite opens its FD before the first query, but holds no WAL lock."""
+        with TemporaryDirectory() as home:
+            path, encrypted, key, _ident = self.prepare(Path(home))
+            unused = sqlite3.connect(path, isolation_level=None, timeout=0.1)
+            try:
+                with patch("clipmint.legacy_cleanup.key_from_secret_service",
+                           return_value=key):
+                    with self.assertRaisesRegex(
+                        HistorySecurityError, "legacy history handle"
+                    ):
+                        remove_verified_legacy_history(encrypted)
+                self.assertTrue(path.exists())
+                self.assertEqual(unused.execute(
+                    "SELECT count(*) FROM clips"
+                ).fetchone(), (1,))
+            finally:
+                unused.close()
+                encrypted.close()
+
+    def test_failed_final_unlink_retains_checkpointed_main_database(self):
+        """Deleting WAL first must not make a partial cleanup lose records."""
+        with TemporaryDirectory() as home:
+            path, encrypted, key, ident = self.prepare(Path(home))
+            original_unlink = Path.unlink
+
+            def fail_removing_main(candidate, *args, **kwargs):
+                if candidate == path:
+                    raise PermissionError("simulated final unlink failure")
+                return original_unlink(candidate, *args, **kwargs)
+
+            try:
+                with patch("clipmint.legacy_cleanup.key_from_secret_service",
+                           return_value=key), patch(
+                           "clipmint.legacy_cleanup.Path.unlink",
+                           new=fail_removing_main):
+                    with self.assertRaises(PermissionError):
+                        remove_verified_legacy_history(encrypted)
+                self.assertTrue(path.exists())
+                with sqlite3.connect(path) as recovered:
+                    self.assertEqual(recovered.execute(
+                        "SELECT content FROM clips WHERE id=?", (ident,)
+                    ).fetchone()[0], b"Harmless synthetic text")
+            finally:
+                encrypted.close()
+
     def test_rollback_journal_is_not_assumed_safe_to_remove(self):
         """Rollback-mode idle handles are not covered by WAL lock semantics."""
         with TemporaryDirectory() as home:
