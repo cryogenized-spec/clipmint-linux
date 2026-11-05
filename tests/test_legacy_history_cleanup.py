@@ -95,6 +95,52 @@ class LegacyHistoryCleanupTests(unittest.TestCase):
                 writer.close()
                 encrypted.close()
 
+    def test_idle_open_clipstore_refuses_removal_and_can_resume_writes(self):
+        """Regression: WAL BEGIN EXCLUSIVE alone misses idle connections."""
+        with TemporaryDirectory() as home:
+            path, encrypted, key, _ident = self.prepare(Path(home))
+            idle = ClipStore(path)
+            try:
+                # A normal idle ClipStore with no transaction is a live WAL
+                # reader and is allowed to write later.
+                self.assertEqual(idle.conn.execute(
+                    "PRAGMA journal_mode"
+                ).fetchone(), ("wal",))
+                with patch("clipmint.legacy_cleanup.key_from_secret_service",
+                           return_value=key):
+                    with self.assertRaises(HistorySecurityError):
+                        remove_verified_legacy_history(encrypted)
+                self.assertTrue(path.exists())
+                self.assertTrue(idle.add("text", b"New after refusal",
+                                         "New after refusal"))
+                self.assertTrue(path.exists())
+            finally:
+                idle.close()
+                encrypted.close()
+
+    def test_rollback_journal_is_not_assumed_safe_to_remove(self):
+        """Rollback-mode idle handles are not covered by WAL lock semantics."""
+        with TemporaryDirectory() as home:
+            path, encrypted, key, _ident = self.prepare(Path(home))
+            changing = sqlite3.connect(path, isolation_level=None)
+            try:
+                self.assertEqual(
+                    changing.execute("PRAGMA journal_mode=DELETE").fetchone(),
+                    ("delete",)
+                )
+            finally:
+                changing.close()
+            try:
+                with patch("clipmint.legacy_cleanup.key_from_secret_service",
+                           return_value=key):
+                    with self.assertRaisesRegex(
+                        HistorySecurityError, "Unexpected legacy journal mode"
+                    ):
+                        remove_verified_legacy_history(encrypted)
+                self.assertTrue(path.exists())
+            finally:
+                encrypted.close()
+
     def test_symlinked_legacy_database_not_followed(self):
         with TemporaryDirectory() as home:
             folder = Path(home)
