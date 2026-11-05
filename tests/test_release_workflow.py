@@ -13,6 +13,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn("if: github.event_name == 'push'", workflow)
         self.assertIn("needs: build", workflow)
         self.assertIn("sha256sum --check SHA256SUMS", workflow)
+        self.assertIn("GH_REPO: ${{ github.repository }}", workflow)
         self.assertIn("gh release create", workflow)
         self.assertIn("dist-packages/SHA256SUMS", workflow)
         self.assertIn("--verify-tag", workflow)
