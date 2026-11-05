@@ -1,6 +1,9 @@
 """No silent deletion of unfinished MP4/GIF recordings."""
 from pathlib import Path
 from tempfile import TemporaryDirectory
+import os
+import time
+from unittest.mock import patch
 import unittest
 
 from clipmint.recording_recovery import pending_recordings, resolve_pending
@@ -12,6 +15,7 @@ class RecordingRecoveryTests(unittest.TestCase):
             folder = Path(home)
             clip = folder / ".pending-recording-20261105-130000-123456.mp4"
             clip.write_bytes(b"unfinished")
+            os.utime(clip, (time.time() - 120, time.time() - 120))
             log = clip.with_suffix(".ffmpeg.log")
             log.write_text("diagnostics")
             (folder / "unrelated.mp4").write_bytes(b"keep")
@@ -25,6 +29,7 @@ class RecordingRecoveryTests(unittest.TestCase):
             folder = Path(home)
             clip = folder / ".pending-recording-20261105-130000-123456.mp4"
             clip.write_bytes(b"partial MP4 data")
+            os.utime(clip, (time.time() - 120, time.time() - 120))
             original = folder / "recovered-recording-20261105-130000-123456.mp4"
             original.write_bytes(b"existing")
             recovered = resolve_pending(clip, "recover")
@@ -38,12 +43,17 @@ class RecordingRecoveryTests(unittest.TestCase):
             folder = Path(home)
             clip = folder / ".pending-recording-20261105-130000-123456.gif"
             clip.write_bytes(b"partial GIF")
+            os.utime(clip, (time.time() - 120, time.time() - 120))
             log = clip.with_suffix(".ffmpeg.log")
             log.write_text("ffmpeg")
             keep = folder / "my-other-video.mp4"
             keep.write_bytes(b"keep")
             with self.assertRaises(ValueError):
                 resolve_pending(clip, "unknown")
+            with patch("clipmint.recording_recovery._writer_may_be_active", return_value=True):
+                with self.assertRaisesRegex(ValueError, "still be in use"):
+                    resolve_pending(clip, "discard")
+                self.assertTrue(clip.exists())
             self.assertIsNone(resolve_pending(clip, "discard"))
             self.assertFalse(clip.exists())
             self.assertFalse(log.exists())
