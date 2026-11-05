@@ -10,6 +10,14 @@ from clipmint.secure_history import EncryptedClipStore
 
 
 class EncryptedSearchRankingTests(unittest.TestCase):
+    def test_active_crimson_archive_search_uses_debounce(self):
+        source = (Path(__file__).resolve().parents[1] /
+                  "clipmint" / "crimson_ui.py").read_text(encoding="utf-8")
+        self.assertIn(
+            "w.search.textChanged.connect(w._schedule_history_search)", source
+        )
+        self.assertNotIn("w.search.textChanged.connect(w.refresh)", source)
+
     def test_best_match_ranks_exact_then_prefix_then_substring(self):
         with TemporaryDirectory() as home:
             store = EncryptedClipStore(
