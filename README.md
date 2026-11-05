@@ -54,6 +54,19 @@ ClipMint's brand header adds `クリップミント` (the Japanese phonetic rend
 
 The sidebar displays the **crimson-haired maid selected by the user**, looking over her shoulder with her hands held behind her back, wearing a dark ruffled dress with white trim and red ornaments. `clipmint/assets/crimson_maid.png` is a 440-pixel-wide optimized PNG derived from the exact user-provided illustration, retaining its transparent background and compositing correctly on the dark Qt interface. The display widget shows a non-distorted upper-body crop. The image is bundled into the offline installer; no network transfer, third-party hosting, image-generation step, or downloaded font is required at runtime. It is decorative, cannot intercept clicks or keyboard focus, and hides when the window is too short. The older Koma mascot, sketches and JPEG assets are retired.
 
+## Optional removal of plaintext history after encryption
+
+**Encrypting history does not automatically delete the original SQLite file.**
+After enabling encrypted history and confirming it is readable, Settings offers
+**Verify and remove old plaintext history…**. ClipMint checks legacy clip
+contents, metadata, tags and templates against the authenticated encrypted
+archive before showing an explicit permanent-deletion confirmation. If the
+check fails, it leaves the original file untouched. The action removes only
+the old `history.sqlite3` database and its SQLite sidecars; it does not
+remove backups, keyring data, snapshots or other copies, and **cannot guarantee
+forensic erasure from an SSD**. Backup your encrypted archive and keyring
+separately before confirming removal.
+
 ## Verification and limitations
 
 Automated tests cover SQLite bins/migration, UI launch and screen-recorder state where possible. GitHub Actions performs a frozen Qt/X11 start test and verifies the included FFmpeg has X11 capture and H264 encoders. **Actual capture on the HP OMEN / Mint Cinnamon has not yet been field-tested.** X11, single-primary-screen selector only; not Wayland. This is a preview, not a security-hardened release.
