@@ -1696,11 +1696,13 @@ class ClipMintWindow(QMainWindow):
         self._sensitive_clipboard_token += 1
 
     def clipboard_changed(self):
-        if (not self.monitoring or self._closing
-                or getattr(self.store, "closed", False)):
-            return
+        # Clear our own-write expectation on every event, even while history
+        # is paused; never carry a stale skip across Pause/Resume.
         data = QApplication.clipboard().mimeData()
-        if self._own_clipboard_guard.consume(data) or data is None:
+        if self._own_clipboard_guard.consume(data):
+            return
+        if (not self.monitoring or self._closing
+                or getattr(self.store, "closed", False) or data is None):
             return
         if is_concealed(data):
             self._privacy_skipped += 1
