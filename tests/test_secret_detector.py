@@ -71,6 +71,19 @@ class SecretDetectorTests(unittest.TestCase):
         self.assertEqual(mask("different-secret", reveal=6), "\N{BULLET}" * 12)
         self.assertEqual(mask("a"), mask("a much longer value"))
 
+    def test_bank_and_identity_labels_are_precise(self):
+        sa = detect_secret("0001010000089")  # Synthetic, checksummed identifier.
+        self.assertTrue(sa.is_secret)
+        self.assertIn("South African identity number", sa.reasons)
+        self.assertNotIn("payment card checksum", sa.reasons)
+        iban = detect_secret("GB82 WEST 1234 5698 7654 32")
+        self.assertTrue(iban.is_secret)
+        self.assertIn("IBAN bank account checksum", iban.reasons)
+        self.assertFalse(detect_secret("GB82 WEST 1234 5698 7654 33").is_secret)
+        # Bare SHA1 and 40-hex credentials cannot be distinguished safely.
+        # Maintain conservative redaction rather than silently allow keys.
+        self.assertTrue(detect_secret("a1b2c3d4" * 5).is_secret)
+
     def test_history_rejects_credentials_even_on_direct_insert(self):
         with TemporaryDirectory() as root:
             store = ClipStore(Path(root) / "history.sqlite3")
