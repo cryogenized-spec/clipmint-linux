@@ -7,11 +7,17 @@ from unittest.mock import Mock, patch
 
 from PySide6.QtCore import QRect
 from PySide6.QtGui import QColor, QPixmap, QPainter
+from PySide6.QtWidgets import QApplication
 
 from clipmint.capture import RegionRecorder, physical_rect
 
 
 class ScaledCaptureTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        # A QPixmap needs a Qt application, even on an offscreen CI display.
+        cls.app = QApplication.instance() or QApplication([])
+
     def test_rectangles_at_100_150_and_200_percent(self):
         logical = QRect(20, 30, 100, 80)
         for factor, expected in (
