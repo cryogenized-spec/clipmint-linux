@@ -276,6 +276,19 @@ class EncryptedClipStore(ClipStore):
                        reverse=(sort == "Z–A"))
         elif sort == "Oldest first":
             items.sort(key=lambda row: (row[0], row[1].id))
+        elif sort == "Best match" and query.strip():
+            # Rank only in process memory while unlocked. Never build a
+            # plaintext FTS index or write query scores into SQLite.
+            needle = query.strip().casefold()
+            def relevance(row):
+                sequence, clip = row
+                text = clip.preview.casefold()
+                return (
+                    0 if text == needle else 1 if text.startswith(needle) else 2,
+                    text.find(needle),
+                    -sequence,
+                )
+            items.sort(key=relevance)
         return [clip for _sequence, clip in items]
 
     @classmethod
