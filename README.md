@@ -7,7 +7,7 @@ A mouse-first clipboard manager, screenshot tool, and dedicated MP4/GIF recorder
 ## Install normally, no terminal
 
 1. Open [ClipMint Releases](https://github.com/cryogenized-spec/clipmint-linux/releases).
-2. Download **clipmint_0.3.0_amd64.deb** from the latest successful preview release.
+2. Download the `clipmint_X.Y.Z_amd64.deb` attached to the chosen version tag (`vX.Y.Z`), along with `SHA256SUMS`. You can verify both files from their download folder using `sha256sum -c SHA256SUMS`.
 3. Double-click the file in Nemo and choose **Install Package**.
 4. Open **ClipMint** from the application menu. No terminal remains open.
 
