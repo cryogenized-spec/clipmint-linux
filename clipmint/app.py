@@ -2518,12 +2518,12 @@ class ClipMintWindow(QMainWindow):
             return
         answer = QMessageBox.question(
             self, "Remove verified plaintext history?",
-            f"Verified {checked} original clipboard entries in the encrypted archive.\\n\\n"
+            f"Verified {checked} original clipboard entries in the encrypted archive.\n\n"
             "Permanently remove the old plaintext SQLite database and its WAL "
             "sidecars? This cannot be undone. Any separate backups, disk "
             "snapshots or SSD remnant data may still contain plaintext; this "
             "is NOT a forensic secure erase. Make sure your encrypted archive "
-            "and keyring key are backed up first.\\n\\n"
+            "and keyring key are backed up first.\n\n"
             f"File: {old_path}",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
