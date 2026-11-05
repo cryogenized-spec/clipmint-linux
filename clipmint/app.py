@@ -36,7 +36,7 @@ from .screenshot_notice import ScreenshotNotice
 from .screenshot_gallery import read_screenshot, screenshot_thumbnail_icon, PREVIEW_SIZE
 from .clipboard_formats import from_mime, is_concealed, sensitive_text, mime_from_entry
 from .foreground_privacy import blocked_foreground, DEFAULT_BLOCKED
-from .ocr import OcrWorker
+from .ocr import OcrWorker, validate_language
 from .quick_popup import QuickPopup, paste_to_window
 from .productivity import PasteQueue
 from .organizer_ui import TemplatesDialog, TransformDialog
@@ -1222,6 +1222,22 @@ class ClipMintWindow(QMainWindow):
         temp_layout.addWidget(self.temporary_exit_toggle)
         layout.addWidget(temp_group)
 
+        ocr_group = QGroupBox("Offline OCR language")
+        ocr_layout = QVBoxLayout(ocr_group)
+        ocr_help = QLabel(
+            "Select installed Tesseract language data. Examples: eng (English), "
+            "afr (Afrikaans), or eng+afr. Language packs are not downloaded by ClipMint."
+        )
+        ocr_help.setWordWrap(True)
+        ocr_layout.addWidget(ocr_help)
+        self.ocr_language_editor = QLineEdit(
+            str(self.settings.value("ocr/language", "eng"))
+        )
+        self.ocr_language_editor.setPlaceholderText("eng")
+        self.ocr_language_editor.editingFinished.connect(self.save_ocr_language)
+        ocr_layout.addWidget(self.ocr_language_editor)
+        layout.addWidget(ocr_group)
+
         open_files = QPushButton("Open recordings folder")
         open_files.clicked.connect(lambda: self.open_folder(recordings_dir()))
         layout.addWidget(open_files)
@@ -1436,6 +1452,19 @@ class ClipMintWindow(QMainWindow):
         scroll.setWidget(page)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         self.pages.addWidget(scroll)
+
+    def save_ocr_language(self):
+        value = self.ocr_language_editor.text().strip().lower()
+        try:
+            validate_language(value)
+        except ValueError as exc:
+            self.statusBar().showMessage(str(exc), 6000)
+            self.ocr_language_editor.setText(
+                str(self.settings.value("ocr/language", "eng"))
+            )
+            return
+        self.settings.setValue("ocr/language", value)
+        self.ocr_language_editor.setText(value)
 
     def install_shortcuts(self):
         callbacks = {
@@ -2166,7 +2195,14 @@ class ClipMintWindow(QMainWindow):
         if not png or len(png) > 16 * 1024 * 1024:
             self.error("OCR", "Choose a PNG image smaller than 16 MB")
             return
-        worker = OcrWorker(png, self)
+        try:
+            language = validate_language(str(
+                self.settings.value("ocr/language", "eng")
+            ))
+            worker = OcrWorker(png, self, language=language)
+        except ValueError as exc:
+            self.error("OCR", str(exc))
+            return
         self._ocr_workers.add(worker)
         worker.recognized.connect(self.ocr_recognized)
         worker.failed.connect(lambda message: self.error("OCR", message))
