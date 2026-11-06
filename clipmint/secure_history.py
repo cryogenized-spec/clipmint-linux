@@ -239,10 +239,12 @@ class EncryptedClipStore(ClipStore):
         # Decrypt matching previews strictly in-process. No plaintext FTS
         # index is ever constructed for encrypted history.
         from .store import classify
+        condition = "corrupt=0" if bin_name is None else "bin=? AND corrupt=0"
+        params = () if bin_name is None else (bin_name,)
         rows = self.conn.execute(
             """SELECT id,kind,content,pinned,created_at,bin,favorite,touch_seq
-               FROM clips WHERE bin=? AND corrupt=0
-               ORDER BY touch_seq DESC,id DESC LIMIT 1000""", (bin_name,)
+               FROM clips WHERE """ + condition +
+            """ ORDER BY touch_seq DESC,id DESC LIMIT 1000""", params
         )
         items: list[tuple[int, Clip]] = []
         newly_damaged: list[int] = []
