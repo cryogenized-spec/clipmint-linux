@@ -124,6 +124,13 @@ class CrimsonArchiveTests(unittest.TestCase):
         try:
             window.show()
             self.app.processEvents()
+            # This test verifies per-bin operations; the default primary
+            # timeline is now All clips, which includes Personal too.
+            work_index = next(
+                i for i in range(window.tabs.count())
+                if window.tabs.tabText(i) == "Work"
+            )
+            window.tabs.setCurrentIndex(work_index)
             a = window.store.add("text", b"inspect brass", "inspect brass", "Work")
             window.store.add("text", b"https://example.org", "https://example.org", "Work")
             window.store.add("text", b"personal note", "personal note", "Personal")
