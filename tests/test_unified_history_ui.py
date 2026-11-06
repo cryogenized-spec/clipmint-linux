@@ -51,6 +51,49 @@ class AllCollectionsDatabaseTests(unittest.TestCase):
             finally:
                 store.close()
 
+    def test_plaintext_fts_finds_older_filtered_full_body_match(self):
+        """Filtered search must not discard an older FTS-only match."""
+        with TemporaryDirectory() as root:
+            store = ClipStore(Path(root) / "history.sqlite3", max_unpinned=1100)
+            try:
+                store.add_bin("Writing")
+                old_id = store.add(
+                    "text",
+                    b"old writing excerpt holding farawaymatch in its body",
+                    "Old writing excerpt", "Writing",
+                )
+                self.assertIsNotNone(old_id)
+                store.favorite(old_id, True)
+                store.set_tags(old_id, ["important"])
+                for index in range(1000):
+                    text = f"farawaymatch record number {index:04d}"
+                    self.assertIsNotNone(store.add(
+                        "text", text.encode(), text, "Work"
+                    ))
+                self.assertEqual(store.count(None), 1001)
+                self.assertEqual(
+                    [clip.id for clip in store.search(
+                        "farawaymatch", None, favorites_only=True
+                    )],
+                    [old_id],
+                )
+                self.assertEqual(
+                    [clip.id for clip in store.search(
+                        "farawaymatch", None, tag="important", category="Text"
+                    )],
+                    [old_id],
+                )
+                self.assertEqual(
+                    [clip.id for clip in store.search(
+                        "farawaymatch", None, sort="Best match",
+                        favorites_only=True,
+                    )],
+                    [old_id],
+                )
+                self.assertEqual(store.search("farawaymatch", "Personal"), [])
+            finally:
+                store.close()
+
     def test_encrypted_history_combines_bins_without_plaintext_index(self):
         with TemporaryDirectory() as root:
             store = EncryptedClipStore(Path(root) / "secure-history.sqlite3", bytes(range(32)))
