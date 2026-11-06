@@ -14,7 +14,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("XDG_SESSION_TYPE", "x11")
 
 from PySide6.QtCore import QSettings
-from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtWidgets import QApplication, QMessageBox, QGroupBox, QKeySequenceEdit
 
 from clipmint.app import ClipMintWindow
 from clipmint.cinnamon_hotkey import ShortcutSetupError
@@ -30,6 +30,40 @@ class GlobalShortcutUiTests(unittest.TestCase):
         QSettings.setDefaultFormat(QSettings.Format.IniFormat)
         QSettings.setPath(QSettings.Format.IniFormat, QSettings.Scope.UserScope, root)
         return ClipMintWindow()
+
+    def test_cinnamon_and_window_shortcuts_share_one_settings_section(self):
+        with TemporaryDirectory() as root:
+            prior = os.environ.get("XDG_DATA_HOME")
+            window = None
+            try:
+                window = self._window(root)
+                sections = [
+                    g for g in window.findChildren(QGroupBox)
+                    if g.title() == "Keyboard shortcuts"
+                ]
+                self.assertEqual(len(sections), 1)
+                section = sections[0]
+                for widget in (
+                    window.global_popup_hotkey,
+                    window.global_screenshot_hotkey,
+                    window.global_record_hotkey,
+                    *window.shortcut_editors.values(),
+                ):
+                    self.assertTrue(section.isAncestorOf(widget))
+                self.assertGreaterEqual(
+                    len(section.findChildren(QKeySequenceEdit)), 8
+                )
+            finally:
+                if window is not None:
+                    window.poller.stop()
+                    window._vault_lock_timer.stop()
+                    window.store.close()
+                    window.screenshot_notice.hide()
+                    window.close()
+                if prior is None:
+                    os.environ.pop("XDG_DATA_HOME", None)
+                else:
+                    os.environ["XDG_DATA_HOME"] = prior
 
     def test_user_approved_takeover_has_explicit_second_registration(self):
         with TemporaryDirectory() as root:
