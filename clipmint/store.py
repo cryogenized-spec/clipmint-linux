@@ -363,7 +363,7 @@ class ClipStore:
         return removed
 
     def search(
-        self, query: str = "", bin_name: str = "Work",
+        self, query: str = "", bin_name: str | None = "Work",
         sort: str = "Latest first", category: str = "All",
         tag: str = "", favorites_only: bool = False,
     ) -> list[Clip]:
@@ -376,8 +376,10 @@ class ClipStore:
         order = SORTS.get(sort, "touch_seq DESC, id DESC")
         query = str(query)[:256]
         matched_ids = self.search_index.search_ids(query, bin_name) if query.strip() else []
-        params: list[object] = [bin_name]
-        where = ["bin=?"]
+        # None is an explicit all-collections view, not a physical bin.
+        # This retains the usual active-bin filtering for existing callers.
+        params: list[object] = [] if bin_name is None else [bin_name]
+        where = [] if bin_name is None else ["bin=?"]
         if query:
             if matched_ids:
                 slots = ",".join("?" for _ in matched_ids)
@@ -400,7 +402,8 @@ class ClipStore:
             params.append(tag.lower().strip())
         rows = self.conn.execute(
             f"""SELECT id,kind,preview,pinned,created_at,bin,favorite FROM clips
-                WHERE {' AND '.join(where)} ORDER BY {order} LIMIT 1000""",
+                {('WHERE ' + ' AND '.join(where)) if where else ''}
+                ORDER BY {order} LIMIT 1000""",
             params
         ).fetchall()
         clips = [Clip(r[0],r[1],r[2],bool(r[3]),r[4],r[5],bool(r[6])) for r in rows]
@@ -486,8 +489,12 @@ class ClipStore:
         self.conn.execute("DELETE FROM templates WHERE id=?", (template_id,))
         self.conn.commit()
 
-    def count(self, bin_name: str) -> int:
-        return self.conn.execute("SELECT COUNT(*) FROM clips WHERE bin=?", (bin_name,)).fetchone()[0]
+    def count(self, bin_name: str | None) -> int:
+        if bin_name is None:
+            return int(self.conn.execute("SELECT COUNT(*) FROM clips").fetchone()[0])
+        return int(self.conn.execute(
+            "SELECT COUNT(*) FROM clips WHERE bin=?", (bin_name,)
+        ).fetchone()[0])
 
     def refresh_temporary_copy_time(self, clip_id: int) -> None:
         """Refresh TTL after a user copies an entry from ClipMint's history.
