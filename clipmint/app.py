@@ -2857,6 +2857,10 @@ class ClipMintWindow(QMainWindow):
             return
         # Make the pixels immediately pasteable into Firefox / another app.
         # Clipboard history may also record the image as an ordinary clip.
+        # Defensive: successful capture is always a background operation.
+        # Keep the archive hidden even when a future caller bypasses the
+        # ordinary region-selection path that already hides the window.
+        self.hide()
         QApplication.clipboard().setImage(pixmap.toImage())
         # Successful screenshots must NEVER summon the main app, even when
         # launched from a button in the previously active ClipMint window.
