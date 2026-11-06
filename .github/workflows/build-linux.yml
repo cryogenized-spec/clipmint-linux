@@ -122,7 +122,13 @@ jobs:
             }
             version="${GITHUB_REF_NAME#v}"
           else
-            version="0.6.0~preview1"
+            # A fresh preview must be a REAL upgrade, not another file with
+            # the same Debian version. Otherwise apt can skip installation,
+            # leaving users on the old screenshot code.
+            # RUN_NUMBER increases per workflow; ATTEMPT increases on reruns.
+            : "${GITHUB_RUN_NUMBER:?Missing GitHub Actions run number}"
+            : "${GITHUB_RUN_ATTEMPT:?Missing GitHub Actions run attempt}"
+            version="0.6.0~preview1.${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
           fi
           echo "package_version=$version" >> "$GITHUB_OUTPUT"
       - name: Create Debian package (preview or verified tag)

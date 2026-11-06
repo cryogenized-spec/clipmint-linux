@@ -15,6 +15,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from PySide6.QtTest import QTest
+from PySide6.QtGui import QColor, QImage, QPixmap
 from PySide6.QtWidgets import QApplication
 
 from clipmint.clipboard_formats import from_mime, mime_from_entry
@@ -118,6 +119,77 @@ class X11ClipboardRoundTripTests(unittest.TestCase):
             finally:
                 if window is not None:
                     window._closing = True
+                    if not window.store.closed:
+                        window.store.close()
+                    window.close()
+                    window.deleteLater()
+                if previous_data is None:
+                    os.environ.pop("XDG_DATA_HOME", None)
+                else:
+                    os.environ["XDG_DATA_HOME"] = previous_data
+                if previous_config is None:
+                    os.environ.pop("XDG_CONFIG_HOME", None)
+                else:
+                    os.environ["XDG_CONFIG_HOME"] = previous_config
+
+    def test_screenshot_is_png_in_external_x11_clipboard_without_main_window(self):
+        """Desktop X11 smoke: copy PNG, paste via xclip, never raise ClipMint.
+
+        Offscreen Qt tests cannot verify that a separate application can read
+        the image through the X11 selection protocol. This test does.
+        """
+        from clipmint.app import ClipMintWindow
+
+        previous_data = os.environ.get("XDG_DATA_HOME")
+        previous_config = os.environ.get("XDG_CONFIG_HOME")
+        window = None
+        with TemporaryDirectory() as root:
+            os.environ["XDG_DATA_HOME"] = root
+            os.environ["XDG_CONFIG_HOME"] = str(Path(root) / "config")
+            try:
+                self.app.setQuitOnLastWindowClosed(False)
+                with patch("clipmint.app.blocked_foreground", return_value=False), \
+                     patch("clipmint.app.play_capture_sound"), \
+                     patch("clipmint.app.screenshots_dir", return_value=Path(root)):
+                    window = ClipMintWindow()
+                    window.monitoring = False
+                    if window.tray is not None:
+                        window.tray.hide()
+                        window.tray = None
+                    window.show()
+                    self.app.processEvents()
+                    window._capture_restore_main = True
+                    sample = QPixmap(67, 53)
+                    sample.fill(QColor("#9C4059"))
+                    window.save_screenshot(None, sample)
+                    self.app.processEvents()
+                    self.assertFalse(window.isVisible())
+                    self.assertTrue(window.screenshot_notice.isVisible())
+                    self.assertFalse(window._capture_restore_main)
+                    reply = subprocess.Popen(
+                        ["xclip", "-selection", "clipboard", "-t", "image/png", "-o"],
+                        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    )
+                    deadline = monotonic() + 8
+                    while reply.poll() is None and monotonic() < deadline:
+                        QTest.qWait(20)
+                    if reply.poll() is None:
+                        reply.kill()
+                        reply.communicate()
+                        self.fail("External X11 image paste timed out")
+                    png, err = reply.communicate(timeout=2)
+                    self.assertEqual(reply.returncode, 0, err)
+                    image = QImage.fromData(png, "PNG")
+                    self.assertFalse(image.isNull())
+                    self.assertEqual(image.size(), sample.size())
+                    self.assertEqual(image.pixelColor(0, 0), QColor("#9C4059"))
+                    self.assertFalse(window.isVisible())
+            finally:
+                if window is not None:
+                    window._closing = True
+                    window.poller.stop()
+                    window._vault_lock_timer.stop()
+                    window.screenshot_notice.hide()
                     if not window.store.closed:
                         window.store.close()
                     window.close()

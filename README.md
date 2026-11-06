@@ -331,14 +331,46 @@ background automation of multiple pastes.
 
 ### v0.6 preview installation and acceptance
 
-After the branch CI completes, download the **ClipMint-v0.6-main-integration-preview**
-GitHub Actions artifact, verify `SHA256SUMS`, and install the
-`clipmint_0.6.0~preview1_amd64.deb` package via `sudo apt install ./...`.
-First close ClipMint and back up `~/.local/share/clipmint` with SQLite WAL
-files intact. The UI and integration tests run on headless Qt/Xvfb; you must
-still confirm real Cinnamon/X11 search, history migration, keyboard paste,
-Nemo and LibreOffice clipboard formats, screen capture and templates on the
-HP OMEN before treating the preview as a daily-driver release.
+Download the **ClipMint-v0.6-main-integration-preview** GitHub Actions
+artifact from the **latest successful build**, not an older PR run. Verify
+`SHA256SUMS` beside the `.deb`. Preview packages now have a **unique**
+Debian version, `0.6.0~preview1.RUN.ATTEMPT`, so a newer build replaces the
+previous one; the constant `0.6.0~preview1` version used on earlier builds
+could leave the old code installed.
+
+**Important: quit the running ClipMint process before installing or testing
+an upgrade.** Merely closing the main window leaves its background clipboard
+daemon running. The updated executable forwards Cinnamon screenshot shortcuts
+to that *existing* (possibly older) process, so changing the installed files
+cannot update capture behaviour until the daemon exits. In Settings, use
+**Quit ClipMint · stop background monitoring**, or use the tray's Quit action.
+If you enabled **Clear unpinned Temporary clips when I quit ClipMint**, turn
+that option off first if you want to keep those items; deliberate Quit can
+otherwise remove them. Do not forcibly kill the database process while it is
+writing. A package installation does not silently quit the app or delete data.
+
+Install the downloaded `.deb` in a folder containing only that installer,
+then verify the *installed* version (which must match its filename):
+
+```bash
+sudo apt install ./clipmint_0.6.0~preview1.*_amd64.deb
+dpkg-query -W -f='${Version}\n' clipmint
+```
+
+After installation, start ClipMint again from the Cinnamon menu. Test
+Ctrl+Shift+S while Firefox is in front. A completed screenshot should be
+immediately pasteable with Ctrl+V; only the small Edit / OCR popup should
+appear, **not the main ClipMint window**. If an old preview has the identical
+version, `sudo apt install --reinstall ./<exact-filename>.deb` is required to
+replace it. Never infer that a build is installed solely because GitHub CI
+passed.
+
+For recovery, back up `~/.local/share/clipmint` with SQLite WAL files intact
+after quitting. The UI, Qt and Xvfb integration tests cannot establish that
+every Cinnamon or Firefox configuration will behave identically; still test
+real clipboard ownership, focused-window behaviour, search, Nemo and
+LibreOffice formats, capture and templates on the actual Linux Mint machine
+before treating the preview as a daily driver.
 
 
 ## The approved full-body Kohaku character card (PR #11)
