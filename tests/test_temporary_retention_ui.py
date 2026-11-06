@@ -193,9 +193,9 @@ class TemporaryRetentionUiTests(unittest.TestCase):
             try:
                 window = self.window_in(root)
                 expired = add_old_temporary(window, b"modal old item")
-                index = next(i for i in range(window.tabs.count())
-                             if window.tabs.tabText(i) == "Temporary")
-                window.tabs.setCurrentIndex(index)
+                index = window.bin_filter.findData("Temporary")
+                self.assertGreater(index, 0)
+                window.bin_filter.setCurrentIndex(index)
                 window.refresh()
                 self.assertEqual(window.history.count(), 1)
                 window.history.setCurrentRow(0)
