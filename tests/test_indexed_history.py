@@ -110,6 +110,21 @@ class IndexedHistoryTests(unittest.TestCase):
         self.assertEqual(len(self.db.search(category="Text")), 1000)
         self.assertEqual(len(self.db.search(category="Images")), 0)
 
+    def test_best_match_includes_older_exact_hit_after_1000_newer_results(self):
+        if not self.db.search_index.enabled:
+            self.skipTest("FTS5 unavailable")
+        exact = self.db.add("text", b"greenhouse", "greenhouse", "Work")
+        for i in range(1000):
+            name = "Personal" if i % 2 else "Work"
+            self.db.add(
+                "text", f"greenhouse research note {i:04d}".encode(),
+                f"Memo number {i:04d}", name,
+            )
+        matches = self.db.search("greenhouse", None, "Best match")
+        self.assertEqual(len(matches), 1000)
+        self.assertIn(exact, [entry.id for entry in matches])
+        self.assertEqual(matches[0].id, exact)
+
     def test_index_search_large_corpus(self):
         for i in range(400):
             self.db.add("text", f"sample test document {i}".encode(), f"Entry {i}")
