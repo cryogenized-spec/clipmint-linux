@@ -105,19 +105,24 @@ class ClipSearchIndex:
                 "INSERT INTO clipmint_fts(clipmint_fts) VALUES('optimize')"
             )
 
-    def search_ids(self, query: str, bin_name: str) -> list[int]:
+    def search_ids(self, query: str, bin_name: str | None) -> list[int]:
         if not self.enabled:
             return []
         expression = safe_fts_query(query)
         if not expression:
             return []
         try:
+            # The all-collections view is explicit. Never interpolate a
+            # clipboard-supplied string or a bin label into SQL.
+            condition = "" if bin_name is None else " AND clips.bin=?"
+            params = ((expression, MAX_RESULTS) if bin_name is None
+                      else (expression, bin_name, MAX_RESULTS))
             rows = self.conn.execute(
                 "SELECT clipmint_fts.rowid FROM clipmint_fts "
                 "JOIN clips ON clips.id=clipmint_fts.rowid "
-                "WHERE clipmint_fts MATCH ? AND clips.bin=? "
-                "ORDER BY bm25(clipmint_fts) LIMIT ?",
-                (expression, bin_name, MAX_RESULTS)
+                "WHERE clipmint_fts MATCH ?" + condition +
+                " ORDER BY bm25(clipmint_fts) LIMIT ?",
+                params
             )
             return [int(row[0]) for row in rows]
         except sqlite3.OperationalError:
