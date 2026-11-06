@@ -114,8 +114,8 @@ class ScreenshotNoticeTests(unittest.TestCase):
                 self.assertFalse(window.isVisible())
                 image = QPixmap(84, 62)
                 image.fill(QColor("#A53043"))
-                with patch("clipmint.app.screenshots_dir", return_value=Path(root)), \\
-                     patch.object(window, "show_window") as raise_main, \\
+                with patch("clipmint.app.screenshots_dir", return_value=Path(root)), \
+                     patch.object(window, "show_window") as raise_main, \
                      patch("clipmint.app.play_capture_sound") as sound:
                     window.save_screenshot(None, image)
                 self.app.processEvents()
@@ -155,7 +155,7 @@ class ScreenshotNoticeTests(unittest.TestCase):
                 window.settings.setValue("capture/sound_enabled", False)
                 image = QPixmap(72, 54)
                 image.fill(QColor("#A53043"))
-                with patch("clipmint.app.screenshots_dir", return_value=Path(root)), \\
+                with patch("clipmint.app.screenshots_dir", return_value=Path(root)), \
                      patch("clipmint.app.play_capture_sound") as sound:
                     window.save_screenshot(None, image)
                 sound.assert_not_called()
