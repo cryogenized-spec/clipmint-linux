@@ -102,7 +102,19 @@ class VisibleHistoryUiTests(unittest.TestCase):
                     # synchronously emits dataChanged.
                     window.clipboard_changed()
                 self.app.processEvents()
-                self.assertEqual(window.store.count("Writing"), 1)
+                self.assertEqual(
+                    window.store.count("Writing"), 1,
+                    "capture diagnostics: " + repr({
+                        "monitoring": window.monitoring,
+                        "security_error": window.history_security_error,
+                        "autosort_enabled": window.autosort_enabled,
+                        "autosort_rules": len(window.autosort_rules),
+                        "counts": {name: window.store.count(name)
+                                   for name in window.store.bins()},
+                        "clipboard_has_text": self.app.clipboard().mimeData().hasText(),
+                        "clipboard_text": self.app.clipboard().text()[:80],
+                    }),
+                )
                 self.assertEqual(window.store.count("Work"), 0)
                 self.assertEqual(window.store.count(None), 1)
                 self.assertEqual(window.history.count(), 1)
