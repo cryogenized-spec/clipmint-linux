@@ -11,7 +11,7 @@ import sqlite3
 import stat
 from .clipboard_formats import bundle_to_bytes, bundle_from_bytes, sensitive_payload
 from .secret_detector import detect_secret
-from .search_index import ClipSearchIndex
+from .search_index import ClipSearchIndex, safe_fts_query
 
 DEFAULT_BINS = ("Work", "Personal", "Temporary")
 SORTS = {
@@ -375,19 +375,23 @@ class ClipStore:
         sort = sort if sort in SORTS or sort == "Best match" else "Latest first"
         order = SORTS.get(sort, "touch_seq DESC, id DESC")
         query = str(query)[:256]
-        matched_ids = self.search_index.search_ids(query, bin_name) if query.strip() else []
+        # Use an FTS subquery *inside* the filtered SQL rather than a
+        # separately limited candidate list. With multiple Autosort bins,
+        # an older favourite/tagged match must not disappear behind 1,000
+        # more recent full-body matches in other collections.
+        fts_query = (safe_fts_query(query) if self.search_index.enabled else "")
         # None is an explicit all-collections view, not a physical bin.
         # This retains the usual active-bin filtering for existing callers.
         params: list[object] = [] if bin_name is None else [bin_name]
         where = [] if bin_name is None else ["bin=?"]
         if query:
-            if matched_ids:
-                slots = ",".join("?" for _ in matched_ids)
+            if fts_query:
                 where.append(
-                    f"(id IN ({slots}) OR instr(lower(preview),lower(?)) > 0)"
+                    "(id IN (SELECT rowid FROM clipmint_fts "
+                    "WHERE clipmint_fts MATCH ?) "
+                    "OR instr(lower(preview),lower(?)) > 0)"
                 )
-                params.extend(matched_ids)
-                params.append(query)
+                params.extend((fts_query, query))
             else:
                 where.append("instr(lower(preview),lower(?)) > 0")
                 params.append(query)
@@ -408,7 +412,10 @@ class ClipStore:
         ).fetchall()
         clips = [Clip(r[0],r[1],r[2],bool(r[3]),r[4],r[5],bool(r[6])) for r in rows]
         if sort == "Best match" and query:
-            relevance = {ident: i for i, ident in enumerate(matched_ids)}
+            # Rank only the already-filtered result IDs. Do not let a
+            # global, capped FTS candidate list affect visibility.
+            ranked = self.search_index.rank_ids(query, [c.id for c in clips])
+            relevance = {ident: i for i, ident in enumerate(ranked)}
             clips.sort(key=lambda c: (relevance.get(c.id, 10**7), -c.id))
         return clips
 
