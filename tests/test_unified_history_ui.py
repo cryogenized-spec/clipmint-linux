@@ -232,8 +232,11 @@ class VisibleHistoryUiTests(unittest.TestCase):
             try:
                 window = ClipMintWindow()
                 self.assertEqual(window.tabs.tabText(0), "All clips")
+                self.assertEqual(window.tabs.tabText(1), "Text")
+                self.assertEqual(window.tabs.tabText(2), "Links")
                 self.assertEqual(window.tabs.currentIndex(), 0)
                 self.assertIsNone(window.view_bin())
+                self.assertEqual(window.bin_filter.currentText(), "All collections")
                 self.assertEqual(window.active_bin(), "Work")
                 # Other UI tests may have persisted an older five-rule
                 # Autosort preference. Explicitly configure the default
@@ -242,7 +245,7 @@ class VisibleHistoryUiTests(unittest.TestCase):
                 for bin_name in SMART_BINS:
                     if bin_name not in window.store.bins():
                         window.store.add_bin(bin_name)
-                        window.tabs.addTab(bin_name)
+                        window.bin_filter.addItem(bin_name, bin_name)
                 window.autosort_rules = default_smart_rules()
                 window.autosort_enabled = True
 
@@ -267,19 +270,31 @@ class VisibleHistoryUiTests(unittest.TestCase):
                 self.assertIn("Work", destinations)
                 self.assertNotIn("Writing", destinations)
 
-                work_index = next(
-                    i for i in range(window.tabs.count())
-                    if window.tabs.tabText(i) == "Work"
+                # Top tabs are content filters, not a physical collection.
+                self.assertNotIn(
+                    "Writing",
+                    [window.tabs.tabText(i) for i in range(window.tabs.count())],
                 )
-                window.tabs.setCurrentIndex(work_index)
-                self.assertEqual(window.history.count(), 0)
-                writing_index = next(
+                text_index = next(
                     i for i in range(window.tabs.count())
-                    if window.tabs.tabText(i) == "Writing"
+                    if window.tabs.tabText(i) == "Text"
                 )
-                window.tabs.setCurrentIndex(writing_index)
+                window.tabs.setCurrentIndex(text_index)
                 self.assertEqual(window.history.count(), 1)
+                links_index = next(
+                    i for i in range(window.tabs.count())
+                    if window.tabs.tabText(i) == "Links"
+                )
+                window.tabs.setCurrentIndex(links_index)
+                self.assertEqual(window.history.count(), 0)
                 window.tabs.setCurrentIndex(0)
+                work_index = window.bin_filter.findData("Work")
+                window.bin_filter.setCurrentIndex(work_index)
+                self.assertEqual(window.history.count(), 0)
+                writing_index = window.bin_filter.findData("Writing")
+                window.bin_filter.setCurrentIndex(writing_index)
+                self.assertEqual(window.history.count(), 1)
+                window.bin_filter.setCurrentIndex(0)
                 self.assertEqual(window.history.count(), 1)
             finally:
                 if window is not None:
