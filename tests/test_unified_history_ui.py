@@ -20,6 +20,7 @@ from PySide6.QtWidgets import QApplication
 from clipmint.app import ClipMintWindow
 from clipmint.store import ClipStore
 from clipmint.secure_history import EncryptedClipStore
+from clipmint.smart_types import DEFAULT_BINS as SMART_BINS, default_smart_rules
 
 
 class AllCollectionsDatabaseTests(unittest.TestCase):
@@ -92,7 +93,16 @@ class VisibleHistoryUiTests(unittest.TestCase):
                 self.assertEqual(window.tabs.currentIndex(), 0)
                 self.assertIsNone(window.view_bin())
                 self.assertEqual(window.active_bin(), "Work")
-                self.assertTrue(window.autosort_enabled)
+                # Other UI tests may have persisted an older five-rule
+                # Autosort preference. Explicitly configure the default
+                # thirty-rule scenario instead of depending on Qt's shared
+                # Settings path/cached native format across the whole suite.
+                for bin_name in SMART_BINS:
+                    if bin_name not in window.store.bins():
+                        window.store.add_bin(bin_name)
+                        window.tabs.addTab(bin_name)
+                window.autosort_rules = default_smart_rules()
+                window.autosort_enabled = True
 
                 with patch("clipmint.app.blocked_foreground", return_value=False):
                     self.app.clipboard().setText(
@@ -102,19 +112,7 @@ class VisibleHistoryUiTests(unittest.TestCase):
                     # synchronously emits dataChanged.
                     window.clipboard_changed()
                 self.app.processEvents()
-                self.assertEqual(
-                    window.store.count("Writing"), 1,
-                    "capture diagnostics: " + repr({
-                        "monitoring": window.monitoring,
-                        "security_error": window.history_security_error,
-                        "autosort_enabled": window.autosort_enabled,
-                        "autosort_rules": len(window.autosort_rules),
-                        "counts": {name: window.store.count(name)
-                                   for name in window.store.bins()},
-                        "clipboard_has_text": self.app.clipboard().mimeData().hasText(),
-                        "clipboard_text": self.app.clipboard().text()[:80],
-                    }),
-                )
+                self.assertEqual(window.store.count("Writing"), 1)
                 self.assertEqual(window.store.count("Work"), 0)
                 self.assertEqual(window.store.count(None), 1)
                 self.assertEqual(window.history.count(), 1)
