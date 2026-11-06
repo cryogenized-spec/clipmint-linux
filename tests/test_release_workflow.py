@@ -21,6 +21,17 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn("contents: read", workflow)
         self.assertIn('[[ "$GITHUB_REF_NAME" =~ ^v', workflow)
 
+    def test_preview_debian_versions_change_for_each_run_and_rerun(self):
+        """Repeated preview1 packages caused apt to keep an old screenshot build."""
+        workflow = (ROOT / ".github/workflows/build-linux.yml").read_text()
+        self.assertIn("GITHUB_RUN_NUMBER", workflow)
+        self.assertIn("GITHUB_RUN_ATTEMPT", workflow)
+        self.assertIn(
+            'version="0.6.0~preview1.${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"',
+            workflow,
+        )
+        self.assertNotIn('version="0.6.0~preview1"\n', workflow)
+
     def test_checksums_reference_downloaded_filename_not_build_path(self):
         build = (ROOT / "packaging/build-deb.sh").read_text()
         self.assertIn('(cd dist-packages && sha256sum', build)
