@@ -604,7 +604,7 @@ def build_archive_page(w):
     header=QHBoxLayout()
     header_text=QVBoxLayout()
     header_text.setSpacing(5)
-    header_text.addWidget(make_label("01 / YOUR COLLECTION","eyebrow"))
+    header_text.addWidget(make_label("01 / CLIPBOARD TIMELINE","eyebrow"))
     w.archive_heading=make_label("Clipboard  ·  クリップボード","sectionTitle")
     header_text.addWidget(w.archive_heading)
     header.addLayout(header_text)
@@ -617,18 +617,12 @@ def build_archive_page(w):
     w.tabs=QTabBar()
     w.tabs.setExpanding(False)
     w.tabs.setDrawBase(False)
-    # The primary clipboard timeline combines every Autosort collection.
-    # Physical bins remain available as their own tabs to the right.
-    w.tabs.addTab("All clips")
-    for name in w.store.bins():
-        w.tabs.addTab(name)
+    # Fixed content filters: top tabs are views, not storage folders.
+    from .history_filters import populate_filter_tabs
+    populate_filter_tabs(w.tabs)
+    w.tabs.setToolTip("Filter all copied clips by content type")
     w.tabs.currentChanged.connect(w.refresh)
     bin_row.addWidget(w.tabs,1)
-    add_bin=QPushButton("+")
-    add_bin.setObjectName("addBin")
-    add_bin.setToolTip("Create a new clipboard bin")
-    add_bin.clicked.connect(w.new_bin)
-    bin_row.addWidget(add_bin)
     layout.addLayout(bin_row)
     # Draw the search outline on a real QFrame. Qt can otherwise ignore a
     # QLineEdit's border radius on some X11 themes and render a square box.
@@ -653,11 +647,25 @@ def build_archive_page(w):
     layout.addWidget(search_shell)
     controls=QHBoxLayout()
     controls.setSpacing(9)
-    w.category=QComboBox()
-    w.category.addItems(["All", "Text", "URLs", "Phone numbers", "Images", "Files"])
-    w.category.currentIndexChanged.connect(w.refresh)
-    controls.addWidget(make_label("SHOW","filterLabel"))
-    controls.addWidget(w.category,1)
+    # Collection scope is secondary and independent of the content tabs.
+    # Retain physical bins for Autosort and existing clip metadata without
+    # treating those storage destinations as top-level navigation.
+    w.bin_filter=QComboBox()
+    w.bin_filter.setObjectName("collectionFilter")
+    w.bin_filter.addItem("All collections", None)
+    for name in w.store.bins():
+        w.bin_filter.addItem(name, name)
+    w.bin_filter.setToolTip(
+        "Optional collection scope; top tabs always filter by content type"
+    )
+    w.bin_filter.currentIndexChanged.connect(w.refresh)
+    controls.addWidget(make_label("COLLECTION","filterLabel"))
+    controls.addWidget(w.bin_filter,1)
+    add_bin=QPushButton("+")
+    add_bin.setObjectName("addBin")
+    add_bin.setToolTip("Create a collection for custom routing and Autosort")
+    add_bin.clicked.connect(w.new_bin)
+    controls.addWidget(add_bin)
     w.sort_combo=QComboBox()
     for display, key in (("Newest", "Latest first"), ("Best match", "Best match"), ("Oldest", "Oldest first"),
                          ("A–Z", "A–Z"), ("Z–A", "Z–A"), ("Numbered", "Numbered list")):
