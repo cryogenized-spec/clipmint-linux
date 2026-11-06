@@ -617,6 +617,9 @@ def build_archive_page(w):
     w.tabs=QTabBar()
     w.tabs.setExpanding(False)
     w.tabs.setDrawBase(False)
+    # The primary clipboard timeline combines every Autosort collection.
+    # Physical bins remain available as their own tabs to the right.
+    w.tabs.addTab("All clips")
     for name in w.store.bins():
         w.tabs.addTab(name)
     w.tabs.currentChanged.connect(w.refresh)

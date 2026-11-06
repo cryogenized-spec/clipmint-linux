@@ -236,60 +236,88 @@ class EncryptedClipStore(ClipStore):
 
     def search(self, query="", bin_name="Work", sort="Latest first",
                category="All", tag="", favorites_only=False):
-        # Decrypt matching previews strictly in-process. No plaintext FTS
-        # index is ever constructed for encrypted history.
+        """Scan encrypted rows one at a time; limit *matched* UI results.
+
+        Autosort bins can together exceed 1,000 rows. Never apply a global
+        ciphertext candidate limit before search/category/tag filters, and
+        never fetch a batch of large encrypted screenshots into memory.
+        """
         from .store import classify
-        rows = self.conn.execute(
+
+        condition = "corrupt=0" if bin_name is None else "bin=? AND corrupt=0"
+        params = () if bin_name is None else (bin_name,)
+        oldest_first = sort == "Oldest first"
+        order = ("touch_seq ASC,id ASC" if oldest_first
+                 else "touch_seq DESC,id DESC")
+        cursor = self.conn.execute(
             """SELECT id,kind,content,pinned,created_at,bin,favorite,touch_seq
-               FROM clips WHERE bin=? AND corrupt=0
-               ORDER BY touch_seq DESC,id DESC LIMIT 1000""", (bin_name,)
+               FROM clips WHERE """ + condition + " ORDER BY " + order,
+            params,
         )
+        needle = str(query).casefold()
+        wanted_tag = str(tag).lower().strip()
+        needs_ranking = sort in ("A–Z", "Z–A") or (
+            sort == "Best match" and needle.strip()
+        )
+        descending = sort == "Z–A"
+
+        def ranking(row):
+            sequence, clip = row
+            value = clip.preview.casefold()
+            if sort in ("A–Z", "Z–A"):
+                return (value, clip.id)
+            return (
+                0 if value == needle else 1 if value.startswith(needle) else 2,
+                value.find(needle),
+                -sequence,
+            )
+
         items: list[tuple[int, Clip]] = []
         newly_damaged: list[int] = []
-        for ident, kind, raw, pinned, date, bucket, favorite, sequence in rows:
-            try:
-                _, preview, _ = self._open(bytes(raw))
-            except HistorySecurityError:
-                # Preserve the unreadable encrypted row for manual recovery,
-                # but do not let it hide unrelated healthy clipboard history.
-                self.corrupt_row_ids.add(ident)
-                newly_damaged.append(ident)
-                continue
-            if query.casefold() not in preview.casefold():
-                continue
-            if favorites_only and not favorite:
-                continue
-            if tag and tag.lower().strip() not in self.tags(ident):
-                continue
-            clip = Clip(ident, kind, preview, bool(pinned), date, bucket, bool(favorite))
-            if category != "All" and classify(clip) != category:
-                continue
-            items.append((sequence, clip))
+        try:
+            # Streaming the cursor one row at a time avoids materializing
+            # 128 ciphertext images at once (which could exceed several GiB).
+            # The 1,000 limit still applies after filtering and decryption.
+            for ident, kind, raw, pinned, date, bucket, favorite, sequence in cursor:
+                if favorites_only and not favorite:
+                    continue
+                if wanted_tag and wanted_tag not in self.tags(ident):
+                    continue
+                try:
+                    _, preview, _ = self._open(bytes(raw))
+                except HistorySecurityError:
+                    # Preserve damaged encrypted rows for explicit recovery.
+                    self.corrupt_row_ids.add(ident)
+                    newly_damaged.append(ident)
+                    continue
+                if needle not in preview.casefold():
+                    continue
+                clip = Clip(
+                    ident, kind, preview, bool(pinned), date, bucket,
+                    bool(favorite)
+                )
+                if category != "All" and classify(clip) != category:
+                    continue
+                items.append((sequence, clip))
+                if needs_ranking:
+                    # Keep the best 1,000; never retain unbounded previews.
+                    if len(items) >= 2000:
+                        items.sort(key=ranking, reverse=descending)
+                        del items[1000:]
+                elif len(items) >= 1000:
+                    break
+        finally:
+            cursor.close()
+
         if newly_damaged:
             with self.conn:
                 self.conn.executemany(
                     "UPDATE clips SET corrupt=1 WHERE id=?",
                     [(ident,) for ident in newly_damaged],
                 )
-        if sort in ("A–Z", "Z–A"):
-            items.sort(key=lambda row: (row[1].preview.casefold(), row[1].id),
-                       reverse=(sort == "Z–A"))
-        elif sort == "Oldest first":
-            items.sort(key=lambda row: (row[0], row[1].id))
-        elif sort == "Best match" and query.strip():
-            # Rank only in process memory while unlocked. Never build a
-            # plaintext FTS index or write query scores into SQLite.
-            needle = query.strip().casefold()
-            def relevance(row):
-                sequence, clip = row
-                text = clip.preview.casefold()
-                return (
-                    0 if text == needle else 1 if text.startswith(needle) else 2,
-                    text.find(needle),
-                    -sequence,
-                )
-            items.sort(key=relevance)
-        return [clip for _sequence, clip in items]
+        if needs_ranking:
+            items.sort(key=ranking, reverse=descending)
+        return [clip for _sequence, clip in items[:1000]]
 
     @classmethod
     def migrate_legacy(cls, legacy: ClipStore, target: Path, key: bytes):

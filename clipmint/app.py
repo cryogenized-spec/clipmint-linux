@@ -311,6 +311,9 @@ class ClipMintWindow(QMainWindow):
         self.tabs = QTabBar()
         self.tabs.setExpanding(True)
         self.tabs.setDrawBase(False)
+        # The main stream must show *all* captured text, even when default
+        # Autosort routes it into Writing or another Smart collection.
+        self.tabs.addTab("All clips")
         for name in self.store.bins():
             self.tabs.addTab(name)
         self.tabs.currentChanged.connect(self.refresh)
@@ -1640,8 +1643,14 @@ class ClipMintWindow(QMainWindow):
         )
         return True
 
+    def view_bin(self) -> str | None:
+        """None means the combined history stream; it is not a writable bin."""
+        index = self.tabs.currentIndex()
+        return self.tabs.tabText(index) if index > 0 else None
+
     def active_bin(self) -> str:
-        return self.tabs.tabText(self.tabs.currentIndex()) if self.tabs.currentIndex() >= 0 else "Work"
+        """Destination for new clips if Autosort is disabled or unmatched."""
+        return self.view_bin() or "Work"
 
     def new_bin(self):
         name, ok = QInputDialog.getText(self, "New accumulation bin", "Bin name:")
@@ -1922,6 +1931,11 @@ class ClipMintWindow(QMainWindow):
                 if tag not in existing and len(existing) < 15:
                     self.store.set_tags(saved_id, [*existing, tag])
         self.refresh()
+        if saved_id is not None and self.view_bin() is not None and target != self.view_bin():
+            self.statusBar().showMessage(
+                f"Clip saved in {target}. Open All clips or {target} to view it.",
+                6500,
+            )
 
     def expire_sensitive_clipboard(self, token: int, expected: str) -> None:
         """Never clear unrelated clipboard content copied in the meantime."""
@@ -1941,7 +1955,7 @@ class ClipMintWindow(QMainWindow):
         previous = self.selected_id()
         self.history.blockSignals(True)
         self.history.clear()
-        bin_name = self.active_bin()
+        bin_name = self.view_bin()
         category = self.category.currentText()
         sort = self.sort_combo.currentData() or self.sort_combo.currentText()
         # Refresh tag choices while preserving the user's current filter.
@@ -1962,6 +1976,8 @@ class ClipMintWindow(QMainWindow):
         )
         for i, clip in enumerate(clips):
             title = f"{i + 1}. {clip.preview}" if sort == "Numbered list" else clip.preview
+            if bin_name is None:
+                title = f"[{clip.bin}]  {title}"
             item = QListWidgetItem(title)
             item.setData(Qt.ItemDataRole.UserRole, clip.id)
             kind_tag, _symbol, _color = label_type(clip.kind, clip.preview)
@@ -1992,7 +2008,10 @@ class ClipMintWindow(QMainWindow):
         if hasattr(self, "footer_status"):
             self.footer_status.setText(f"● Ready   |   HISTORY {self.store.count(bin_name):02d}")
         if hasattr(self, "footer_status"):
-            self.footer_status.setToolTip(f"{self.store.count(bin_name)} clips in {bin_name}")
+            scope = "all collections" if bin_name is None else bin_name
+            self.footer_status.setToolTip(
+                f"{self.store.count(bin_name)} clips in {scope}"
+            )
         if self.history.currentItem() is None:
             self.clear_preview()
         else:
@@ -2222,6 +2241,16 @@ class ClipMintWindow(QMainWindow):
         item = self.history.currentItem()
         return item.data(Qt.ItemDataRole.UserRole) if item else None
 
+    def move_destinations_for_item(self, item) -> list[str]:
+        """Offer every bin except the selected clip's *actual* collection.
+
+        The All clips stream has no physical destination of its own. Do not
+        conflate the Work fallback for new writes with an existing item's bin.
+        """
+        details = item.data(Qt.ItemDataRole.UserRole + 1) or {}
+        current = details.get("bin") if isinstance(details, dict) else None
+        return [name for name in self.store.bins() if name != current]
+
     def context_menu(self, position):
         item = self.history.itemAt(position)
         if item is None:
@@ -2246,9 +2275,8 @@ class ClipMintWindow(QMainWindow):
         menu.addSeparator()
         move_menu = menu.addMenu("Move to bin")
         moves = {}
-        for name in self.store.bins():
-            if name != self.active_bin():
-                moves[move_menu.addAction(name)] = name
+        for name in self.move_destinations_for_item(item):
+            moves[move_menu.addAction(name)] = name
         delete = menu.addAction("Delete")
         choice = menu.exec(self.history.viewport().mapToGlobal(position))
         if choice == copy:

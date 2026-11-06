@@ -105,19 +105,45 @@ class ClipSearchIndex:
                 "INSERT INTO clipmint_fts(clipmint_fts) VALUES('optimize')"
             )
 
-    def search_ids(self, query: str, bin_name: str) -> list[int]:
+    def search_ids(
+        self, query: str, bin_name: str | None,
+        category: str = "All", tag: str = "", favorites_only: bool = False,
+    ) -> list[int]:
+        """Retrieve relevance ranks after metadata filtering.
+
+        For result membership, ClipStore.search uses an unlimited FTS
+        subquery inside its final filtered SELECT; this bounded rank list is
+        not permitted to hide any older result.
+        """
         if not self.enabled:
             return []
         expression = safe_fts_query(query)
         if not expression:
             return []
+        conditions = ["clipmint_fts MATCH ?"]
+        params: list[object] = [expression]
+        if bin_name is not None:
+            conditions.append("clips.bin=?")
+            params.append(bin_name)
+        if category != "All":
+            conditions.append("clipmint_category(clips.kind,clips.preview)=?")
+            params.append(category)
+        if favorites_only:
+            conditions.append("clips.favorite=1")
+        if tag:
+            conditions.append(
+                "EXISTS (SELECT 1 FROM clip_tags t "
+                "WHERE t.clip_id=clips.id AND t.tag=?)"
+            )
+            params.append(tag.lower().strip())
+        params.append(MAX_RESULTS)
         try:
             rows = self.conn.execute(
                 "SELECT clipmint_fts.rowid FROM clipmint_fts "
-                "JOIN clips ON clips.id=clipmint_fts.rowid "
-                "WHERE clipmint_fts MATCH ? AND clips.bin=? "
-                "ORDER BY bm25(clipmint_fts) LIMIT ?",
-                (expression, bin_name, MAX_RESULTS)
+                "JOIN clips ON clips.id=clipmint_fts.rowid WHERE " +
+                " AND ".join(conditions) +
+                " ORDER BY bm25(clipmint_fts) LIMIT ?",
+                params,
             )
             return [int(row[0]) for row in rows]
         except sqlite3.OperationalError:
