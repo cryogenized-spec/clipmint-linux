@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
     QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow,
     QMenu, QMessageBox, QPushButton, QStyle, QSystemTrayIcon,
     QTabBar, QToolButton, QVBoxLayout, QWidget, QStackedWidget, QSizePolicy,
-    QKeySequenceEdit, QGroupBox, QCheckBox, QDialogButtonBox,
+    QKeySequenceEdit, QGroupBox, QCheckBox, QDialogButtonBox, QTabWidget,
     QFormLayout, QAbstractItemView, QFileDialog, QScrollArea, QListView,
 )
 
@@ -32,7 +32,7 @@ from .smart_types import (SMART_TYPES, TYPE_BY_KEY, DEFAULT_BINS as SMART_BINS,
                           classify_smart, default_smart_rules)
 from .vault import Vault, VaultError
 from .screenshot_editor import installed_editors, resolve_editor, open_image_editor
-from .screenshot_notice import ScreenshotNotice
+from .screenshot_notice import ScreenshotNotice, play_capture_sound
 from .screenshot_gallery import read_screenshot, screenshot_thumbnail_icon, PREVIEW_SIZE
 from .clipboard_formats import from_mime, is_concealed, sensitive_text, mime_from_entry
 from .clipboard_guard import OwnClipboardGuard
@@ -214,6 +214,7 @@ class ClipMintWindow(QMainWindow):
         self._closing = False
         self._own_clipboard_guard = OwnClipboardGuard()
         self._last_screenshot_path = None
+        self._capture_restore_main = False
         self._screenshot_thumbnail_generation = 0
         self._ocr_workers = set()
         self._last_tray_notification = None
@@ -264,8 +265,6 @@ class ClipMintWindow(QMainWindow):
         super().resizeEvent(event)
         if hasattr(self, "manga_dock"):
             self._update_manga_visibility()
-        if getattr(self, "screenshot_notice", None) is not None:
-            self.screenshot_notice.position_inside_window()
 
     def _update_manga_visibility(self):
         """Keep dock labels readable; never regress to an icons-only rail.
@@ -1293,24 +1292,13 @@ class ClipMintWindow(QMainWindow):
         popup_group = QGroupBox("Quick access")
         popup_controls = QVBoxLayout(popup_group)
         popup_help = QLabel(
-            "Cinnamon global shortcut: bind /opt/clipmint/ClipMint --toggle "
-            "in System Settings → Keyboard → Shortcuts → Custom Shortcuts. "
-            "The popup searches all bins without opening the main window."
+            "Open a compact search popup without opening ClipMint's main window."
         )
         popup_help.setWordWrap(True)
         popup_controls.addWidget(popup_help)
         popup_test = QPushButton("Show quick search popup")
         popup_test.clicked.connect(self.toggle_quick_popup)
         popup_controls.addWidget(popup_test)
-        popup_controls.addWidget(QLabel("Cinnamon global shortcut (optional):"))
-        self.global_popup_hotkey = QKeySequenceEdit()
-        self.global_popup_hotkey.setKeySequence(QKeySequence(str(
-            self.settings.value("popup/global_shortcut", "Ctrl+Alt+V")
-        )))
-        popup_controls.addWidget(self.global_popup_hotkey)
-        register_button = QPushButton("Register shortcut in Cinnamon…")
-        register_button.clicked.connect(self.register_cinnamon_hotkey)
-        popup_controls.addWidget(register_button)
         self.popup_paste_choice = QCheckBox(
             "Paste into the previously focused window after pressing Enter"
         )
@@ -1323,16 +1311,49 @@ class ClipMintWindow(QMainWindow):
         popup_controls.addWidget(self.popup_paste_choice)
         layout.addWidget(popup_group)
 
-        # The in-window Ctrl+Shift+S cannot replace Cinnamon shortcuts.
-        # Register an independent system-wide command only on explicit request.
-        global_screenshot_group = QGroupBox("Screenshot area · global shortcut")
+        # One home for every hotkey: Cinnamon global + ClipMint-focused local.
+        # Keep each Cinnamon registration opt-in and collision-checked.
+        shortcuts_section = QGroupBox("Keyboard shortcuts")
+        shortcuts_layout = QVBoxLayout(shortcuts_section)
+        shortcuts_help = QLabel(
+            "Cinnamon global shortcuts work while Firefox or another app is "
+            "focused. Register them individually; ClipMint never replaces "
+            "existing desktop shortcuts without confirmation. Local "
+            "shortcuts below work only when ClipMint is focused."
+        )
+        shortcuts_help.setWordWrap(True)
+        shortcuts_layout.addWidget(shortcuts_help)
+        shortcut_tabs = QTabWidget()
+        shortcut_tabs.setObjectName("shortcutTabs")
+        shortcuts_layout.addWidget(shortcut_tabs)
+        global_page = QWidget()
+        global_layout = QVBoxLayout(global_page)
+        global_layout.setContentsMargins(10, 10, 10, 10)
+        global_layout.setSpacing(8)
+        shortcut_tabs.addTab(global_page, "Cinnamon · Global")
+        local_page = QWidget()
+        local_layout = QVBoxLayout(local_page)
+        local_layout.setContentsMargins(10, 10, 10, 10)
+        shortcut_tabs.addTab(local_page, "Inside ClipMint")
+
+        global_popup_group = QGroupBox("Clipboard popup · Cinnamon global")
+        global_popup_layout = QVBoxLayout(global_popup_group)
+        self.global_popup_hotkey = QKeySequenceEdit()
+        self.global_popup_hotkey.setKeySequence(QKeySequence(str(
+            self.settings.value("popup/global_shortcut", "Ctrl+Alt+V")
+        )))
+        global_popup_layout.addWidget(self.global_popup_hotkey)
+        register_button = QPushButton("Register clipboard popup in Cinnamon…")
+        register_button.clicked.connect(self.register_cinnamon_hotkey)
+        global_popup_layout.addWidget(register_button)
+        global_layout.addWidget(global_popup_group)
+
+        global_screenshot_group = QGroupBox("Screenshot area · Cinnamon global")
         global_screenshot_layout = QVBoxLayout(global_screenshot_group)
         global_screenshot_help = QLabel(
-            "Cinnamon owns system-wide shortcuts. Register Ctrl+Shift+S here "
-            "to use ClipMint's region selector even when another app is focused. "
-            "If Cinnamon's built-in screenshot action owns the combination, "
-            "ClipMint will ask before taking it over, preserve its other "
-            "shortcuts and save a reversible backup."
+            "The chosen key starts region capture even when ClipMint is hidden. "
+            "A conflict with Cinnamon's own screenshot binding can be "
+            "replaced only with explicit permission and a reversible backup."
         )
         global_screenshot_help.setWordWrap(True)
         global_screenshot_layout.addWidget(global_screenshot_help)
@@ -1348,14 +1369,13 @@ class ClipMintWindow(QMainWindow):
         restore_screenshot = QPushButton("Restore previous Cinnamon screenshot binding…")
         restore_screenshot.clicked.connect(self.restore_cinnamon_screenshot_hotkey)
         global_screenshot_layout.addWidget(restore_screenshot)
-        layout.addWidget(global_screenshot_group)
+        global_layout.addWidget(global_screenshot_group)
 
-        global_record_group = QGroupBox("Recording area · global shortcut")
+        global_record_group = QGroupBox("Recording area · Cinnamon global")
         global_record_layout = QVBoxLayout(global_record_group)
         global_record_help = QLabel(
-            "Optionally assign Ctrl+Shift+R system-wide to ClipMint's MP4 "
-            "region recorder. Desktop or other custom bindings are not "
-            "silently replaced."
+            "Choose a system-wide MP4 region-recording key. Other Cinnamon "
+            "or custom shortcuts are never silently replaced."
         )
         global_record_help.setWordWrap(True)
         global_record_layout.addWidget(global_record_help)
@@ -1367,10 +1387,12 @@ class ClipMintWindow(QMainWindow):
         global_record_button = QPushButton("Register recording shortcut in Cinnamon…")
         global_record_button.clicked.connect(self.register_cinnamon_recording_hotkey)
         global_record_layout.addWidget(global_record_button)
-        layout.addWidget(global_record_group)
+        global_layout.addWidget(global_record_group)
+
         audit_button = QPushButton("Check Cinnamon hotkey assignments…")
         audit_button.clicked.connect(self.audit_global_hotkeys)
-        layout.addWidget(audit_button)
+        global_layout.addWidget(audit_button)
+        layout.addWidget(shortcuts_section)
 
         privacy_group = QGroupBox("Clipboard privacy")
         privacy_layout = QVBoxLayout(privacy_group)
@@ -1453,17 +1475,27 @@ class ClipMintWindow(QMainWindow):
             )
         )
         screenshot_layout.addWidget(self.screenshot_editor_choice)
+        self.screenshot_sound_toggle = QCheckBox(
+            "Play desktop shutter sound when available"
+        )
+        self.screenshot_sound_toggle.setChecked(
+            self.settings.value("capture/sound_enabled", True, type=bool)
+        )
+        self.screenshot_sound_toggle.toggled.connect(
+            lambda enabled: self.settings.setValue("capture/sound_enabled", enabled)
+        )
+        screenshot_layout.addWidget(self.screenshot_sound_toggle)
         layout.addWidget(screenshot_group)
 
         # QSettings holds nonsensitive preferences ONLY; never vault credentials.
         self.shortcut_editors = {}
         self.shortcut_values = {}
         self.shortcut_objects = {}
-        shortcut_group = QGroupBox("Keyboard shortcuts")
+        shortcut_group = QGroupBox("Only when ClipMint is focused")
         shortcut_layout = QVBoxLayout(shortcut_group)
         shortcut_note = QLabel(
-            "These shortcuts work when ClipMint is focused. No system-wide "
-            "keys are registered, and every action remains mouse-accessible."
+            "These shortcuts only work in the ClipMint window. They do not "
+            "override Firefox or Cinnamon shortcuts."
         )
         shortcut_note.setWordWrap(True)
         shortcut_layout.addWidget(shortcut_note)
@@ -1498,7 +1530,7 @@ class ClipMintWindow(QMainWindow):
             )
             row.addWidget(disable)
             shortcut_layout.addLayout(row)
-        layout.addWidget(shortcut_group)
+        local_layout.addWidget(shortcut_group)
         layout.addWidget(QLabel(
             "Vault entries are separately encrypted. Clipboard history needs "
             "the optional secure-history migration above."
@@ -2268,6 +2300,7 @@ class ClipMintWindow(QMainWindow):
 
     def ocr_last_screenshot(self):
         if self._last_screenshot_path is not None:
+            self.dismiss_screenshot_notice()
             self.start_ocr_file(self._last_screenshot_path)
 
     def start_ocr_file(self, path: Path):
@@ -2730,6 +2763,11 @@ class ClipMintWindow(QMainWindow):
         if purpose == "video" and self.recorder.process is not None:
             self.inform("Recording", "Finish the current recording first")
             return
+        # Only return to ClipMint if the user was working in its foreground
+        # window. Global Cinnamon grabs must not summon it over Firefox.
+        self._capture_restore_main = self.isVisible() and self.isActiveWindow()
+        if self.screenshot_notice is not None:
+            self.screenshot_notice.hide()
         self.hide()
         QTimer.singleShot(250, lambda: self.begin_selection(purpose))
 
@@ -2737,7 +2775,9 @@ class ClipMintWindow(QMainWindow):
         try:
             self.selector = AreaSelector(purpose)
         except Exception as exc:
-            self.show_window()
+            if self._capture_restore_main:
+                self.show_window()
+            self._capture_restore_main = False
             self.error("Screen capture", str(exc))
             return
         self.selector.cancelled.connect(self.selection_cancelled)
@@ -2751,7 +2791,9 @@ class ClipMintWindow(QMainWindow):
 
     def selection_cancelled(self):
         QTimer.singleShot(0, self.clear_selection)
-        self.show_window()
+        if self._capture_restore_main:
+            self.show_window()
+        self._capture_restore_main = False
 
     def choose_screenshot(self):
         self.select_area("image")
@@ -2759,13 +2801,18 @@ class ClipMintWindow(QMainWindow):
     def screenshot_full(self):
         if self.selector is not None or self.recorder.active:
             return
+        self._capture_restore_main = self.isVisible() and self.isActiveWindow()
+        if self.screenshot_notice is not None:
+            self.screenshot_notice.hide()
         self.hide()
         QTimer.singleShot(350, self.finish_full_screenshot)
 
     def finish_full_screenshot(self):
         screen = QApplication.primaryScreen()
         if screen is None:
-            self.show_window()
+            if self._capture_restore_main:
+                self.show_window()
+            self._capture_restore_main = False
             self.error("Screenshot", "No screen detected")
             return
         self.save_screenshot(None, screen.grabWindow(0))
@@ -2774,13 +2821,19 @@ class ClipMintWindow(QMainWindow):
         QTimer.singleShot(0, self.clear_selection)
         path = screenshots_dir() / stamped_filename("screenshot", "png")
         if pixmap.isNull() or not pixmap.save(str(path), "PNG"):
-            self.show_window()
+            if self._capture_restore_main:
+                self.show_window()
+            self._capture_restore_main = False
             self.error("Screenshot", "Could not save screenshot")
             return
+        # Make the pixels immediately pasteable into Firefox / another app.
+        # Clipboard history may also record the image as an ordinary clip.
         QApplication.clipboard().setImage(pixmap.toImage())
-        self.show_window()
+        if self._capture_restore_main:
+            self.show_window()
+        self._capture_restore_main = False
         self.notify_screenshot_captured(path)
-        # If the user visits the archive after capturing, preselect the new PNG.
+        # Update the archive without switching to or raising the main window.
         self.refresh_library("Screenshots", select_path=path)
 
     def notify_screenshot_captured(self, path: Path):
@@ -2792,15 +2845,12 @@ class ClipMintWindow(QMainWindow):
         if self.screenshot_notice is not None:
             self.screenshot_notice.present()
             QTimer.singleShot(
-                12000, lambda: self.dismiss_screenshot_notice(token)
+                10000, lambda: self.dismiss_screenshot_notice(token)
             )
-        if self.tray is not None:
-            self._last_tray_notification = "screenshot"
-            self.tray.showMessage(
-                "Screenshot captured",
-                "Click here to edit your screenshot.",
-                QSystemTrayIcon.MessageIcon.Information, 10000,
-            )
+        # Do not duplicate the two-action popup with a tray balloon.
+        # The standard Cinnamon shutter event is best-effort, never blocking.
+        if self.settings.value("capture/sound_enabled", True, type=bool):
+            play_capture_sound()
 
     def dismiss_screenshot_notice(self, token=None):
         if type(token) is int and token != self._screenshot_notice_token:
@@ -3059,12 +3109,12 @@ def main():
         return
     if command == "toggle":
         QTimer.singleShot(150, window.toggle_quick_popup)
-    elif command in ("screenshot-area", "record-area"):
+    elif command == "screenshot-area":
+        # A cold-start global screenshot key must not reveal the main window.
+        QTimer.singleShot(150, window.choose_screenshot)
+    elif command == "record-area":
         window.show()
-        if command == "screenshot-area":
-            QTimer.singleShot(150, window.choose_screenshot)
-        else:
-            QTimer.singleShot(150, lambda: window.choose_recording("MP4"))
+        QTimer.singleShot(150, lambda: window.choose_recording("MP4"))
     elif hidden:
         # Login startup runs headlessly regardless of the desktop's tray
         # support. Reopen through the app launcher (single-instance 'show').

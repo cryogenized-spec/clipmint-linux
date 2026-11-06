@@ -99,12 +99,12 @@ class AreaSelector(QWidget):
     def paintEvent(self, _event):
         painter = QPainter(self)
         painter.drawPixmap(self.rect(), self.background)
-        painter.fillRect(self.rect(), QColor(0, 0, 0, 100))
+        painter.fillRect(self.rect(), QColor(0, 0, 0, 64))
         if self.box.isValid() and not self.box.isEmpty():
             area = self.box.intersected(self.rect())
             source_pixels = physical_rect(area, *self.pixel_scale)
             painter.drawPixmap(area, self.background, source_pixels)
-            painter.setPen(QPen(QColor("#00FF9D"), 2))
+            painter.setPen(QPen(QColor("#C94A62"), 2))
             painter.drawRect(area)
             painter.setPen(QColor("#F1F5F9"))
             size_label = f"{source_pixels.width()} × {source_pixels.height()} px"
