@@ -41,6 +41,7 @@ from .ocr import OcrWorker, validate_language
 from .quick_popup import QuickPopup, paste_to_window
 from .productivity import PasteQueue
 from .organizer_ui import TemplatesDialog, TransformDialog
+from .history_filters import populate_filter_tabs, selected_category
 from .single_instance import InstanceServer, send_command
 from .cinnamon_hotkey import (install_shortcut, restore_screenshot_takeover,
                               shortcut_conflicts, ShortcutSetupError)
@@ -311,28 +312,28 @@ class ClipMintWindow(QMainWindow):
         self.tabs = QTabBar()
         self.tabs.setExpanding(True)
         self.tabs.setDrawBase(False)
-        # The main stream must show *all* captured text, even when default
-        # Autosort routes it into Writing or another Smart collection.
-        self.tabs.addTab("All clips")
-        for name in self.store.bins():
-            self.tabs.addTab(name)
+        # Tabs filter a unified history; none represents a storage folder.
+        populate_filter_tabs(self.tabs)
         self.tabs.currentChanged.connect(self.refresh)
         bins.addWidget(self.tabs, 1)
-        add_bin = QPushButton("+")
-        add_bin.setToolTip("Add a new accumulation bin")
-        add_bin.clicked.connect(self.new_bin)
-        bins.addWidget(add_bin)
         layout.addLayout(bins)
         self.search = QLineEdit()
-        self.search.setPlaceholderText("Search clips in this bin…")
+        self.search.setPlaceholderText("Search all copied content…")
         self.search.textChanged.connect(self._schedule_history_search)
         layout.addWidget(self.search)
         sorts = QHBoxLayout()
-        sorts.addWidget(QLabel("View:"))
-        self.category = QComboBox()
-        self.category.addItems(["All", "Text", "URLs", "Phone numbers", "Images", "Files"])
-        self.category.currentIndexChanged.connect(self.refresh)
-        sorts.addWidget(self.category)
+        sorts.addWidget(QLabel("Collection:"))
+        self.bin_filter = QComboBox()
+        self.bin_filter.setObjectName("collectionFilter")
+        self.bin_filter.addItem("All collections", None)
+        for name in self.store.bins():
+            self.bin_filter.addItem(name, name)
+        self.bin_filter.currentIndexChanged.connect(self.refresh)
+        sorts.addWidget(self.bin_filter)
+        add_bin = QPushButton("+")
+        add_bin.setToolTip("Create an Autosort collection")
+        add_bin.clicked.connect(self.new_bin)
+        sorts.addWidget(add_bin)
         sorts.addWidget(QLabel("Sort:"))
         self.sort_combo = QComboBox()
         self.sort_combo.addItems(["Latest first", "Oldest first", "A–Z", "Z–A", "Best match", "Numbered list"])
@@ -1128,7 +1129,7 @@ class ClipMintWindow(QMainWindow):
         for name in SMART_BINS:
             if name not in self.store.bins():
                 self.store.add_bin(name)
-                self.tabs.addTab(name)
+                self.bin_filter.addItem(name, name)
         self.autosort_rules = default_smart_rules()
         self.persist_autosort()
         # The explicit Restore defaults action is also the one-click upgrade
@@ -1644,25 +1645,25 @@ class ClipMintWindow(QMainWindow):
         return True
 
     def view_bin(self) -> str | None:
-        """None means the combined history stream; it is not a writable bin."""
-        index = self.tabs.currentIndex()
-        return self.tabs.tabText(index) if index > 0 else None
+        """An optional secondary source selector, not a top history tab."""
+        name = self.bin_filter.currentData()
+        return name if isinstance(name, str) and name in self.store.bins() else None
 
     def active_bin(self) -> str:
-        """Destination for new clips if Autosort is disabled or unmatched."""
+        """Writable target for unmatched clips; filter tabs never choose it."""
         return self.view_bin() or "Work"
 
     def new_bin(self):
-        name, ok = QInputDialog.getText(self, "New accumulation bin", "Bin name:")
+        name, ok = QInputDialog.getText(self, "New collection", "Collection name:")
         if not ok or not name.strip():
             return
         try:
             self.store.add_bin(name.strip())
         except (ValueError, OSError, Exception) as exc:
-            self.error("Bin", str(exc))
+            self.error("Collection", str(exc))
             return
-        index = self.tabs.addTab(name.strip())
-        self.tabs.setCurrentIndex(index)
+        self.bin_filter.addItem(name.strip(), name.strip())
+        self.bin_filter.setCurrentIndex(self.bin_filter.count() - 1)
 
     def open_section(self, index: int):
         self.pages.setCurrentIndex(index)
@@ -1933,7 +1934,7 @@ class ClipMintWindow(QMainWindow):
         self.refresh()
         if saved_id is not None and self.view_bin() is not None and target != self.view_bin():
             self.statusBar().showMessage(
-                f"Clip saved in {target}. Open All clips or {target} to view it.",
+                f"Clip saved in {target}. Choose All collections to see it.",
                 6500,
             )
 
@@ -1956,7 +1957,7 @@ class ClipMintWindow(QMainWindow):
         self.history.blockSignals(True)
         self.history.clear()
         bin_name = self.view_bin()
-        category = self.category.currentText()
+        category = selected_category(self.tabs)
         sort = self.sort_combo.currentData() or self.sort_combo.currentText()
         # Refresh tag choices while preserving the user's current filter.
         current_tag = self.tag_filter.currentData() or ""
