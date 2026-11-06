@@ -169,6 +169,14 @@ class ClipStore:
         self.conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_clips_bin_recent ON clips(bin,touch_seq)"
         )
+        # All clips reads encrypted screenshot ciphertext in recency order.
+        # Without this covering *order* index SQLite can materialize every
+        # large ciphertext blob in a temporary B-tree before yielding a row.
+        # The index stores metadata only; it never stores clip payloads.
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_clips_global_recent "
+            "ON clips(touch_seq DESC,id DESC)"
+        )
         self.conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_clips_bin_fingerprint ON clips(bin,fingerprint)"
         )
