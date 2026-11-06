@@ -2241,6 +2241,16 @@ class ClipMintWindow(QMainWindow):
         item = self.history.currentItem()
         return item.data(Qt.ItemDataRole.UserRole) if item else None
 
+    def move_destinations_for_item(self, item) -> list[str]:
+        """Offer every bin except the selected clip's *actual* collection.
+
+        The All clips stream has no physical destination of its own. Do not
+        conflate the Work fallback for new writes with an existing item's bin.
+        """
+        details = item.data(Qt.ItemDataRole.UserRole + 1) or {}
+        current = details.get("bin") if isinstance(details, dict) else None
+        return [name for name in self.store.bins() if name != current]
+
     def context_menu(self, position):
         item = self.history.itemAt(position)
         if item is None:
@@ -2265,9 +2275,8 @@ class ClipMintWindow(QMainWindow):
         menu.addSeparator()
         move_menu = menu.addMenu("Move to bin")
         moves = {}
-        for name in self.store.bins():
-            if name != self.active_bin():
-                moves[move_menu.addAction(name)] = name
+        for name in self.move_destinations_for_item(item):
+            moves[move_menu.addAction(name)] = name
         delete = menu.addAction("Delete")
         choice = menu.exec(self.history.viewport().mapToGlobal(position))
         if choice == copy:
