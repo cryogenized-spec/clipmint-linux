@@ -354,7 +354,7 @@ then verify the *installed* version (which must match its filename):
 
 ```bash
 sudo apt install ./clipmint_0.6.0~preview1.*_amd64.deb
-dpkg-query -W -f='${Version}\\n' clipmint
+dpkg-query -W -f='${Version}\n' clipmint
 ```
 
 After installation, start ClipMint again from the Cinnamon menu. Test
