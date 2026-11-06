@@ -180,6 +180,20 @@ class AllCollectionsDatabaseTests(unittest.TestCase):
                         "text", value.encode(), value, "Work"
                     ))
                 self.assertEqual(store.count(None), 1001)
+                # A combined encrypted scan must never sort entire screenshot
+                # ciphertext blobs in a temporary SQLite B-tree. The global
+                # recency index supplies both forward and reverse traversal.
+                for direction in ("DESC", "ASC"):
+                    plan = " ".join(
+                        str(row[3]) for row in store.conn.execute(
+                            "EXPLAIN QUERY PLAN SELECT id,kind,content,pinned,"
+                            "created_at,bin,favorite,touch_seq FROM clips "
+                            "WHERE corrupt=0 ORDER BY touch_seq " +
+                            direction + ",id " + direction
+                        )
+                    )
+                    self.assertNotIn("USE TEMP B-TREE", plan)
+                    self.assertIn("idx_clips_global_recent", plan)
                 self.assertEqual(len(store.search("", None)), 1000)
                 self.assertEqual(
                     [clip.id for clip in store.search("archived greenhouse", None)],
