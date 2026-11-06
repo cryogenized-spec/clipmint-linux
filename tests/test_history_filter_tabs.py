@@ -77,8 +77,10 @@ class TimelineFiltersTests(unittest.TestCase):
         self.assertEqual(selected_category(w.tabs), "All")
         self.assertEqual(w.bin_filter.currentText(), "All collections")
 
-        w.store.add_bin("Writing")
-        w.bin_filter.addItem("Writing", "Writing")
+        if "Writing" not in w.store.bins():
+            w.store.add_bin("Writing")
+        if w.bin_filter.findData("Writing") == -1:
+            w.bin_filter.addItem("Writing", "Writing")
         entries = {
             "text": w.store.add("text", b"Ordinary useful workshop prose",
                                 "Ordinary useful workshop prose", "Writing"),
@@ -115,8 +117,10 @@ class TimelineFiltersTests(unittest.TestCase):
 
     def test_collection_scope_is_secondary_and_combines_with_tab_filter(self):
         w = self.window
-        w.store.add_bin("Writing")
-        w.bin_filter.addItem("Writing", "Writing")
+        if "Writing" not in w.store.bins():
+            w.store.add_bin("Writing")
+        if w.bin_filter.findData("Writing") == -1:
+            w.bin_filter.addItem("Writing", "Writing")
         w.store.add("text", b"plain Work item", "plain Work item", "Work")
         w.store.add("text", b"plain Writing item", "plain Writing item", "Writing")
         w.store.add("text", b"https://example.org", "https://example.org", "Writing")
