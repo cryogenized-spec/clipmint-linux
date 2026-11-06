@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
     QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow,
     QMenu, QMessageBox, QPushButton, QStyle, QSystemTrayIcon,
     QTabBar, QToolButton, QVBoxLayout, QWidget, QStackedWidget, QSizePolicy,
-    QKeySequenceEdit, QGroupBox, QCheckBox, QDialogButtonBox,
+    QKeySequenceEdit, QGroupBox, QCheckBox, QDialogButtonBox, QTabWidget,
     QFormLayout, QAbstractItemView, QFileDialog, QScrollArea, QListView,
 )
 
@@ -1323,6 +1323,18 @@ class ClipMintWindow(QMainWindow):
         )
         shortcuts_help.setWordWrap(True)
         shortcuts_layout.addWidget(shortcuts_help)
+        shortcut_tabs = QTabWidget()
+        shortcut_tabs.setObjectName("shortcutTabs")
+        shortcuts_layout.addWidget(shortcut_tabs)
+        global_page = QWidget()
+        global_layout = QVBoxLayout(global_page)
+        global_layout.setContentsMargins(10, 10, 10, 10)
+        global_layout.setSpacing(8)
+        shortcut_tabs.addTab(global_page, "Cinnamon · Global")
+        local_page = QWidget()
+        local_layout = QVBoxLayout(local_page)
+        local_layout.setContentsMargins(10, 10, 10, 10)
+        shortcut_tabs.addTab(local_page, "Inside ClipMint")
 
         global_popup_group = QGroupBox("Clipboard popup · Cinnamon global")
         global_popup_layout = QVBoxLayout(global_popup_group)
@@ -1334,7 +1346,7 @@ class ClipMintWindow(QMainWindow):
         register_button = QPushButton("Register clipboard popup in Cinnamon…")
         register_button.clicked.connect(self.register_cinnamon_hotkey)
         global_popup_layout.addWidget(register_button)
-        shortcuts_layout.addWidget(global_popup_group)
+        global_layout.addWidget(global_popup_group)
 
         global_screenshot_group = QGroupBox("Screenshot area · Cinnamon global")
         global_screenshot_layout = QVBoxLayout(global_screenshot_group)
@@ -1357,7 +1369,7 @@ class ClipMintWindow(QMainWindow):
         restore_screenshot = QPushButton("Restore previous Cinnamon screenshot binding…")
         restore_screenshot.clicked.connect(self.restore_cinnamon_screenshot_hotkey)
         global_screenshot_layout.addWidget(restore_screenshot)
-        shortcuts_layout.addWidget(global_screenshot_group)
+        global_layout.addWidget(global_screenshot_group)
 
         global_record_group = QGroupBox("Recording area · Cinnamon global")
         global_record_layout = QVBoxLayout(global_record_group)
@@ -1375,11 +1387,11 @@ class ClipMintWindow(QMainWindow):
         global_record_button = QPushButton("Register recording shortcut in Cinnamon…")
         global_record_button.clicked.connect(self.register_cinnamon_recording_hotkey)
         global_record_layout.addWidget(global_record_button)
-        shortcuts_layout.addWidget(global_record_group)
+        global_layout.addWidget(global_record_group)
 
         audit_button = QPushButton("Check Cinnamon hotkey assignments…")
         audit_button.clicked.connect(self.audit_global_hotkeys)
-        shortcuts_layout.addWidget(audit_button)
+        global_layout.addWidget(audit_button)
         layout.addWidget(shortcuts_section)
 
         privacy_group = QGroupBox("Clipboard privacy")
@@ -1518,7 +1530,7 @@ class ClipMintWindow(QMainWindow):
             )
             row.addWidget(disable)
             shortcut_layout.addLayout(row)
-        shortcuts_layout.addWidget(shortcut_group)
+        local_layout.addWidget(shortcut_group)
         layout.addWidget(QLabel(
             "Vault entries are separately encrypted. Clipboard history needs "
             "the optional secure-history migration above."
