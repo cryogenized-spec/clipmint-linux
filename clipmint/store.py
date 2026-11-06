@@ -414,7 +414,10 @@ class ClipStore:
         if sort == "Best match" and query:
             # Rank only the already-filtered result IDs. Do not let a
             # global, capped FTS candidate list affect visibility.
-            ranked = self.search_index.rank_ids(query, [c.id for c in clips])
+            ranked = self.search_index.search_ids(
+                query, bin_name, category=category, tag=tag,
+                favorites_only=favorites_only,
+            )
             relevance = {ident: i for i, ident in enumerate(ranked)}
             clips.sort(key=lambda c: (relevance.get(c.id, 10**7), -c.id))
         return clips
