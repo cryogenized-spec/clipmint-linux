@@ -145,6 +145,53 @@ class ScreenshotNoticeTests(unittest.TestCase):
                 else:
                     os.environ["XDG_DATA_HOME"] = old
 
+    def test_screenshot_from_active_main_window_stays_hidden_after_capture(self):
+        """Regression: a successful screenshot must not bring up the main UI.
+
+        Earlier behavior set _capture_restore_main=True when the archive was
+        active and save_screenshot() called show_window() after saving. The
+        user wants a clipboard-first capture with only the small edit/OCR
+        panel, regardless of where the capture shortcut originated.
+        """
+        with TemporaryDirectory() as root:
+            old = os.environ.get("XDG_DATA_HOME")
+            os.environ["XDG_DATA_HOME"] = root
+            window = None
+            try:
+                window = ClipMintWindow()
+                window.show()
+                self.app.processEvents()
+                self.assertTrue(window.isVisible())
+                # Model the state after selecting an area from an active
+                # ClipMint window; capture has not been cancelled.
+                window._capture_restore_main = True
+                image = QPixmap(96, 68)
+                image.fill(QColor("#A53043"))
+                with patch("clipmint.app.screenshots_dir", return_value=Path(root)), \
+                     patch.object(window, "show_window") as raise_main, \
+                     patch("clipmint.app.play_capture_sound"):
+                    window.save_screenshot(None, image)
+                    self.app.processEvents()
+                raise_main.assert_not_called()
+                self.assertFalse(window.isVisible())
+                self.assertFalse(window._capture_restore_main)
+                self.assertTrue(window.screenshot_notice.isVisible())
+                self.assertTrue(window.screenshot_notice.edit_button.isVisible())
+                self.assertTrue(window.screenshot_notice.ocr_button.isVisible())
+                self.assertTrue(window._last_screenshot_path.is_file())
+                self.assertEqual(self.app.clipboard().image().size(), image.size())
+            finally:
+                if window is not None:
+                    window.poller.stop()
+                    window._vault_lock_timer.stop()
+                    window.screenshot_notice.hide()
+                    window.store.close()
+                    window.hide()
+                if old is None:
+                    os.environ.pop("XDG_DATA_HOME", None)
+                else:
+                    os.environ["XDG_DATA_HOME"] = old
+
     def test_disabled_shutter_sound_keeps_capture_and_popup(self):
         with TemporaryDirectory() as root:
             old = os.environ.get("XDG_DATA_HOME")
