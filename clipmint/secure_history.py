@@ -236,12 +236,11 @@ class EncryptedClipStore(ClipStore):
 
     def search(self, query="", bin_name="Work", sort="Latest first",
                category="All", tag="", favorites_only=False):
-        """Search all matching encrypted rows without persisting plaintext.
+        """Scan encrypted rows one at a time; limit *matched* UI results.
 
-        The 1,000-item UI limit applies to *matches*, not merely the most
-        recent 1,000 rows. With Autosort enabled, multiple bins can together
-        exceed that threshold even when no single bin reaches its retention
-        limit. Scan ciphertext in small batches and decrypt in process only.
+        Autosort bins can together exceed 1,000 rows. Never apply a global
+        ciphertext candidate limit before search/category/tag filters, and
+        never fetch a batch of large encrypted screenshots into memory.
         """
         from .store import classify
 
@@ -276,42 +275,37 @@ class EncryptedClipStore(ClipStore):
         items: list[tuple[int, Clip]] = []
         newly_damaged: list[int] = []
         try:
-            done = False
-            while not done:
-                batch = cursor.fetchmany(128)
-                if not batch:
+            # Streaming the cursor one row at a time avoids materializing
+            # 128 ciphertext images at once (which could exceed several GiB).
+            # The 1,000 limit still applies after filtering and decryption.
+            for ident, kind, raw, pinned, date, bucket, favorite, sequence in cursor:
+                if favorites_only and not favorite:
+                    continue
+                if wanted_tag and wanted_tag not in self.tags(ident):
+                    continue
+                try:
+                    _, preview, _ = self._open(bytes(raw))
+                except HistorySecurityError:
+                    # Preserve damaged encrypted rows for explicit recovery.
+                    self.corrupt_row_ids.add(ident)
+                    newly_damaged.append(ident)
+                    continue
+                if needle not in preview.casefold():
+                    continue
+                clip = Clip(
+                    ident, kind, preview, bool(pinned), date, bucket,
+                    bool(favorite)
+                )
+                if category != "All" and classify(clip) != category:
+                    continue
+                items.append((sequence, clip))
+                if needs_ranking:
+                    # Keep the best 1,000; never retain unbounded previews.
+                    if len(items) >= 2000:
+                        items.sort(key=ranking, reverse=descending)
+                        del items[1000:]
+                elif len(items) >= 1000:
                     break
-                for ident, kind, raw, pinned, date, bucket, favorite, sequence in batch:
-                    if favorites_only and not favorite:
-                        continue
-                    if wanted_tag and wanted_tag not in self.tags(ident):
-                        continue
-                    try:
-                        _, preview, _ = self._open(bytes(raw))
-                    except HistorySecurityError:
-                        # Do not delete damaged encrypted records. Mark them
-                        # as unreadable for explicit later recovery.
-                        self.corrupt_row_ids.add(ident)
-                        newly_damaged.append(ident)
-                        continue
-                    if needle not in preview.casefold():
-                        continue
-                    clip = Clip(
-                        ident, kind, preview, bool(pinned), date, bucket,
-                        bool(favorite)
-                    )
-                    if category != "All" and classify(clip) != category:
-                        continue
-                    items.append((sequence, clip))
-                    if needs_ranking:
-                        # Keep only the best 1,000 so alphabetical/relevance
-                        # scans remain bounded even with many pinned clips.
-                        if len(items) >= 2000:
-                            items.sort(key=ranking, reverse=descending)
-                            del items[1000:]
-                    elif len(items) >= 1000:
-                        done = True
-                        break
         finally:
             cursor.close()
 
