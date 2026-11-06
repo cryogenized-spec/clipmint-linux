@@ -14,9 +14,8 @@ from unittest.mock import patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("XDG_SESSION_TYPE", "x11")
 
-from PySide6.QtCore import QSettings, Qt
+from PySide6.QtCore import QSettings
 from PySide6.QtWidgets import QApplication
-from PySide6.QtGui import QImage
 
 from clipmint.app import ClipMintWindow
 from clipmint.store import ClipStore
@@ -108,6 +107,13 @@ class VisibleHistoryUiTests(unittest.TestCase):
                 self.assertEqual(window.store.count(None), 1)
                 self.assertEqual(window.history.count(), 1)
                 self.assertIn("[Writing]", window.history.item(0).text())
+                # Context menus must offer Work for a Writing clip, even
+                # though Work is the default write destination in All clips.
+                destinations = window.move_destinations_for_item(
+                    window.history.item(0)
+                )
+                self.assertIn("Work", destinations)
+                self.assertNotIn("Writing", destinations)
 
                 work_index = next(
                     i for i in range(window.tabs.count())
@@ -140,8 +146,10 @@ class VisibleHistoryUiTests(unittest.TestCase):
             store = ClipStore(Path(root) / "history.sqlite3")
             try:
                 self.assertNotIn("All clips", store.bins())
-                self.assertIsNone(store.search("anything", None)[0]
-                                  if store.search("anything", None) else None)
+                with self.assertRaisesRegex(ValueError, "Unknown"):
+                    store.add("text", b"nonsecret example", "nonsecret example",
+                              "All clips")
+                self.assertEqual(store.count(None), 0)
             finally:
                 store.close()
 
