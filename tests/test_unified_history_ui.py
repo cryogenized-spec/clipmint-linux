@@ -73,6 +73,50 @@ class AllCollectionsDatabaseTests(unittest.TestCase):
             finally:
                 store.close()
 
+    def test_plain_fts_filters_before_global_candidate_limit(self):
+        """A favoured old full-body match must survive 1,000 newer FTS hits."""
+        with TemporaryDirectory() as root:
+            store = ClipStore(Path(root) / "history.sqlite3")
+            try:
+                if not store.search_index.enabled:
+                    self.skipTest("FTS5 not installed")
+                store.add_bin("Writing")
+                store.add_bin("Utility")
+                oldest = store.add(
+                    "text", b"greenhouse previously clipped from Firefox",
+                    "Old favourite note", "Writing",
+                )
+                store.favorite(oldest, True)
+                store.set_tags(oldest, ["keeper"])
+                bins = ("Work", "Personal", "Temporary", "Writing", "Utility")
+                for number in range(1000):
+                    # Term is deliberately absent from preview, requiring
+                    # the full-body FTS index instead of substring fallback.
+                    phrase = f"greenhouse document number {number:04d}".encode()
+                    preview = f"Memo {number:04d}"
+                    store.add("text", phrase, preview, bins[number % len(bins)])
+                self.assertEqual(store.count(None), 1001)
+                self.assertEqual(
+                    [clip.id for clip in store.search(
+                        "greenhouse", None, favorites_only=True
+                    )],
+                    [oldest],
+                )
+                self.assertEqual(
+                    [clip.id for clip in store.search(
+                        "greenhouse", None, tag="keeper"
+                    )],
+                    [oldest],
+                )
+                self.assertEqual(
+                    [clip.id for clip in store.search(
+                        "greenhouse", "Writing", favorites_only=True
+                    )],
+                    [oldest],
+                )
+            finally:
+                store.close()
+
     def test_encrypted_combined_search_finds_older_matches_after_1000_clips(self):
         """The result cap applies to matched clips, not ciphertext scanned."""
         with TemporaryDirectory() as root:
