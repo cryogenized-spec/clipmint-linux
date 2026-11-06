@@ -88,16 +88,6 @@ class EncryptedClipStore(ClipStore):
                 "SELECT id FROM clips WHERE corrupt=1"
             )
         }
-        # The All clips timeline selects ciphertext payloads in global
-        # touch order. Without this partial metadata-only index, SQLite
-        # constructs a TEMP B-TREE to sort the entire ciphertext blobs,
-        # potentially writing gigabytes when users retain screenshots.
-        # This index contains IDs/order keys only, never plaintext previews.
-        self.conn.execute(
-            """CREATE INDEX IF NOT EXISTS idx_secure_visible_recent
-               ON clips(touch_seq DESC, id DESC) WHERE corrupt=0"""
-        )
-        self.conn.commit()
         # One-time upgrade on key unlock, not during each clipboard capture.
         # Rows without a fingerprint predate this version.
         self._backfill_legacy_fingerprints()
