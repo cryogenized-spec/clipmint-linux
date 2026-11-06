@@ -73,6 +73,47 @@ class AllCollectionsDatabaseTests(unittest.TestCase):
             finally:
                 store.close()
 
+    def test_encrypted_combined_search_finds_older_matches_after_1000_clips(self):
+        """The result cap applies to matched clips, not ciphertext scanned."""
+        with TemporaryDirectory() as root:
+            store = EncryptedClipStore(
+                Path(root) / "secure-history.sqlite3",
+                bytes(range(32)), max_unpinned=1200,
+            )
+            try:
+                store.add_bin("Writing")
+                old_id = store.add(
+                    "text", b"archived greenhouse memories",
+                    "archived greenhouse memories", "Writing",
+                )
+                self.assertIsNotNone(old_id)
+                for number in range(1000):
+                    value = f"unrelated office memo record {number:04d}"
+                    self.assertIsNotNone(store.add(
+                        "text", value.encode(), value, "Work"
+                    ))
+                self.assertEqual(store.count(None), 1001)
+                self.assertEqual(len(store.search("", None)), 1000)
+                self.assertEqual(
+                    [clip.id for clip in store.search("archived greenhouse", None)],
+                    [old_id],
+                )
+                self.assertEqual(
+                    store.search("", None, sort="Oldest first")[0].id,
+                    old_id,
+                )
+                store.favorite(old_id, True)
+                self.assertEqual(
+                    [clip.id for clip in store.search(
+                        "", None, favorites_only=True
+                    )],
+                    [old_id],
+                )
+                self.assertFalse(store.search_index.enabled)
+            finally:
+                store.close()
+
+
 
 class VisibleHistoryUiTests(unittest.TestCase):
     @classmethod
