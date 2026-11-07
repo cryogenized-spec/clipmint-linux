@@ -34,6 +34,11 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn('tag="clipmint-preview-', workflow)
         self.assertIn('if [[ "$latest" != "$GITHUB_SHA" ]]', workflow)
         self.assertIn('contents: write', workflow)
+        # Rerun-failed-jobs must reuse the exact version exported by build.
+        self.assertIn('package_version: ${{ steps.version.outputs.package_version }}', workflow)
+        self.assertIn('CLIPMINT_VERSION: ${{ needs.build.outputs.package_version }}', workflow)
+        self.assertIn('version="${CLIPMINT_VERSION:?Missing built package version}"', workflow)
+        self.assertIn('tag="clipmint-preview-${GITHUB_RUN_NUMBER}-${version##*.}"', workflow)
 
     def test_preview_debian_versions_change_for_each_run_and_rerun(self):
         """Repeated preview1 packages caused apt to keep an old screenshot build."""
