@@ -49,6 +49,25 @@ class UpdaterTests(unittest.TestCase):
         self.assertEqual(candidates[0].version, "0.6.0~preview1.301.1")
         self.assertEqual(candidates[0].filename, good["assets"][0]["name"])
 
+    def test_github_normalized_preview_asset_and_legacy_checksum(self):
+        item = preview_fixture()
+        name = item["assets"][0]["name"]
+        normalized = name.replace("~preview", ".preview")
+        item["assets"][0]["name"] = normalized
+        item["assets"][0]["browser_download_url"] = (
+            item["assets"][0]["browser_download_url"].replace(name, normalized)
+        )
+        release = updater.parse_preview_releases(json.dumps([item]).encode())
+        self.assertEqual(len(release), 1)
+        self.assertEqual(release[0].version, "0.6.0~preview1.301.1")
+        self.assertEqual(release[0].filename, normalized)
+        expected = "b" * 64
+        # Older releases had an original Debian basename in SHA256SUMS,
+        # even though GitHub renamed the public asset to .preview.
+        self.assertEqual(updater.expected_checksum(
+            f"{expected}  {name}\\n".encode(), normalized
+        ), expected)
+
     def test_reject_malformed_or_unsafe_release_urls(self):
         url = preview_fixture()["assets"][0]["browser_download_url"]
         self.assertEqual(
