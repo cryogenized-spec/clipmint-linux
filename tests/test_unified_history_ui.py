@@ -14,7 +14,7 @@ from unittest.mock import patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("XDG_SESSION_TYPE", "x11")
 
-from PySide6.QtCore import QSettings
+from PySide6.QtCore import QSettings, Qt
 from PySide6.QtWidgets import QApplication
 
 from clipmint.app import ClipMintWindow
@@ -261,7 +261,16 @@ class VisibleHistoryUiTests(unittest.TestCase):
                 self.assertEqual(window.store.count("Work"), 0)
                 self.assertEqual(window.store.count(None), 1)
                 self.assertEqual(window.history.count(), 1)
-                self.assertIn("[Writing]", window.history.item(0).text())
+                # The unified stream must not decorate actual clip content
+                # with storage-bin labels or type tags.
+                self.assertEqual(
+                    window.history.item(0).text(),
+                    "A normal note about sunshine and window curtains",
+                )
+                metadata = window.history.item(0).data(
+                    Qt.ItemDataRole.UserRole + 1
+                )
+                self.assertEqual(metadata["bin"], "Writing")
                 # Context menus must offer Work for a Writing clip, even
                 # though Work is the default write destination in All clips.
                 destinations = window.move_destinations_for_item(

@@ -35,7 +35,7 @@ from .screenshot_editor import installed_editors, resolve_editor, open_image_edi
 from .screenshot_notice import ScreenshotNotice, play_capture_sound
 from .screenshot_gallery import read_screenshot, screenshot_thumbnail_icon, PREVIEW_SIZE
 from .clipboard_formats import from_mime, is_concealed, sensitive_text, mime_from_entry
-from .clipboard_guard import OwnClipboardGuard
+from .clipboard_guard import OwnClipboardGuard, HiddenTextClipboardProbe
 from .foreground_privacy import blocked_foreground, DEFAULT_BLOCKED
 from .ocr import OcrWorker, validate_language
 from .quick_popup import QuickPopup, paste_to_window
@@ -214,6 +214,10 @@ class ClipMintWindow(QMainWindow):
         self._privacy_skipped = 0
         self._closing = False
         self._own_clipboard_guard = OwnClipboardGuard()
+        self._hidden_text_probe = HiddenTextClipboardProbe()
+        self._hidden_clipboard_timer = QTimer(self)
+        self._hidden_clipboard_timer.setInterval(1500)
+        self._hidden_clipboard_timer.timeout.connect(self.poll_hidden_clipboard)
         self._last_screenshot_path = None
         self._capture_restore_main = False
         self._screenshot_thumbnail_generation = 0
@@ -249,6 +253,16 @@ class ClipMintWindow(QMainWindow):
             self._clipboard_generation_changed
         )
         QApplication.clipboard().dataChanged.connect(self.clipboard_changed)
+        # Starting the watcher must not retroactively import text copied
+        # while ClipMint was explicitly QUIT. Observe the current clipboard
+        # as a baseline, then capture future changes through dataChanged
+        # and the hidden-window recovery timer.
+        self._hidden_text_probe.observe(QApplication.clipboard().mimeData())
+        # Keep observing the most recent plain-text clip after the archive is
+        # closed, even if a Cinnamon/X11 clipboard manager misses a signal.
+        # This is a fallback for a LIVE hidden process, not a background
+        # service that can run after the user explicitly chooses Quit.
+        self._hidden_clipboard_timer.start()
         self.poller = QTimer(self)
         self.poller.timeout.connect(self.poll_recording)
         self.poller.start(300)
@@ -259,7 +273,8 @@ class ClipMintWindow(QMainWindow):
         # startup. An upgrade or an application crash cannot opt users in.
         if self._temporary_expiry_timer.isActive():
             QTimer.singleShot(0, self.expire_temporary_if_enabled)
-        QTimer.singleShot(400, self.clipboard_changed)
+        # Do not call clipboard_changed() unconditionally at startup: it
+        # would save a clip from a period in which monitoring was not active.
         QTimer.singleShot(900, self.offer_pending_recordings)
 
     def resizeEvent(self, event):
@@ -1186,7 +1201,15 @@ class ClipMintWindow(QMainWindow):
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.addWidget(QLabel("Settings · local-only"))
-        self.pause_button = QPushButton("Pause monitoring")
+        # The monitoring state must be visible, especially if encrypted
+        # history could not be unlocked on restart. Never present a disabled
+        # watcher as though it is still actively collecting clipboard clips.
+        self.pause_button = QPushButton(
+            "Monitoring unavailable · unlock keyring and restart"
+            if self.history_security_error else
+            "Pause monitoring" if self.monitoring else "Resume monitoring"
+        )
+        self.pause_button.setEnabled(not bool(self.history_security_error))
         self.pause_button.clicked.connect(self.toggle_monitoring)
         layout.addWidget(self.pause_button)
 
@@ -1834,6 +1857,11 @@ class ClipMintWindow(QMainWindow):
             self.show_window()
 
     def show_window(self):
+        if not self.isVisible():
+            # Last-chance recovery if the desktop skipped a clipboard signal
+            # while the archive was hidden. This can only retrieve the current
+            # item, not every intermediate copy made while ClipMint was quit.
+            self.poll_hidden_clipboard()
         self.showNormal()
         self.raise_()
         self.activateWindow()
@@ -1856,10 +1884,27 @@ class ClipMintWindow(QMainWindow):
         """Track *all* X11 clipboard writes, including Vault and concealed data."""
         self._sensitive_clipboard_token += 1
 
+    def poll_hidden_clipboard(self):
+        """Recover the latest plain-text copy when X11 omits dataChanged.
+
+        Paused/locked monitoring must never capture a clipboard value later
+        when the user resumes. No clipboard contents or source titles are
+        retained beyond the in-memory digest.
+        """
+        if self._closing or getattr(self.store, "closed", False):
+            return
+        if self.isVisible():
+            return
+        data = QApplication.clipboard().mimeData()
+        changed = self._hidden_text_probe.observe(data)
+        if changed and self.monitoring and not self.history_security_error:
+            self.clipboard_changed()
+
     def clipboard_changed(self):
         # Clear our own-write expectation on every event, even while history
         # is paused; never carry a stale skip across Pause/Resume.
         data = QApplication.clipboard().mimeData()
+        self._hidden_text_probe.observe(data)
         if self._own_clipboard_guard.consume(data):
             return
         if (not self.monitoring or self._closing
@@ -1976,9 +2021,9 @@ class ClipMintWindow(QMainWindow):
             favorites_only=self.favorites_filter.isChecked(),
         )
         for i, clip in enumerate(clips):
+            # Collection scope lives in the secondary selector and item
+            # metadata. Do not prepend [Work] / [Writing] to the clip itself.
             title = f"{i + 1}. {clip.preview}" if sort == "Numbered list" else clip.preview
-            if bin_name is None:
-                title = f"[{clip.bin}]  {title}"
             item = QListWidgetItem(title)
             item.setData(Qt.ItemDataRole.UserRole, clip.id)
             kind_tag, _symbol, _color = label_type(clip.kind, clip.preview)
@@ -2007,7 +2052,12 @@ class ClipMintWindow(QMainWindow):
             )
         self._refresh_queue_button()
         if hasattr(self, "footer_status"):
-            self.footer_status.setText(f"● Ready   |   HISTORY {self.store.count(bin_name):02d}")
+            state = ("HISTORY LOCKED" if self.history_security_error
+                     else "MONITORING ACTIVE" if self.monitoring
+                     else "MONITORING PAUSED")
+            self.footer_status.setText(
+                f"● {state}   |   HISTORY {self.store.count(bin_name):02d}"
+            )
         if hasattr(self, "footer_status"):
             scope = "all collections" if bin_name is None else bin_name
             self.footer_status.setToolTip(
@@ -2684,6 +2734,10 @@ class ClipMintWindow(QMainWindow):
         self.quick_popup.store = secure
         self.history_secure = True
         self.history_security_error = ""
+        # Enabling encrypted history also resumes monitoring. Just like
+        # Resume, baseline the current clipboard first so paused text cannot
+        # leak into the new encrypted archive on the next hidden poll.
+        self._hidden_text_probe.observe(QApplication.clipboard().mimeData())
         self.monitoring = True
         self.settings.setValue("privacy/history_secure", True)
         self.secure_history_button.setText("Encrypted history active")
@@ -2782,8 +2836,14 @@ class ClipMintWindow(QMainWindow):
         if self.history_security_error:
             self.error("Clipboard privacy", "Unlock the desktop keyring and restart ClipMint")
             return
+        if not self.monitoring:
+            # A pause may end before the next hidden poll. Baseline the
+            # CURRENT system clipboard now, so nothing copied during pause
+            # can be ingested merely because monitoring was resumed.
+            self._hidden_text_probe.observe(QApplication.clipboard().mimeData())
         self.monitoring = not self.monitoring
         self.pause_button.setText("Pause monitoring" if self.monitoring else "Resume monitoring")
+        self.refresh()
         self.inform("Clipboard monitoring", "Enabled" if self.monitoring else "Paused")
 
     def select_area(self, purpose: str):
@@ -3088,6 +3148,7 @@ class ClipMintWindow(QMainWindow):
             self.recorder_window.deleteLater()
             self.recorder_window = None
         self._closing = True
+        self._hidden_clipboard_timer.stop()
         self.lock_vault()
         self.clear_temporary_on_normal_exit()
         self.store.close()
