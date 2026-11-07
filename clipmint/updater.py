@@ -210,8 +210,8 @@ def prune_superseded_previews(folder: Path, retain: Path) -> None:
     Never delete unrelated user files.
 
     This runs after a successful checksum and Debian-identity verification.
-    Stale preview files are large, and automatic downloads are enabled by
-    default, so leaving them all cached would consume gigabytes over time.
+    Stale preview files are large; retain only the installed base and the
+    newly staged package instead of accumulating gigabytes of old builds.
     """
     keep = {retain}
     current = installed_version()
