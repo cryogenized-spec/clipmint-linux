@@ -207,7 +207,7 @@ jobs:
             elif [[ "$is_draft" == "false" ]]; then
               # Never claim success for an incomplete public release.
               assets="$(gh release view "$tag" --json assets --jq '.assets[].name' | sort)"
-              expected="$(printf '%s\\n' "SHA256SUMS" "clipmint_${version}_amd64.deb" | sort)"
+              expected="$(printf '%s\n' "SHA256SUMS" "clipmint_${version}_amd64.deb" | sort)"
               if [[ "$assets" != "$expected" ]]; then
                 echo "Published preview exists with incomplete or unexpected assets" >&2
                 exit 1
