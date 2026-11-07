@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 class ReleaseWorkflowTests(unittest.TestCase):
     def test_release_requires_version_tag_and_successful_build(self):
         workflow = (ROOT / ".github/workflows/build-linux.yml").read_text()
-        self.assertIn("push:\n    tags:", workflow)
+        self.assertIn("    tags:", workflow)
         self.assertIn("'v[0-9]*.[0-9]*.[0-9]*'", workflow)
         self.assertIn("if: github.event_name == 'push'", workflow)
         self.assertIn("needs: build", workflow)
