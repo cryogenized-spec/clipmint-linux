@@ -299,17 +299,31 @@ class CrimsonClipDelegate(QStyledItemDelegate):
             painter.fillRect(QRect(r.left()+4, r.top()+9, 3, r.height()-18), QColor("#F1A0AC"))
         meta = index.data(int(Qt.ItemDataRole.UserRole) + 1) or {}
         name = meta.get("preview", index.data(Qt.ItemDataRole.DisplayRole) or "")
-        kind_tag, icon, _colour = label_type(meta.get("kind", "text"), name)
-        x = r.left() + 12
-        y = r.top() + (r.height() - 34)//2
-        painter.setPen(QPen(QColor("#9A5A67"),1))
-        painter.drawRect(x, y, 34, 34)
-        painter.setPen(QColor(PORCELAIN))
-        painter.setFont(QFont("DejaVu Sans Mono", 12, QFont.Weight.Bold))
-        painter.drawText(QRect(x, y, 34, 34), Qt.AlignmentFlag.AlignCenter, icon)
-        # The top tabs already filter by type. Do not place redundant
-        # TXT/URL/IMG/CODE badges between the icon and ordinary clip text.
-        textx=x+45
+        kind_tag, icon, colour = label_type(meta.get("kind", "text"), name)
+        if meta.get("show_badges", False):
+            # Opt-in: include the old type chips and collection label.
+            # Never change the actual saved clipboard contents.
+            x = r.left() + 12
+            y = r.top() + (r.height() - 34)//2
+            painter.setPen(QPen(QColor("#9A5A67"), 1))
+            painter.drawRect(x, y, 34, 34)
+            painter.setPen(QColor(PORCELAIN))
+            painter.setFont(QFont("DejaVu Sans Mono", 12, QFont.Weight.Bold))
+            painter.drawText(QRect(x, y, 34, 34), Qt.AlignmentFlag.AlignCenter, icon)
+            tagx = x + 45
+            tagw = 39 if kind_tag == "CODE" else 29
+            painter.fillRect(QRect(tagx, r.top()+17, tagw, 19), QColor(colour))
+            painter.setPen(QColor("#25101A"))
+            painter.setFont(QFont("DejaVu Sans Mono", 9, QFont.Weight.Bold))
+            painter.drawText(
+                QRect(tagx, r.top()+17, tagw, 19),
+                Qt.AlignmentFlag.AlignCenter, kind_tag,
+            )
+            textx = tagx + tagw + 8
+        else:
+            # Default: clean text aligned with the row, no leading chips
+            # or decorative icon labels. The category tabs remain available.
+            textx = r.left() + 16
         available=max(30, r.right()-textx-40)
         painter.setPen(QColor("#F4EEEB"))
         painter.setFont(QFont("Cormorant Garamond", 17))
