@@ -17,6 +17,8 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-24.04
+    outputs:
+      package_version: ${{ steps.version.outputs.package_version }}
     env:
       XDG_SESSION_TYPE: x11
     steps:
@@ -155,6 +157,8 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: write
+    env:
+      CLIPMINT_VERSION: ${{ needs.build.outputs.package_version }}
     concurrency:
       group: clipmint-publish-preview
       cancel-in-progress: false
@@ -169,7 +173,8 @@ jobs:
           set -euo pipefail
           cd dist-packages
           sha256sum --check SHA256SUMS
-          version="0.6.0~preview1.${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
+          version="${CLIPMINT_VERSION:?Missing built package version}"
+          [[ "$version" =~ ^0\\.6\\.0~preview1\\.[0-9]+\\.[0-9]+$ ]] || exit 1
           test -s "clipmint_${version}_amd64.deb"
           test "$(dpkg-deb -f "clipmint_${version}_amd64.deb" Package)" = clipmint
           test "$(dpkg-deb -f "clipmint_${version}_amd64.deb" Version)" = "$version"
@@ -187,8 +192,15 @@ jobs:
             echo "Main advanced: skip publishing stale preview $GITHUB_SHA"
             exit 0
           fi
-          version="0.6.0~preview1.${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
-          tag="clipmint-preview-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}"
+          version="${CLIPMINT_VERSION:?Missing built package version}"
+          # Rerun-failed-jobs reuses the already built artifact, but the new
+          # GITHUB_RUN_ATTEMPT would be different. Derive tag from the actual
+          # version, never from the publisher's retry attempt.
+          tag="clipmint-preview-${GITHUB_RUN_NUMBER}-${version##*.}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Preview $tag already published; nothing to do"
+            exit 0
+          fi
           gh release create "$tag" \
             "dist-packages/clipmint_${version}_amd64.deb" \
             dist-packages/SHA256SUMS \
