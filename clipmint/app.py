@@ -146,6 +146,19 @@ SHORTCUT_SPECS = (
 )
 
 
+class WheelSafeHistoryLimitComboBox(QComboBox):
+    """Wheel scrolling a Settings page must not alter a destructive setting.
+
+    A closed QComboBox normally selects another value on wheelEvent; that
+    would raise a permanent-deletion confirmation while the user simply
+    scrolls the Settings QScrollArea. Require an actual click or keyboard
+    selection. Wheel events bubble up to the containing scroll area.
+    """
+
+    def wheelEvent(self, event):
+        event.ignore()
+
+
 class ClipMintWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -1277,7 +1290,7 @@ class ClipMintWindow(QMainWindow):
         )
         cap_help.setWordWrap(True)
         cap_layout.addWidget(cap_help)
-        self.history_storage_limit = QComboBox()
+        self.history_storage_limit = WheelSafeHistoryLimitComboBox()
         for name, value in (
             ("Off · no automatic byte pruning", 0),
             ("128 MB", 128),
@@ -1293,8 +1306,31 @@ class ClipMintWindow(QMainWindow):
         self.history_storage_limit.currentIndexChanged.connect(
             self.set_history_storage_limit
         )
+        self.history_storage_limit.setToolTip(
+            "Click to choose a limit. Scrolling Settings will not change it."
+        )
         cap_layout.addWidget(self.history_storage_limit)
         layout.addWidget(cap_group)
+
+        labels_group = QGroupBox("Clipboard row appearance")
+        labels_layout = QVBoxLayout(labels_group)
+        labels_help = QLabel(
+            "Keep All clips uncluttered. Optional type badges (TXT, URL, IMG, "
+            "etc.) and collection prefixes ([Work], [Writing], etc.) can be "
+            "shown when needed. This changes only the display, never clip "
+            "content, tags, collections, or Autosort rules."
+        )
+        labels_help.setWordWrap(True)
+        labels_layout.addWidget(labels_help)
+        self.clip_labels_toggle = QCheckBox(
+            "Show labels before entries in All clips"
+        )
+        self.clip_labels_toggle.setChecked(
+            self.settings.value("history/show_clip_labels", False, type=bool)
+        )
+        self.clip_labels_toggle.toggled.connect(self.set_clip_labels_visible)
+        labels_layout.addWidget(self.clip_labels_toggle)
+        layout.addWidget(labels_group)
 
         ocr_group = QGroupBox("Offline OCR language")
         ocr_layout = QVBoxLayout(ocr_group)
@@ -1568,6 +1604,11 @@ class ClipMintWindow(QMainWindow):
         scroll.setWidget(page)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         self.pages.addWidget(scroll)
+
+    def set_clip_labels_visible(self, enabled: bool):
+        """Display-only preference; never rewrite clipboard history rows."""
+        self.settings.setValue("history/show_clip_labels", bool(enabled))
+        self.refresh()
 
     def set_history_storage_limit(self, _index):
         mb = int(self.history_storage_limit.currentData() or 0)
@@ -2020,17 +2061,27 @@ class ClipMintWindow(QMainWindow):
             tag=self.tag_filter.currentData() or "",
             favorites_only=self.favorites_filter.isChecked(),
         )
+        show_labels = (
+            self.settings.value("history/show_clip_labels", False, type=bool)
+            and category == "All"
+        )
         for i, clip in enumerate(clips):
-            # Collection scope lives in the secondary selector and item
-            # metadata. Do not prepend [Work] / [Writing] to the clip itself.
+            # Both the stored preview and default UI are free of prefixes.
+            # Optional collection labels are presentation-only in All clips.
             title = f"{i + 1}. {clip.preview}" if sort == "Numbered list" else clip.preview
+            if show_labels:
+                title = f"[{clip.bin}]  {title}"
             item = QListWidgetItem(title)
             item.setData(Qt.ItemDataRole.UserRole, clip.id)
             kind_tag, _symbol, _color = label_type(clip.kind, clip.preview)
             item.setData(Qt.ItemDataRole.UserRole + 1, {
                 "kind": clip.kind, "preview": title,
-                "subtitle": "PNG image · clipboard history" if clip.kind == "image"
-                    else f"{kind_tag} · clipboard history",
+                "raw_preview": clip.preview,
+                "show_badges": show_labels,
+                "subtitle": (
+                    ("PNG image" if clip.kind == "image" else kind_tag)
+                    + " · clipboard history"
+                ) if show_labels else "Clipboard history",
                 "age": relative_time(clip.created_at),
                 "created": clip.created_at, "pinned": clip.pinned,
                 "favorite": clip.favorite,
