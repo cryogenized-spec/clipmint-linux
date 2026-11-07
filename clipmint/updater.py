@@ -204,8 +204,14 @@ def verify_deb(path: Path, version: str) -> None:
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise UpdateError("Could not inspect downloaded Debian package") from exc
-    fields = [part.strip() for part in result.stdout.splitlines()]
-    if result.returncode or fields != ["clipmint", version, "amd64"]:
+    fields = {}
+    for line in result.stdout.splitlines():
+        key, separator, value = line.partition(":")
+        if separator:
+            fields[key.strip()] = value.strip()
+    if result.returncode or fields != {
+        "Package": "clipmint", "Version": version, "Architecture": "amd64",
+    }:
         raise UpdateError("Downloaded file is not the expected ClipMint package")
 
 
@@ -226,8 +232,11 @@ def download_verified_preview(update: PreviewUpdate) -> Path:
     target = folder / update.filename
     if target.is_file() and not target.is_symlink():
         if target.stat().st_size <= MAX_PACKAGE_BYTES:
-            digest = hashlib.sha256(target.read_bytes()).hexdigest()
-            if digest == expected:
+            hasher = hashlib.sha256()
+            with target.open("rb") as existing:
+                while piece := existing.read(1024 * 1024):
+                    hasher.update(piece)
+            if hasher.hexdigest() == expected:
                 verify_deb(target, update.version)
                 return target
         target.unlink()
