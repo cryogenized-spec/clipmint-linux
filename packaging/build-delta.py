@@ -17,7 +17,7 @@ import tempfile
 import bsdiff4
 
 PACKAGE_RE = re.compile(
-    r"clipmint_([0-9]+\.[0-9]+\.[0-9]+~preview[0-9]+\.[0-9]+\.[0-9]+)_amd64\.deb"
+    r"clipmint_([0-9]+\.[0-9]+\.[0-9]+[~.]preview[0-9]+\.[0-9]+\.[0-9]+)_amd64\.deb"
 )
 MAX_BYTES = 350 * 1024 * 1024
 MAX_PATCH_RATIO = 0.85
@@ -37,7 +37,7 @@ def package_version(path: Path) -> str:
         raise ValueError("Expected a regular ClipMint preview Debian package")
     if not 0 < path.stat().st_size <= MAX_BYTES:
         raise ValueError("Unsupported Debian package size")
-    version = match.group(1)
+    version = match.group(1).replace(".preview", "~preview")
     for key, wanted in (
         ("Package", "clipmint"), ("Version", version), ("Architecture", "amd64"),
     ):
@@ -60,7 +60,7 @@ def build_delta(base: Path, target: Path, output: Path) -> bool:
     ).returncode:
         return False
     output.mkdir(parents=True, exist_ok=True)
-    name = f"clipmint_delta_from_{old}_to_{new}_amd64.bsdiff"
+    name = f"clipmint_delta_from_{old}_to_{new}_amd64.bsdiff".replace("~preview", ".preview")
     patch = output / name
     manifest = output / "DELTA.json"
     if patch.exists() or manifest.exists():
