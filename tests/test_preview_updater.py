@@ -65,7 +65,7 @@ class UpdaterTests(unittest.TestCase):
         # Older releases had an original Debian basename in SHA256SUMS,
         # even though GitHub renamed the public asset to .preview.
         self.assertEqual(updater.expected_checksum(
-            f"{expected}  {name}\\n".encode(), normalized
+            f"{expected}  {name}".encode(), normalized
         ), expected)
 
     def test_reject_malformed_or_unsafe_release_urls(self):
