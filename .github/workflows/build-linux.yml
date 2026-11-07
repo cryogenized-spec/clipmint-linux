@@ -164,11 +164,11 @@ jobs:
       group: clipmint-publish-preview
       cancel-in-progress: false
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           name: ClipMint-v0.6-main-integration-preview
           path: dist-packages
-      - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -184,6 +184,11 @@ jobs:
           test "$(dpkg-deb -f "clipmint_${version}_amd64.deb" Package)" = clipmint
           test "$(dpkg-deb -f "clipmint_${version}_amd64.deb" Version)" = "$version"
           test "$(dpkg-deb -f "clipmint_${version}_amd64.deb" Architecture)" = amd64
+          # GitHub release assets normalize '~' to '.'; publish an explicitly
+          # normalized basename and checksum instead of breaking updater links.
+          published="clipmint_${version/\~/.}_amd64.deb"
+          mv "clipmint_${version}_amd64.deb" "$published"
+          sha256sum "$published" > SHA256SUMS
       - name: Prepare optional verified delta from previous published preview
         shell: bash
         env:
@@ -203,11 +208,16 @@ jobs:
             echo "Unable to fetch previous preview; full installer only"
             exit 0
           fi
-          if ! (cd previous && sha256sum --check SHA256SUMS); then
+          # Older GitHub preview assets replaced '~' with '.' while leaving
+          # their checksum manifest's filename unchanged. Verify the same
+          # digest against the actual downloaded file, without trusting a
+          # different filename embedded in an old manifest.
+          expected_previous="$(awk 'NR == 1 {print $1}' previous/SHA256SUMS)"
+          old=(previous/clipmint_*_amd64.deb)
+          if [[ "${#old[@]}" -ne 1 || ! -f "${old[0]}" || ! "$expected_previous" =~ ^[a-fA-F0-9]{64}$ || "$(sha256sum "${old[0]}" | awk '{print $1}')" != "$expected_previous" ]]; then
             echo "Unverified previous package; full installer only"
             exit 0
           fi
-          old=(previous/clipmint_*_amd64.deb)
           if [[ "${#old[@]}" -ne 1 || ! -f "${old[0]}" ]]; then
             echo "Previous release package not unique; full installer only"
             exit 0
@@ -216,7 +226,7 @@ jobs:
             echo "Delta build dependency unavailable; full installer only"
             exit 0
           fi
-          if ! python packaging/build-delta.py "${old[0]}" "dist-packages/clipmint_${CLIPMINT_VERSION}_amd64.deb" dist-packages; then
+          if ! python packaging/build-delta.py "${old[0]}" "dist-packages/clipmint_${CLIPMINT_VERSION/\~/.}_amd64.deb" dist-packages; then
             echo "Delta verification failed; full installer remains available"
             rm -f dist-packages/DELTA.json dist-packages/clipmint_delta_from_*_amd64.bsdiff
           fi
@@ -248,7 +258,7 @@ jobs:
             elif [[ "$is_draft" == "false" ]]; then
               # Never claim success for an incomplete public release.
               assets="$(gh release view "$tag" --json assets --jq '.assets[].name' | sort)"
-              assets_to_publish=("dist-packages/clipmint_${version}_amd64.deb" dist-packages/SHA256SUMS)
+              assets_to_publish=("dist-packages/clipmint_${version/\~/.}_amd64.deb" dist-packages/SHA256SUMS)
               if [[ -f dist-packages/DELTA.json ]]; then
                 patches=(dist-packages/clipmint_delta_from_*_amd64.bsdiff)
                 if [[ "${#patches[@]}" -ne 1 || ! -f "${patches[0]}" ]]; then
@@ -269,7 +279,7 @@ jobs:
               exit 1
             fi
           fi
-          assets_to_publish=("dist-packages/clipmint_${version}_amd64.deb" dist-packages/SHA256SUMS)
+          assets_to_publish=("dist-packages/clipmint_${version/\~/.}_amd64.deb" dist-packages/SHA256SUMS)
           if [[ -f dist-packages/DELTA.json ]]; then
             patches=(dist-packages/clipmint_delta_from_*_amd64.bsdiff)
             if [[ "${#patches[@]}" -ne 1 || ! -f "${patches[0]}" ]]; then

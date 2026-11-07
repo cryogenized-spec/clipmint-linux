@@ -21,6 +21,20 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn("contents: read", workflow)
         self.assertIn('[[ "$GITHUB_REF_NAME" =~ ^v', workflow)
 
+    def test_publisher_keeps_artifact_and_normalizes_github_filename(self):
+        workflow = (ROOT / ".github/workflows/build-linux.yml").read_text()
+        publisher = workflow.split("  publish-preview:", 1)[1].split(
+            "  publish-release:", 1
+        )[0]
+        self.assertLess(
+            publisher.index("uses: actions/checkout@v4"),
+            publisher.index("uses: actions/download-artifact@v4"),
+        )
+        self.assertIn("published=", publisher)
+        self.assertIn("mv \"clipmint_${version}_amd64.deb\" \"$published\"", publisher)
+        self.assertIn("sha256sum \"$published\" > SHA256SUMS", publisher)
+        self.assertIn("expected_previous=", publisher)
+
     def test_successful_main_build_publishes_immutable_preview(self):
         """No PR/token scope may publish a privileged update candidate."""
         workflow = (ROOT / ".github/workflows/build-linux.yml").read_text()
