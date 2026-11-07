@@ -10,7 +10,7 @@ from unittest.mock import patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("XDG_SESSION_TYPE", "x11")
 
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMessageBox
 from PySide6.QtTest import QTest
 
 from clipmint.app import ClipMintWindow
@@ -213,6 +213,74 @@ class BackgroundHistoryTests(unittest.TestCase):
                     if not window.store.closed:
                         window.store.close()
                     window.hide()
+                    window.deleteLater()
+                if old_data is None:
+                    os.environ.pop("XDG_DATA_HOME", None)
+                else:
+                    os.environ["XDG_DATA_HOME"] = old_data
+                if old_config is None:
+                    os.environ.pop("XDG_CONFIG_HOME", None)
+                else:
+                    os.environ["XDG_CONFIG_HOME"] = old_config
+
+    def test_encryption_toggle_cannot_capture_previously_paused_text(self):
+        """Enabling encrypted history is another resume path; baseline it."""
+        from nacl import utils
+        from nacl.secret import SecretBox
+        with TemporaryDirectory() as root:
+            old_data = os.environ.get("XDG_DATA_HOME")
+            old_config = os.environ.get("XDG_CONFIG_HOME")
+            os.environ["XDG_DATA_HOME"] = root
+            os.environ["XDG_CONFIG_HOME"] = str(Path(root) / "settings")
+            window = None
+            disconnected = False
+            try:
+                self.app.setQuitOnLastWindowClosed(False)
+                window = ClipMintWindow()
+                if window.tray is not None:
+                    window.tray.hide()
+                    window.tray = None
+                window.autosort_enabled = False
+                window.show()
+                self.app.processEvents()
+                window.close()
+                self.app.processEvents()
+                window.monitoring = False
+                self.app.clipboard().dataChanged.disconnect(window.clipboard_changed)
+                disconnected = True
+
+                skipped = "Never import text copied during encryption pause 20261107"
+                self.app.clipboard().setText(skipped)
+                secret_file = Path(root) / "encrypted-history.sqlite3"
+                key = utils.random(SecretBox.KEY_SIZE)
+                with patch.object(
+                    QMessageBox, "question",
+                    return_value=QMessageBox.StandardButton.Yes
+                ), patch(
+                    "clipmint.app.key_from_secret_service", return_value=key
+                ), patch(
+                    "clipmint.app.secure_path", return_value=secret_file
+                ), patch(
+                    "clipmint.app.blocked_foreground", return_value=False
+                ):
+                    window.enable_encrypted_history()
+                    self.assertTrue(window.monitoring)
+                    self.assertTrue(window.history_secure)
+                    window.poll_hidden_clipboard()
+                    self.assertFalse(window.store.search(skipped, None))
+                    copied = "Fresh protected clip after enabling encryption"
+                    self.app.clipboard().setText(copied)
+                    window.poll_hidden_clipboard()
+                    self.assertEqual(len(window.store.search(copied, None)), 1)
+            finally:
+                if window is not None:
+                    window._hidden_clipboard_timer.stop()
+                    if disconnected:
+                        self.app.clipboard().dataChanged.connect(window.clipboard_changed)
+                    window._closing = True
+                    if not window.store.closed:
+                        window.store.close()
+                    window.close()
                     window.deleteLater()
                 if old_data is None:
                     os.environ.pop("XDG_DATA_HOME", None)
