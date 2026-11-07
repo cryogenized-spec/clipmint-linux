@@ -30,6 +30,10 @@ SHA_LINE = re.compile(r"^([a-fA-F0-9]{64})\s+\*?([^/\\\s]+)$")
 MAX_API_BYTES = 256 * 1024
 MAX_CHECKSUM_BYTES = 16 * 1024
 MAX_PACKAGE_BYTES = 350 * 1024 * 1024
+MAX_DELTA_MANIFEST_BYTES = 8 * 1024
+MAX_DELTA_RATIO = 0.85
+PREVIEW_VERSION = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+~preview[0-9]+\.[0-9]+\.[0-9]+$")
+SHA256_HEX = re.compile(r"^[a-f0-9]{64}$")
 
 
 class UpdateError(RuntimeError):
@@ -43,6 +47,8 @@ class PreviewUpdate:
     package_url: str
     checksum_url: str
     release_url: str
+    package_size: int = 0
+    delta_manifest_url: str | None = None
 
 
 def validate_asset_url(url: str, tag: str, filename: str) -> str:
@@ -96,6 +102,7 @@ def parse_preview_releases(raw: bytes) -> list[PreviewUpdate]:
             continue
         packages = []
         checksums = []
+        delta_manifests = []
         for asset in assets:
             if not isinstance(asset, dict):
                 continue
@@ -107,6 +114,8 @@ def parse_preview_releases(raw: bytes) -> list[PreviewUpdate]:
                 packages.append((match.group(1), name, url, asset.get("size")))
             elif name == "SHA256SUMS":
                 checksums.append(url)
+            elif name == "DELTA.json":
+                delta_manifests.append((url, asset.get("size")))
         if len(packages) != 1 or len(checksums) != 1:
             # Never use an incomplete release; immutable releases are created
             # only after the .deb and SHA256SUMS have been validated in CI.
@@ -120,9 +129,23 @@ def parse_preview_releases(raw: bytes) -> list[PreviewUpdate]:
             checksum_url = validate_asset_url(checksums[0], tag, "SHA256SUMS")
         except UpdateError:
             continue
+        if len(delta_manifests) > 1:
+            continue
+        delta_manifest_url = None
+        if delta_manifests:
+            delta_url, delta_size = delta_manifests[0]
+            if (type(delta_size) is int
+                    and 0 < delta_size <= MAX_DELTA_MANIFEST_BYTES):
+                try:
+                    delta_manifest_url = validate_asset_url(
+                        delta_url, tag, "DELTA.json"
+                    )
+                except UpdateError:
+                    pass  # Full installer remains usable.
         found.append(PreviewUpdate(
             version, filename, package_url, checksum_url,
             f"https://github.com/{OWNER}/{REPOSITORY}/releases/tag/{tag}",
+            size, delta_manifest_url,
         ))
     return found
 
@@ -182,14 +205,20 @@ def cached_updates_dir() -> Path:
 
 
 def prune_superseded_previews(folder: Path, retain: Path) -> None:
-    """Keep only the latest verified .deb; never delete unrelated user files.
+    """Keep staged and currently installed installers for the next delta.
+
+    Never delete unrelated user files.
 
     This runs after a successful checksum and Debian-identity verification.
     Stale preview files are large, and automatic downloads are enabled by
     default, so leaving them all cached would consume gigabytes over time.
     """
+    keep = {retain}
+    current = installed_version()
+    if current and PREVIEW_VERSION.fullmatch(current):
+        keep.add(folder / f"clipmint_{current}_amd64.deb")
     for old in folder.iterdir():
-        if old == retain or not ASSET_PATTERN.fullmatch(old.name):
+        if old in keep or not ASSET_PATTERN.fullmatch(old.name):
             continue
         if old.is_symlink():
             # Do not follow or remove links that ClipMint did not create.
@@ -237,6 +266,130 @@ def verify_deb(path: Path, version: str) -> None:
         raise UpdateError("Downloaded file is not the expected ClipMint package")
 
 
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        while block := stream.read(1024 * 1024):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def parse_delta_manifest(update: PreviewUpdate, raw: bytes, target_sha: str) -> dict:
+    """Only an exact patch tied to two immutable Debian package hashes is usable."""
+    try:
+        data = json.loads(raw)
+    except (ValueError, UnicodeError) as exc:
+        raise UpdateError("Invalid delta manifest") from exc
+    keys = {"format", "base_version", "base_sha256", "target_version",
+            "target_sha256", "patch_name", "patch_sha256", "patch_size"}
+    if not isinstance(data, dict) or set(data) != keys:
+        raise UpdateError("Unsupported delta manifest")
+    base, target = data["base_version"], data["target_version"]
+    if (data["format"] != "bsdiff4-v1"
+            or not isinstance(base, str)
+            or not PREVIEW_VERSION.fullmatch(base)
+            or target != update.version
+            or not PREVIEW_VERSION.fullmatch(target)):
+        raise UpdateError("Delta version mismatch")
+    for key in ("base_sha256", "target_sha256", "patch_sha256"):
+        if not isinstance(data[key], str) or not SHA256_HEX.fullmatch(data[key]):
+            raise UpdateError("Invalid delta hash")
+    if data["target_sha256"] != target_sha:
+        raise UpdateError("Delta target does not match the full package checksum")
+    expected_name = f"clipmint_delta_from_{base}_to_{target}_amd64.bsdiff"
+    if data["patch_name"] != expected_name:
+        raise UpdateError("Unexpected delta filename")
+    size = data["patch_size"]
+    if (type(size) is not int or size < 32
+            or size >= min(MAX_PACKAGE_BYTES, update.package_size * MAX_DELTA_RATIO)):
+        raise UpdateError("Delta is not a useful smaller transfer")
+    tag = update.release_url.rsplit("/", 1)[-1]
+    data["patch_url"] = validate_asset_url(
+        f"https://github.com/{OWNER}/{REPOSITORY}/releases/download/{tag}/"
+        + expected_name, tag, expected_name
+    )
+    return data
+
+
+def download_verified_delta(
+    update: PreviewUpdate, target: Path, expected: str, folder: Path
+) -> bool:
+    """Reconstruct only from the exact installed, locally cached .deb.
+
+    Every error returns control to the caller for a full verified download.
+    The system-installed application and all clipboard data are untouched.
+    """
+    if not update.delta_manifest_url or update.package_size <= 0:
+        return False
+    manifest = parse_delta_manifest(
+        update,
+        read_bounded(update.delta_manifest_url, MAX_DELTA_MANIFEST_BYTES),
+        expected,
+    )
+    if installed_version() != manifest["base_version"]:
+        return False
+    base = folder / f"clipmint_{manifest['base_version']}_amd64.deb"
+    if (base.is_symlink() or not base.is_file()
+            or base.stat().st_size > MAX_PACKAGE_BYTES
+            or sha256_file(base) != manifest["base_sha256"]):
+        return False
+    verify_deb(base, manifest["base_version"])
+    patch_fd, patch_name = tempfile.mkstemp(prefix=".clipmint-delta-", dir=folder)
+    out_fd, out_name = tempfile.mkstemp(prefix=".clipmint-rebuilt-", dir=folder)
+    os.close(out_fd)
+    try:
+        digest = hashlib.sha256()
+        size = 0
+        request = Request(
+            manifest["patch_url"], headers={"User-Agent": "ClipMint-Updater/0.6"}
+        )
+        with os.fdopen(patch_fd, "wb") as output:
+            try:
+                with urlopen(request, timeout=30) as response:
+                    if response.status != 200:
+                        raise UpdateError("Delta download failed")
+                    while True:
+                        block = response.read(1024 * 1024)
+                        if not block:
+                            break
+                        size += len(block)
+                        if size > manifest["patch_size"]:
+                            raise UpdateError("Delta is larger than advertised")
+                        output.write(block)
+                        digest.update(block)
+            except (OSError, ValueError, http.client.HTTPException, EOFError) as exc:
+                raise UpdateError(f"Cannot download delta: {exc}") from exc
+            output.flush()
+            os.fsync(output.fileno())
+        if (size != manifest["patch_size"]
+                or digest.hexdigest() != manifest["patch_sha256"]):
+            raise UpdateError("Delta checksum or transfer size mismatch")
+        with open(patch_name, "rb") as patch_stream:
+            header = patch_stream.read(32)
+        if header[:8] != b"BSDIFF40" or len(header) != 32:
+            raise UpdateError("Invalid bsdiff header")
+        encoded_size = int.from_bytes(header[24:32], "little")
+        if encoded_size & (1 << 63):
+            raise UpdateError("Negative bsdiff output size")
+        if encoded_size != update.package_size:
+            raise UpdateError("Unexpected reconstructed package size")
+        import bsdiff4
+        bsdiff4.file_patch(str(base), out_name, patch_name)
+        rebuilt = Path(out_name)
+        if (rebuilt.stat().st_size != update.package_size
+                or sha256_file(rebuilt) != expected):
+            raise UpdateError("Reconstructed installer failed checksum verification")
+        verify_deb(rebuilt, update.version)
+        os.chmod(out_name, 0o600)
+        os.replace(out_name, target)
+        return True
+    finally:
+        for name in (patch_name, out_name):
+            if os.path.exists(name):
+                os.unlink(name)
+
+
 def download_verified_preview(update: PreviewUpdate) -> Path:
     """Download into a private cache, atomically accept only verified .deb."""
     if not ASSET_PATTERN.fullmatch(update.filename):
@@ -263,6 +416,16 @@ def download_verified_preview(update: PreviewUpdate) -> Path:
                 prune_superseded_previews(folder, target)
                 return target
         target.unlink()
+    # Try the smaller, authenticated delta first. A missing base, an invalid
+    # manifest, a failed patch or an unsupported dependency all fall back to
+    # the complete .deb using the existing SHA-256/package verification.
+    try:
+        if download_verified_delta(update, target, expected, folder):
+            prune_superseded_previews(folder, target)
+            return target
+    except Exception:
+        pass
+
     request = Request(
         update.package_url, headers={"User-Agent": "ClipMint-Updater/0.6"}
     )
