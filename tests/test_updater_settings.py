@@ -58,13 +58,16 @@ class UpdateSettingsTests(unittest.TestCase):
         with patch.object(w, "check_for_updates") as check:
             w._auto_check_updates()
             check.assert_not_called()
+            self.assertFalse(
+                w.settings.value("updates/automatic", False, type=bool)
+            )
+            w.auto_update_toggle.setChecked(True)
+            check.assert_called_once_with(manual=False)
             w.auto_update_toggle.setChecked(False)
             self.assertFalse(
-                w.settings.value("updates/automatic", True, type=bool)
+                w.settings.value("updates/automatic", False, type=bool)
             )
             w._auto_check_updates()
-            check.assert_not_called()
-            w.auto_update_toggle.setChecked(True)
             check.assert_called_once_with(manual=False)
 
     def test_download_notification_never_installs_without_user_action(self):
