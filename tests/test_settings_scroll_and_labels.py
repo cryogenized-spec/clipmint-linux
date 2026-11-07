@@ -18,6 +18,7 @@ from PySide6.QtGui import QWheelEvent
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from clipmint.app import ClipMintWindow
+from clipmint.crimson_ui import label_type
 
 
 class ScrollAndLabelsTests(unittest.TestCase):
@@ -138,6 +139,38 @@ class ScrollAndLabelsTests(unittest.TestCase):
             w.history.item(0).data(int(Qt.ItemDataRole.UserRole) + 1)["show_badges"]
         )
         self.assertEqual(w.store.get(ident), ("text", b"Plain workshop clipboard item"))
+
+
+    def test_opt_in_badges_classify_raw_preview_not_collection_prefix(self):
+        w = self.window
+        samples = (
+            ("https://example.org", "URL"),
+            ("sudo apt update", "CODE"),
+            ("#ABCDEF", "HEX"),
+            ("Just a note", "TXT"),
+        )
+        for content, _label in samples:
+            w.store.add("text", content.encode(), content, "Work")
+        w.clip_labels_toggle.setChecked(True)
+        w.refresh()
+        observed = {}
+        for idx in range(w.history.count()):
+            item = w.history.item(idx)
+            meta = item.data(int(Qt.ItemDataRole.UserRole) + 1)
+            self.assertTrue(meta["show_badges"])
+            self.assertTrue(item.text().startswith("[Work]  "))
+            self.assertFalse(meta["raw_preview"].startswith("[Work]"))
+            observed[meta["raw_preview"]] = label_type(
+                meta["kind"], meta["raw_preview"]
+            )[0]
+        self.assertEqual(observed, dict(samples))
+        w.clip_labels_toggle.setChecked(False)
+        for idx in range(w.history.count()):
+            item = w.history.item(idx)
+            self.assertFalse(item.text().startswith("[Work]"))
+            self.assertFalse(
+                item.data(int(Qt.ItemDataRole.UserRole) + 1)["show_badges"]
+            )
 
 
 if __name__ == "__main__":
