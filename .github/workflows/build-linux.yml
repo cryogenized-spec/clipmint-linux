@@ -167,6 +167,10 @@ jobs:
         with:
           name: ClipMint-v0.6-main-integration-preview
           path: dist-packages
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       - name: Verify immutable preview package before publishing
         shell: bash
         run: |
@@ -179,6 +183,42 @@ jobs:
           test "$(dpkg-deb -f "clipmint_${version}_amd64.deb" Package)" = clipmint
           test "$(dpkg-deb -f "clipmint_${version}_amd64.deb" Version)" = "$version"
           test "$(dpkg-deb -f "clipmint_${version}_amd64.deb" Architecture)" = amd64
+      - name: Prepare optional verified delta from previous published preview
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # Only verified main-branch prereleases are usable as delta bases.
+          # If no previous package can be verified, keep the full installer.
+          previous_tag="$(gh api "repos/$GH_REPO/releases?per_page=50" --jq '[.[] | select(.prerelease == true and .draft == false) | select(.tag_name | test("^clipmint-preview-[0-9]+-[0-9]+$"))][0].tag_name // empty' || true)"
+          if [[ -z "$previous_tag" ]]; then
+            echo "No previous published preview; full installer only"
+            exit 0
+          fi
+          mkdir -p previous
+          if ! gh release download "$previous_tag" --pattern 'clipmint_*_amd64.deb' --pattern 'SHA256SUMS' --dir previous; then
+            echo "Unable to fetch previous preview; full installer only"
+            exit 0
+          fi
+          if ! (cd previous && sha256sum --check SHA256SUMS); then
+            echo "Unverified previous package; full installer only"
+            exit 0
+          fi
+          old=(previous/clipmint_*_amd64.deb)
+          if [[ "${#old[@]}" -ne 1 || ! -f "${old[0]}" ]]; then
+            echo "Previous release package not unique; full installer only"
+            exit 0
+          fi
+          if ! python -m pip install --disable-pip-version-check "bsdiff4>=1.4.0,<2"; then
+            echo "Delta build dependency unavailable; full installer only"
+            exit 0
+          fi
+          if ! python packaging/build-delta.py "${old[0]}" "dist-packages/clipmint_${CLIPMINT_VERSION}_amd64.deb" dist-packages; then
+            echo "Delta verification failed; full installer remains available"
+            rm -f dist-packages/DELTA.json dist-packages/clipmint_delta_from_*_amd64.bsdiff
+          fi
       - name: Publish immutable GitHub prerelease (automatic update channel)
         shell: bash
         env:
@@ -207,7 +247,16 @@ jobs:
             elif [[ "$is_draft" == "false" ]]; then
               # Never claim success for an incomplete public release.
               assets="$(gh release view "$tag" --json assets --jq '.assets[].name' | sort)"
-              expected="$(printf '%s\n' "SHA256SUMS" "clipmint_${version}_amd64.deb" | sort)"
+              assets_to_publish=("dist-packages/clipmint_${version}_amd64.deb" dist-packages/SHA256SUMS)
+              if [[ -f dist-packages/DELTA.json ]]; then
+                patches=(dist-packages/clipmint_delta_from_*_amd64.bsdiff)
+                if [[ "${#patches[@]}" -ne 1 || ! -f "${patches[0]}" ]]; then
+                  echo "Incomplete delta candidate" >&2
+                  exit 1
+                fi
+                assets_to_publish+=(dist-packages/DELTA.json "${patches[0]}")
+              fi
+              expected="$(printf '%s\n' "${assets_to_publish[@]##*/}" | sort)"
               if [[ "$assets" != "$expected" ]]; then
                 echo "Published preview exists with incomplete or unexpected assets" >&2
                 exit 1
@@ -219,9 +268,16 @@ jobs:
               exit 1
             fi
           fi
-          gh release create "$tag" \
-            "dist-packages/clipmint_${version}_amd64.deb" \
-            dist-packages/SHA256SUMS \
+          assets_to_publish=("dist-packages/clipmint_${version}_amd64.deb" dist-packages/SHA256SUMS)
+          if [[ -f dist-packages/DELTA.json ]]; then
+            patches=(dist-packages/clipmint_delta_from_*_amd64.bsdiff)
+            if [[ "${#patches[@]}" -ne 1 || ! -f "${patches[0]}" ]]; then
+              echo "Incomplete delta candidate" >&2
+              exit 1
+            fi
+            assets_to_publish+=(dist-packages/DELTA.json "${patches[0]}")
+          fi
+          gh release create "$tag" "${assets_to_publish[@]}" \
             --prerelease --target "$GITHUB_SHA" \
             --title "ClipMint Preview $version" \
             --notes "Verified Linux Mint preview from main commit $GITHUB_SHA. Installs require native package-manager approval. See SHA256SUMS."
