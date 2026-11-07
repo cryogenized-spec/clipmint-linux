@@ -78,6 +78,23 @@ class UpdateSettingsTests(unittest.TestCase):
                 w.open_verified_update()
                 open_package.assert_called_once_with(path)
 
+    def test_network_protocol_error_does_not_disable_check_button_forever(self):
+        w = self.window
+        def run_synchronously(*_args, **kwargs):
+            class FakeThread:
+                def start(self):
+                    kwargs["target"]()
+            return FakeThread()
+        with patch("clipmint.app.check_for_preview_update",
+                   side_effect=RuntimeError("truncated update stream")), \
+             patch("clipmint.app.threading.Thread",
+                   side_effect=run_synchronously):
+            w.check_for_updates(manual=True)
+            self.app.processEvents()
+            self.assertFalse(w._update_busy)
+            self.assertTrue(w.check_update_button.isEnabled())
+            self.assertIn("Update check failed", w.update_status.text())
+
     def test_missing_staged_package_cannot_be_opened(self):
         w = self.window
         with patch.object(w, "open_path") as open_package:
