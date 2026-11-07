@@ -48,6 +48,7 @@ class BackgroundHistoryTests(unittest.TestCase):
                     self.assertFalse(window.isVisible())
                     self.assertFalse(window.store.closed)
                     self.assertTrue(window.monitoring)
+                    self.assertIn("MONITORING ACTIVE", window.footer_status.text())
 
                     sample = "Background clipboard capture after closing window"
                     QApplication.clipboard().setText(sample)
@@ -192,6 +193,7 @@ class BackgroundHistoryTests(unittest.TestCase):
                     # caught during independent code review.
                     window.toggle_monitoring()
                     self.assertFalse(window.monitoring)
+                    self.assertIn("MONITORING PAUSED", window.footer_status.text())
                     skipped = "Do not save this while paused 20261107"
                     self.app.clipboard().setText(skipped)
                     window.toggle_monitoring()
