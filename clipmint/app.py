@@ -1201,7 +1201,15 @@ class ClipMintWindow(QMainWindow):
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.addWidget(QLabel("Settings · local-only"))
-        self.pause_button = QPushButton("Pause monitoring")
+        # The monitoring state must be visible, especially if encrypted
+        # history could not be unlocked on restart. Never present a disabled
+        # watcher as though it is still actively collecting clipboard clips.
+        self.pause_button = QPushButton(
+            "Monitoring unavailable · unlock keyring and restart"
+            if self.history_security_error else
+            "Pause monitoring" if self.monitoring else "Resume monitoring"
+        )
+        self.pause_button.setEnabled(not bool(self.history_security_error))
         self.pause_button.clicked.connect(self.toggle_monitoring)
         layout.addWidget(self.pause_button)
 
@@ -2044,7 +2052,12 @@ class ClipMintWindow(QMainWindow):
             )
         self._refresh_queue_button()
         if hasattr(self, "footer_status"):
-            self.footer_status.setText(f"● Ready   |   HISTORY {self.store.count(bin_name):02d}")
+            state = ("HISTORY LOCKED" if self.history_security_error
+                     else "MONITORING ACTIVE" if self.monitoring
+                     else "MONITORING PAUSED")
+            self.footer_status.setText(
+                f"● {state}   |   HISTORY {self.store.count(bin_name):02d}"
+            )
         if hasattr(self, "footer_status"):
             scope = "all collections" if bin_name is None else bin_name
             self.footer_status.setToolTip(
@@ -2830,6 +2843,7 @@ class ClipMintWindow(QMainWindow):
             self._hidden_text_probe.observe(QApplication.clipboard().mimeData())
         self.monitoring = not self.monitoring
         self.pause_button.setText("Pause monitoring" if self.monitoring else "Resume monitoring")
+        self.refresh()
         self.inform("Clipboard monitoring", "Enabled" if self.monitoring else "Paused")
 
     def select_area(self, purpose: str):
