@@ -24,7 +24,7 @@ REPOSITORY = "clipmint-linux"
 API_URL = f"https://api.github.com/repos/{OWNER}/{REPOSITORY}/releases?per_page=20"
 RELEASE_PREFIX = "clipmint-preview-"
 ASSET_PATTERN = re.compile(
-    r"^clipmint_([0-9]+\.[0-9]+\.[0-9]+~preview[0-9]+\.[0-9]+\.[0-9]+)_amd64\.deb$"
+    r"^clipmint_([0-9]+\.[0-9]+\.[0-9]+[~.]preview[0-9]+\.[0-9]+\.[0-9]+)_amd64\.deb$"
 )
 SHA_LINE = re.compile(r"^([a-fA-F0-9]{64})\s+\*?([^/\\\s]+)$")
 MAX_API_BYTES = 256 * 1024
@@ -121,6 +121,7 @@ def parse_preview_releases(raw: bytes) -> list[PreviewUpdate]:
             # only after the .deb and SHA256SUMS have been validated in CI.
             continue
         version, filename, url, size = packages[0]
+        version = version.replace(".preview", "~preview")
         if (not isinstance(size, int) or size <= 0
                 or size > MAX_PACKAGE_BYTES):
             continue
@@ -217,6 +218,7 @@ def prune_superseded_previews(folder: Path, retain: Path) -> None:
     current = installed_version()
     if current and PREVIEW_VERSION.fullmatch(current):
         keep.add(folder / f"clipmint_{current}_amd64.deb")
+        keep.add(folder / f"clipmint_{current.replace('~preview', '.preview')}_amd64.deb")
     for old in folder.iterdir():
         if old in keep or not ASSET_PATTERN.fullmatch(old.name):
             continue
@@ -240,7 +242,8 @@ def expected_checksum(raw: bytes, filename: str) -> str:
     if len(lines) != 1:
         raise UpdateError("Update checksum must contain one package")
     match = SHA_LINE.fullmatch(lines[0].strip())
-    if match is None or match.group(2) != filename:
+    if (match is None or match.group(2) not in
+            {filename, filename.replace(".preview", "~preview")}):
         raise UpdateError("Update checksum does not match package filename")
     return match.group(1).lower()
 
@@ -297,8 +300,13 @@ def parse_delta_manifest(update: PreviewUpdate, raw: bytes, target_sha: str) -> 
             raise UpdateError("Invalid delta hash")
     if data["target_sha256"] != target_sha:
         raise UpdateError("Delta target does not match the full package checksum")
-    expected_name = f"clipmint_delta_from_{base}_to_{target}_amd64.bsdiff"
-    if data["patch_name"] != expected_name:
+    # GitHub's asset store replaces the tilde in Debian versions with a dot.
+    legacy_name = f"clipmint_delta_from_{base}_to_{target}_amd64.bsdiff"
+    expected_name = legacy_name.replace("~preview", ".preview")
+    if data["patch_name"] not in (expected_name, legacy_name):
+        raise UpdateError("Unexpected delta filename")
+    expected_name = data["patch_name"]
+    if not expected_name.startswith("clipmint_delta_from_"):
         raise UpdateError("Unexpected delta filename")
     size = data["patch_size"]
     if (type(size) is not int or size < 32
@@ -329,7 +337,9 @@ def download_verified_delta(
     )
     if installed_version() != manifest["base_version"]:
         return False
-    base = folder / f"clipmint_{manifest['base_version']}_amd64.deb"
+    base = folder / f"clipmint_{manifest['base_version'].replace('~preview', '.preview')}_amd64.deb"
+    if not base.exists():
+        base = folder / f"clipmint_{manifest['base_version']}_amd64.deb"
     if (base.is_symlink() or not base.is_file()
             or base.stat().st_size > MAX_PACKAGE_BYTES
             or sha256_file(base) != manifest["base_sha256"]):
@@ -394,7 +404,10 @@ def download_verified_preview(update: PreviewUpdate) -> Path:
     """Download into a private cache, atomically accept only verified .deb."""
     if not ASSET_PATTERN.fullmatch(update.filename):
         raise UpdateError("Invalid preview package filename")
-    if update.filename != f"clipmint_{update.version}_amd64.deb":
+    if update.filename not in (
+        f"clipmint_{update.version}_amd64.deb",
+        f"clipmint_{update.version.replace('~preview', '.preview')}_amd64.deb",
+    ):
         raise UpdateError("Update version mismatch")
     tag = urlparse(update.release_url).path.rsplit("/", 1)[-1]
     validate_asset_url(update.package_url, tag, update.filename)
