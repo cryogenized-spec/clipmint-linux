@@ -21,6 +21,20 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn("contents: read", workflow)
         self.assertIn('[[ "$GITHUB_REF_NAME" =~ ^v', workflow)
 
+    def test_successful_main_build_publishes_immutable_preview(self):
+        """No PR/token scope may publish a privileged update candidate."""
+        workflow = (ROOT / ".github/workflows/build-linux.yml").read_text()
+        self.assertIn("branches: [main]", workflow)
+        self.assertIn("  publish-preview:", workflow)
+        self.assertIn("if: github.event_name == 'push' && github.ref == 'refs/heads/main'", workflow)
+        self.assertIn("needs: build", workflow)
+        self.assertIn("sha256sum --check SHA256SUMS", workflow)
+        self.assertIn('test "$(dpkg-deb -f', workflow)
+        self.assertIn('--prerelease --target "$GITHUB_SHA"', workflow)
+        self.assertIn('tag="clipmint-preview-', workflow)
+        self.assertIn('if [[ "$latest" != "$GITHUB_SHA" ]]', workflow)
+        self.assertIn('contents: write', workflow)
+
     def test_preview_debian_versions_change_for_each_run_and_rerun(self):
         """Repeated preview1 packages caused apt to keep an old screenshot build."""
         workflow = (ROOT / ".github/workflows/build-linux.yml").read_text()
