@@ -43,6 +43,19 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn("gh release delete \"$tag\" --yes --cleanup-tag", workflow)
         self.assertIn("Published preview exists with incomplete or unexpected assets", workflow)
 
+    def test_optional_delta_is_built_from_verified_upstream_package(self):
+        workflow = (ROOT / ".github/workflows/build-linux.yml").read_text()
+        self.assertIn("packaging/build-delta.py", workflow)
+        self.assertIn("sha256sum --check SHA256SUMS", workflow)
+        self.assertIn("dist-packages/DELTA.json", workflow)
+        self.assertIn("assets_to_publish", workflow)
+        self.assertIn("full installer only", workflow)
+        script = (ROOT / "packaging/build-delta.py").read_text()
+        self.assertIn("bsdiff4.file_diff", script)
+        self.assertIn("bsdiff4.file_patch", script)
+        self.assertIn("digest(rebuilt) != digest(target)", script)
+        self.assertIn("MAX_PATCH_RATIO = 0.85", script)
+
     def test_preview_debian_versions_change_for_each_run_and_rerun(self):
         """Repeated preview1 packages caused apt to keep an old screenshot build."""
         workflow = (ROOT / ".github/workflows/build-linux.yml").read_text()
