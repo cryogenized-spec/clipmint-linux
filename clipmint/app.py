@@ -2813,6 +2813,11 @@ class ClipMintWindow(QMainWindow):
         if self.history_security_error:
             self.error("Clipboard privacy", "Unlock the desktop keyring and restart ClipMint")
             return
+        if not self.monitoring:
+            # A pause may end before the next hidden poll. Baseline the
+            # CURRENT system clipboard now, so nothing copied during pause
+            # can be ingested merely because monitoring was resumed.
+            self._hidden_text_probe.observe(QApplication.clipboard().mimeData())
         self.monitoring = not self.monitoring
         self.pause_button.setText("Pause monitoring" if self.monitoring else "Resume monitoring")
         self.inform("Clipboard monitoring", "Enabled" if self.monitoring else "Paused")
