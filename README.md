@@ -24,16 +24,29 @@ The installer bundles Python, Qt, and FFmpeg. GitHub downloads build-time depend
 
 After installing the first version that includes the updater, open
 **Settings → Updates · verified preview channel**. The
-**Check for and download verified preview updates automatically** checkbox
-defaults to **ON** and can be switched off. The app checks the official
+**Automatically check and download updates (opt-in)** checkbox
+defaults to **OFF**. Use **Check and download updates now** when you want to
+check manually. If you explicitly enable automatic downloads, ClipMint checks
+the official
 `cryogenized-spec/clipmint-linux` GitHub **preview releases** no more than once
 per 24 hours (with a manual **Check for updates now** option). A successful
 `main`-branch build can now publish an **immutable, public GitHub prerelease**
 containing an `amd64.deb` and its `SHA256SUMS`.
 
-Updates download to a private user cache only after version validation. The
-client verifies the GitHub release URL, the SHA-256 checksum and the .deb's
-internal Package/Version/Architecture identity before offering it for install.
+Updates download to a private user cache only after version validation. Where
+the exact previous preview installer is already cached, ClipMint first tries a
+**BSDIFF4 binary delta**. The publisher supplies one only when it is less than
+85% of the full .deb and demonstrates that the patch reconstructs the next .deb
+byte-for-byte. The client checks the old installer hash, patch hash, resulting
+full .deb checksum and Debian package identity before offering installation.
+If the base installer is absent (including first-time upgrades), the patch
+is invalid or the requested versions do not match, it downloads and verifies
+the original full .deb instead. A delta is **not guaranteed to be 5–15 MB**:
+actual savings depend on changes in the compressed installer.
+
+The verified download cache retains the installed preview and staged preview
+to make later deltas possible, instead of deleting the old installer prematurely.
+The old package may consume disk space until it is superseded.
 There are no update-server credentials, untrusted shell commands, package
 hooks, or automatic privileged installation. A normal GitHub login is **not**
 needed to check or download updates. Network access is required only for update
