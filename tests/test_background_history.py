@@ -89,6 +89,52 @@ class BackgroundHistoryTests(unittest.TestCase):
                 else:
                     os.environ["XDG_CONFIG_HOME"] = old_config
 
+    def test_startup_does_not_retroactively_save_preexisting_clipboard(self):
+        """An explicit Quit ends monitoring; reopening starts a NEW session."""
+        with TemporaryDirectory() as root:
+            old_data = os.environ.get("XDG_DATA_HOME")
+            old_config = os.environ.get("XDG_CONFIG_HOME")
+            os.environ["XDG_DATA_HOME"] = root
+            os.environ["XDG_CONFIG_HOME"] = str(Path(root) / "settings")
+            window = None
+            try:
+                self.app.setQuitOnLastWindowClosed(False)
+                old_copy = "Copied while no ClipMint watcher was running 20261107"
+                self.app.clipboard().setText(old_copy)
+                window = ClipMintWindow()
+                if window.tray is not None:
+                    window.tray.hide()
+                    window.tray = None
+                window.autosort_enabled = False
+                window.show()
+                self.app.processEvents()
+                window.close()
+                self.app.processEvents()
+                QTest.qWait(1800)
+                self.assertEqual(window.store.search(old_copy, None), [])
+
+                new_copy = "New copy after ClipMint background watcher starts"
+                with patch("clipmint.app.blocked_foreground", return_value=False):
+                    self.app.clipboard().setText(new_copy)
+                    QTest.qWait(250)
+                self.assertEqual(len(window.store.search(new_copy, None)), 1)
+            finally:
+                if window is not None:
+                    window._hidden_clipboard_timer.stop()
+                    window._closing = True
+                    if not window.store.closed:
+                        window.store.close()
+                    window.close()
+                    window.deleteLater()
+                if old_data is None:
+                    os.environ.pop("XDG_DATA_HOME", None)
+                else:
+                    os.environ["XDG_DATA_HOME"] = old_data
+                if old_config is None:
+                    os.environ.pop("XDG_CONFIG_HOME", None)
+                else:
+                    os.environ["XDG_CONFIG_HOME"] = old_config
+
     def test_hidden_probe_recovers_text_without_data_changed_signal(self):
         """Missed X11 signals must not lose copied text while UI is closed."""
         with TemporaryDirectory() as root:
