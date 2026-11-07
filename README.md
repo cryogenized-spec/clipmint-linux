@@ -20,6 +20,39 @@ Without Tesseract, OCR actions report that the optional tool is missing.
 
 The installer bundles Python, Qt, and FFmpeg. GitHub downloads build-time dependencies on the **GitHub runner**, not on your laptop. The app doesn't run pip/apt or fetch packages on first use.
 
+## Automatic preview updates (new bootstrap release)
+
+After installing the first version that includes the updater, open
+**Settings → Updates · verified preview channel**. The
+**Check for and download verified preview updates automatically** checkbox
+defaults to **ON** and can be switched off. The app checks the official
+`cryogenized-spec/clipmint-linux` GitHub **preview releases** no more than once
+per 24 hours (with a manual **Check for updates now** option). A successful
+`main`-branch build can now publish an **immutable, public GitHub prerelease**
+containing an `amd64.deb` and its `SHA256SUMS`.
+
+Updates download to a private user cache only after version validation. The
+client verifies the GitHub release URL, the SHA-256 checksum and the .deb's
+internal Package/Version/Architecture identity before offering it for install.
+There are no update-server credentials, untrusted shell commands, package
+hooks, or automatic privileged installation. A normal GitHub login is **not**
+needed to check or download updates. Network access is required only for update
+checks and downloads; all existing clipboard functions remain local.
+
+**Important distinction:** ClipMint can **automatically check and download**,
+but it cannot silently replace a system-owned `/opt/clipmint` installation.
+Select **Open verified installer in Linux Mint…**, approve the installation
+in your native package manager, and then fully **Quit ClipMint and restart** it.
+Closing its main window only hides it; the previous background process remains
+active until you quit. If you enabled **Clear unpinned Temporary clips when I
+quit ClipMint**, disable that option first if you want to retain those entries.
+
+This updater is **not retroactively present in older installed .deb files**.
+Install this bootstrap .deb **once**; subsequent updates can be found and
+downloaded from inside the application. ClipMint's preview update channel uses
+`clipmint-preview-NUMBER-ATTEMPT` release tags; official stable releases remain
+separate and are not silently replaced with a downgrade.
+
 ## Background clipboard history
 
 **Closing the ClipMint window keeps the clipboard watcher running.** New, permitted
