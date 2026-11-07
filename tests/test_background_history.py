@@ -140,13 +140,15 @@ class BackgroundHistoryTests(unittest.TestCase):
                     ).fetchone()[0]
                     self.assertEqual(before, after)
 
-                    # Pause must be respected: ignored text must not be saved
-                    # just because the user later resumes monitoring.
-                    window.monitoring = False
+                    # Even if resume happens BEFORE the next 1500-ms timer,
+                    # paused content must not leak into history. This was
+                    # caught during independent code review.
+                    window.toggle_monitoring()
+                    self.assertFalse(window.monitoring)
                     skipped = "Do not save this while paused 20261107"
                     self.app.clipboard().setText(skipped)
-                    window.poll_hidden_clipboard()
-                    window.monitoring = True
+                    window.toggle_monitoring()
+                    self.assertTrue(window.monitoring)
                     window.poll_hidden_clipboard()
                     self.assertEqual(window.store.search(skipped, None), [])
 
