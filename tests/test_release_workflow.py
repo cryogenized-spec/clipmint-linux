@@ -39,6 +39,9 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn('CLIPMINT_VERSION: ${{ needs.build.outputs.package_version }}', workflow)
         self.assertIn('version="${CLIPMINT_VERSION:?Missing built package version}"', workflow)
         self.assertIn('tag="clipmint-preview-${GITHUB_RUN_NUMBER}-${version##*.}"', workflow)
+        self.assertIn("gh release view \"$tag\" --json isDraft", workflow)
+        self.assertIn("gh release delete \"$tag\" --yes --cleanup-tag", workflow)
+        self.assertIn("Published preview exists with incomplete or unexpected assets", workflow)
 
     def test_preview_debian_versions_change_for_each_run_and_rerun(self):
         """Repeated preview1 packages caused apt to keep an old screenshot build."""
