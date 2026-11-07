@@ -1270,8 +1270,8 @@ class ClipMintWindow(QMainWindow):
         update_group = QGroupBox("Updates · verified preview channel")
         update_layout = QVBoxLayout(update_group)
         update_help = QLabel(
-            "Automatically check the official ClipMint GitHub releases and "
-            "download newer checksum-verified preview packages. No GitHub "
+            "Check for updates manually by default, or opt in to automatic "
+            "checking and downloading from official ClipMint GitHub releases. No GitHub "
             "login is needed. Installing a system .deb still requires your "
             "approval in Linux Mint's package manager; ClipMint will never "
             "run sudo or silently install privileged software."
@@ -1279,10 +1279,10 @@ class ClipMintWindow(QMainWindow):
         update_help.setWordWrap(True)
         update_layout.addWidget(update_help)
         self.auto_update_toggle = QCheckBox(
-            "Check for and download verified preview updates automatically"
+            "Automatically check and download updates (opt-in)"
         )
         self.auto_update_toggle.setChecked(
-            self.settings.value("updates/automatic", True, type=bool)
+            self.settings.value("updates/automatic", False, type=bool)
         )
         self.auto_update_toggle.toggled.connect(self.set_auto_updates_enabled)
         update_layout.addWidget(self.auto_update_toggle)
@@ -1291,7 +1291,7 @@ class ClipMintWindow(QMainWindow):
         ))
         self.update_status.setWordWrap(True)
         update_layout.addWidget(self.update_status)
-        self.check_update_button = QPushButton("Check for updates now")
+        self.check_update_button = QPushButton("Check and download updates now")
         self.check_update_button.clicked.connect(
             lambda: self.check_for_updates(manual=True)
         )
@@ -1669,7 +1669,7 @@ class ClipMintWindow(QMainWindow):
             self.check_for_updates(manual=False)
 
     def _auto_check_updates(self):
-        if not self.settings.value("updates/automatic", True, type=bool):
+        if not self.settings.value("updates/automatic", False, type=bool):
             return
         last = int(self.settings.value("updates/last_checked", 0, type=int))
         if int(time.time()) - last < 24 * 60 * 60:
@@ -1684,7 +1684,7 @@ class ClipMintWindow(QMainWindow):
         self.check_update_button.setEnabled(False)
         self.update_status.setText("Checking official ClipMint previews…")
         auto_download = bool(
-            manual or self.settings.value("updates/automatic", True, type=bool)
+            manual or self.settings.value("updates/automatic", False, type=bool)
         )
         signals = self._update_signals
 
