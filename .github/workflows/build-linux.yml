@@ -84,6 +84,7 @@ jobs:
           test -f /usr/lib/x86_64-linux-gnu/libxcb-cursor.so.0
           pyinstaller --noconfirm --clean --windowed --onedir --name ClipMint \
             --hidden-import "_cffi_backend" \
+            --hidden-import "bsdiff4" \
             --hidden-import "keyring.backends.SecretService" \
             --collect-submodules "secretstorage" \
             --collect-binaries "nacl" \
