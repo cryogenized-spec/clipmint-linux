@@ -54,8 +54,10 @@ class UpdateSettingsTests(unittest.TestCase):
 
     def test_preview_check_is_configurable_and_off_stops_network(self):
         w = self.window
-        self.assertTrue(w.auto_update_toggle.isChecked())
+        self.assertFalse(w.auto_update_toggle.isChecked())
         with patch.object(w, "check_for_updates") as check:
+            w._auto_check_updates()
+            check.assert_not_called()
             w.auto_update_toggle.setChecked(False)
             self.assertFalse(
                 w.settings.value("updates/automatic", True, type=bool)
