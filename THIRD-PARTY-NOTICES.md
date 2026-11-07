@@ -51,3 +51,11 @@ Distributors must preserve upstream notices and satisfy both the AGPL
 conditions for ClipMint's covered code and the actual licence conditions
 for each included component. This inventory is a starting point, **not**
 a completed bill of materials or legal compliance certification.
+
+## bsdiff4
+
+The optional binary-delta update feature bundles the `bsdiff4` Python/C
+package (BSD-style licensed). It is used only to reconstruct a verified Debian
+installer from an exact cached base package and an independently hashed patch.
+Upstream: https://pypi.org/project/bsdiff4/
+The corresponding upstream licensing notices remain applicable.
