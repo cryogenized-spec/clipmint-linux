@@ -299,7 +299,11 @@ class CrimsonClipDelegate(QStyledItemDelegate):
             painter.fillRect(QRect(r.left()+4, r.top()+9, 3, r.height()-18), QColor("#F1A0AC"))
         meta = index.data(int(Qt.ItemDataRole.UserRole) + 1) or {}
         name = meta.get("preview", index.data(Qt.ItemDataRole.DisplayRole) or "")
-        kind_tag, icon, colour = label_type(meta.get("kind", "text"), name)
+        # Classify the original clip, not the optional '[Work]' prefix,
+        # otherwise URLs, HEX values and code lose their accurate type chip.
+        kind_tag, icon, colour = label_type(
+            meta.get("kind", "text"), meta.get("raw_preview", name)
+        )
         if meta.get("show_badges", False):
             # Opt-in: include the old type chips and collection label.
             # Never change the actual saved clipboard contents.
