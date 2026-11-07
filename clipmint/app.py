@@ -2721,6 +2721,10 @@ class ClipMintWindow(QMainWindow):
         self.quick_popup.store = secure
         self.history_secure = True
         self.history_security_error = ""
+        # Enabling encrypted history also resumes monitoring. Just like
+        # Resume, baseline the current clipboard first so paused text cannot
+        # leak into the new encrypted archive on the next hidden poll.
+        self._hidden_text_probe.observe(QApplication.clipboard().mimeData())
         self.monitoring = True
         self.settings.setValue("privacy/history_secure", True)
         self.secure_history_button.setText("Encrypted history active")
