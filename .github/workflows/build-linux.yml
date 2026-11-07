@@ -1,6 +1,7 @@
-name: Build ClipMint v0.6 integration preview (no auto release)
+name: Build and publish verified ClipMint previews
 on:
   push:
+    branches: [main]
     tags:
       - 'v[0-9]*.[0-9]*.[0-9]*'
   pull_request:
@@ -16,6 +17,8 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-24.04
+    outputs:
+      package_version: ${{ steps.version.outputs.package_version }}
     env:
       XDG_SESSION_TYPE: x11
     steps:
@@ -146,6 +149,82 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  publish-preview:
+    # Only successful builds from the upstream main branch are public update
+    # candidates. PRs and forked workflows NEVER gain write permissions.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'cryogenized-spec/clipmint-linux'
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      CLIPMINT_VERSION: ${{ needs.build.outputs.package_version }}
+    concurrency:
+      group: clipmint-publish-preview
+      cancel-in-progress: false
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ClipMint-v0.6-main-integration-preview
+          path: dist-packages
+      - name: Verify immutable preview package before publishing
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist-packages
+          sha256sum --check SHA256SUMS
+          version="${CLIPMINT_VERSION:?Missing built package version}"
+          [[ "$version" =~ ^0\.6\.0~preview1\.[0-9]+\.[0-9]+$ ]] || exit 1
+          test -s "clipmint_${version}_amd64.deb"
+          test "$(dpkg-deb -f "clipmint_${version}_amd64.deb" Package)" = clipmint
+          test "$(dpkg-deb -f "clipmint_${version}_amd64.deb" Version)" = "$version"
+          test "$(dpkg-deb -f "clipmint_${version}_amd64.deb" Architecture)" = amd64
+      - name: Publish immutable GitHub prerelease (automatic update channel)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # Skip an outdated build if a newer main commit already exists.
+          latest="$(gh api "repos/$GH_REPO/git/ref/heads/main" --jq '.object.sha')"
+          if [[ "$latest" != "$GITHUB_SHA" ]]; then
+            echo "Main advanced: skip publishing stale preview $GITHUB_SHA"
+            exit 0
+          fi
+          version="${CLIPMINT_VERSION:?Missing built package version}"
+          # Rerun-failed-jobs reuses the already built artifact, but the new
+          # GITHUB_RUN_ATTEMPT would be different. Derive tag from the actual
+          # version, never from the publisher's retry attempt.
+          tag="clipmint-preview-${GITHUB_RUN_NUMBER}-${version##*.}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            is_draft="$(gh release view "$tag" --json isDraft --jq '.isDraft')"
+            if [[ "$is_draft" == "true" ]]; then
+              # gh release create publishes via draft -> upload -> publish.
+              # Cancellation can strand an invisible draft. Retry safely by
+              # deleting only this unpublicized run-specific draft and tag.
+              gh release delete "$tag" --yes --cleanup-tag
+            elif [[ "$is_draft" == "false" ]]; then
+              # Never claim success for an incomplete public release.
+              assets="$(gh release view "$tag" --json assets --jq '.assets[].name' | sort)"
+              expected="$(printf '%s\n' "SHA256SUMS" "clipmint_${version}_amd64.deb" | sort)"
+              if [[ "$assets" != "$expected" ]]; then
+                echo "Published preview exists with incomplete or unexpected assets" >&2
+                exit 1
+              fi
+              echo "Verified preview $tag already published; nothing to do"
+              exit 0
+            else
+              echo "Unable to determine preview release draft state" >&2
+              exit 1
+            fi
+          fi
+          gh release create "$tag" \
+            "dist-packages/clipmint_${version}_amd64.deb" \
+            dist-packages/SHA256SUMS \
+            --prerelease --target "$GITHUB_SHA" \
+            --title "ClipMint Preview $version" \
+            --notes "Verified Linux Mint preview from main commit $GITHUB_SHA. Installs require native package-manager approval. See SHA256SUMS."
   publish-release:
     # Only an explicit version-tag push can publish. PRs and manual preview
     # builds never publish a release or gain contents:write permission.

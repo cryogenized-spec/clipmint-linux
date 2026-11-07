@@ -8,8 +8,10 @@ import shlex
 import sqlite3
 import subprocess
 import sys
+import threading
+import time
 
-from PySide6.QtCore import Qt, QByteArray, QBuffer, QIODevice, QTimer, QSettings, QSize
+from PySide6.QtCore import Qt, QByteArray, QBuffer, QIODevice, QTimer, QSettings, QSize, QObject, Signal
 from PySide6.QtGui import QImage, QFont, QPixmap, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QDialog, QFrame, QHBoxLayout, QInputDialog,
@@ -42,6 +44,7 @@ from .quick_popup import QuickPopup, paste_to_window
 from .productivity import PasteQueue
 from .organizer_ui import TemplatesDialog, TransformDialog
 from .history_filters import populate_filter_tabs, selected_category
+from .updater import check_for_preview_update, download_verified_preview, installed_version, UpdateError
 from .single_instance import InstanceServer, send_command
 from .cinnamon_hotkey import (install_shortcut, restore_screenshot_takeover,
                               shortcut_conflicts, ShortcutSetupError)
@@ -159,6 +162,11 @@ class WheelSafeHistoryLimitComboBox(QComboBox):
         event.ignore()
 
 
+class _UpdateSignals(QObject):
+    """Deliver worker results on Qt's UI thread without blocking clipboard events."""
+    finished = Signal(str, str, str)
+
+
 class ClipMintWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -169,6 +177,13 @@ class ClipMintWindow(QMainWindow):
         self.store = ClipStore()
         self.settings = QSettings("ClipMint", "ClipMint")
         self._temporary_exit_cleaned = False
+        self._update_busy = False
+        self._verified_update_path = None
+        self._update_signals = _UpdateSignals(self)
+        self._update_signals.finished.connect(self._on_update_result)
+        self._auto_update_timer = QTimer(self)
+        self._auto_update_timer.setInterval(6 * 60 * 60 * 1000)
+        self._auto_update_timer.timeout.connect(self._auto_check_updates)
         self._temporary_expiry_timer = QTimer(self)
         self._temporary_expiry_timer.setInterval(5 * 60 * 1000)
         self._temporary_expiry_timer.timeout.connect(self.expire_temporary_if_enabled)
@@ -289,6 +304,12 @@ class ClipMintWindow(QMainWindow):
         # Do not call clipboard_changed() unconditionally at startup: it
         # would save a clip from a period in which monitoring was not active.
         QTimer.singleShot(900, self.offer_pending_recordings)
+        if getattr(sys, "frozen", False):
+            # Network activity is explicitly configurable and never runs in
+            # the Qt UI thread. Development/testing checkouts remain offline
+            # unless the user presses Check now.
+            self._auto_update_timer.start()
+            QTimer.singleShot(12000, self._auto_check_updates)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -1246,6 +1267,43 @@ class ClipMintWindow(QMainWindow):
         login_layout.addWidget(quit_background_button)
         layout.addWidget(login_group)
 
+        update_group = QGroupBox("Updates · verified preview channel")
+        update_layout = QVBoxLayout(update_group)
+        update_help = QLabel(
+            "Automatically check the official ClipMint GitHub releases and "
+            "download newer checksum-verified preview packages. No GitHub "
+            "login is needed. Installing a system .deb still requires your "
+            "approval in Linux Mint's package manager; ClipMint will never "
+            "run sudo or silently install privileged software."
+        )
+        update_help.setWordWrap(True)
+        update_layout.addWidget(update_help)
+        self.auto_update_toggle = QCheckBox(
+            "Check for and download verified preview updates automatically"
+        )
+        self.auto_update_toggle.setChecked(
+            self.settings.value("updates/automatic", True, type=bool)
+        )
+        self.auto_update_toggle.toggled.connect(self.set_auto_updates_enabled)
+        update_layout.addWidget(self.auto_update_toggle)
+        self.update_status = QLabel("Installed version: " + (
+            installed_version() or "development build"
+        ))
+        self.update_status.setWordWrap(True)
+        update_layout.addWidget(self.update_status)
+        self.check_update_button = QPushButton("Check for updates now")
+        self.check_update_button.clicked.connect(
+            lambda: self.check_for_updates(manual=True)
+        )
+        update_layout.addWidget(self.check_update_button)
+        self.install_update_button = QPushButton(
+            "Open verified installer in Linux Mint…"
+        )
+        self.install_update_button.setEnabled(False)
+        self.install_update_button.clicked.connect(self.open_verified_update)
+        update_layout.addWidget(self.install_update_button)
+        layout.addWidget(update_group)
+
         temp_group = QGroupBox("Temporary collection · retention")
         temp_layout = QVBoxLayout(temp_group)
         explanation = QLabel(
@@ -1604,6 +1662,98 @@ class ClipMintWindow(QMainWindow):
         scroll.setWidget(page)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         self.pages.addWidget(scroll)
+
+    def set_auto_updates_enabled(self, enabled: bool):
+        self.settings.setValue("updates/automatic", bool(enabled))
+        if enabled:
+            self.check_for_updates(manual=False)
+
+    def _auto_check_updates(self):
+        if not self.settings.value("updates/automatic", True, type=bool):
+            return
+        last = int(self.settings.value("updates/last_checked", 0, type=int))
+        if int(time.time()) - last < 24 * 60 * 60:
+            return
+        self.check_for_updates(manual=False)
+
+    def check_for_updates(self, manual: bool = False):
+        """Use a background daemon thread, never block screenshot/clipboard UI."""
+        if self._update_busy or self._closing:
+            return
+        self._update_busy = True
+        self.check_update_button.setEnabled(False)
+        self.update_status.setText("Checking official ClipMint previews…")
+        auto_download = bool(
+            manual or self.settings.value("updates/automatic", True, type=bool)
+        )
+        signals = self._update_signals
+
+        def check_worker():
+            version = ""
+            downloaded = ""
+            error = ""
+            try:
+                candidate = check_for_preview_update()
+                if candidate is not None:
+                    version = candidate.version
+                    if auto_download:
+                        downloaded = str(download_verified_preview(candidate))
+            except Exception as exc:
+                # Worker failures must always unlock the Check button.
+                # urllib can raise HTTP protocol errors not covered by
+                # OSError, including truncated transfer bodies.
+                error = str(exc) or type(exc).__name__
+            try:
+                signals.finished.emit(version, downloaded, error)
+            except RuntimeError:
+                # Window/process could have been shut down while downloading.
+                pass
+
+        threading.Thread(
+            target=check_worker, name="ClipMint-update-check", daemon=True
+        ).start()
+
+    def _on_update_result(self, version: str, downloaded: str, error: str):
+        self._update_busy = False
+        self.check_update_button.setEnabled(True)
+        self.settings.setValue("updates/last_checked", int(time.time()))
+        if error:
+            self.update_status.setText("Update check failed: " + error)
+            return
+        if not version:
+            self.update_status.setText(
+                "ClipMint is up to date for the verified preview channel."
+            )
+            return
+        if downloaded:
+            self._verified_update_path = Path(downloaded)
+            self.install_update_button.setEnabled(True)
+            self.update_status.setText(
+                f"Verified update {version} downloaded. "
+                "Open the installer to approve installation."
+            )
+            if self.tray is not None:
+                self.tray.showMessage(
+                    "ClipMint update ready",
+                    "Verified preview downloaded; approve install in Settings.",
+                    QSystemTrayIcon.MessageIcon.Information, 4000,
+                )
+        else:
+            self.update_status.setText(
+                f"New ClipMint preview {version} is available."
+            )
+
+    def open_verified_update(self):
+        path = self._verified_update_path
+        if path is None or not path.is_file() or path.is_symlink():
+            self.install_update_button.setEnabled(False)
+            self.update_status.setText(
+                "Downloaded package missing; please check again."
+            )
+            return
+        # The native Mint package installer handles authorization. Never
+        # invoke sudo or download-and-execute silently.
+        self.open_path(path)
 
     def set_clip_labels_visible(self, enabled: bool):
         """Display-only preference; never rewrite clipboard history rows."""
@@ -3199,6 +3349,7 @@ class ClipMintWindow(QMainWindow):
             self.recorder_window.deleteLater()
             self.recorder_window = None
         self._closing = True
+        self._auto_update_timer.stop()
         self._hidden_clipboard_timer.stop()
         self.lock_vault()
         self.clear_temporary_on_normal_exit()
