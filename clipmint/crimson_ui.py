@@ -586,7 +586,13 @@ def build_crimson_ui(w, image_preview_class):
     fl.addStretch(1)
     root.addWidget(footer)
     w.setCentralWidget(shell)
-    w.statusBar().messageChanged.connect(lambda s: w.footer_status.setText("● "+s.split(" · ")[0][:24]))
+    # Keep the actual monitor state visible; transient status-bar messages
+    # must not replace ACTIVE/PAUSED/LOCKED with an unrelated notification.
+    # The hidden native Qt status bar's latest message remains inspectable
+    # in the footer tooltip.
+    w.statusBar().messageChanged.connect(
+        lambda s: w.footer_status.setToolTip(s) if s else None
+    )
     w.statusBar().hide()
     return shell
 
