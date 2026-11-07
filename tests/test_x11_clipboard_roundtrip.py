@@ -132,6 +132,67 @@ class X11ClipboardRoundTripTests(unittest.TestCase):
                 else:
                     os.environ["XDG_CONFIG_HOME"] = previous_config
 
+    def test_closed_window_recovers_external_text_if_signal_is_lost(self):
+        """Real X11 background fallback even without the Qt dataChanged slot."""
+        from clipmint.app import ClipMintWindow
+
+        previous_data = os.environ.get("XDG_DATA_HOME")
+        previous_config = os.environ.get("XDG_CONFIG_HOME")
+        window = None
+        disconnected = False
+        with TemporaryDirectory() as root:
+            os.environ["XDG_DATA_HOME"] = root
+            os.environ["XDG_CONFIG_HOME"] = str(Path(root) / "config")
+            try:
+                self.app.setQuitOnLastWindowClosed(False)
+                with patch("clipmint.app.blocked_foreground", return_value=False):
+                    window = ClipMintWindow()
+                    if window.tray is not None:
+                        window.tray.hide()
+                        window.tray = None
+                    window.autosort_enabled = False
+                    window.show()
+                    self.app.processEvents()
+                    window.close()
+                    self.app.processEvents()
+                    self.assertFalse(window.isVisible())
+                    self.assertTrue(window._hidden_clipboard_timer.isActive())
+
+                    clipboard = self.app.clipboard()
+                    clipboard.dataChanged.disconnect(window.clipboard_changed)
+                    disconnected = True
+                    sample = b"X11 hidden recovered externally copied note 20261107"
+                    subprocess.run(
+                        ["xclip", "-selection", "clipboard",
+                         "-t", "text/plain", "-in"],
+                        input=sample, check=True, timeout=8,
+                    )
+                    QTest.qWait(2100)
+                    matches = window.store.search(sample.decode(), None)
+                    self.assertEqual(len(matches), 1)
+                    self.assertEqual(window.store.get(matches[0].id),
+                                     ("text", sample))
+            finally:
+                if window is not None:
+                    window._hidden_clipboard_timer.stop()
+                    if disconnected:
+                        self.app.clipboard().dataChanged.connect(
+                            window.clipboard_changed
+                        )
+                    window._closing = True
+                    if not window.store.closed:
+                        window.store.close()
+                    window.close()
+                    window.deleteLater()
+                if previous_data is None:
+                    os.environ.pop("XDG_DATA_HOME", None)
+                else:
+                    os.environ["XDG_DATA_HOME"] = previous_data
+                if previous_config is None:
+                    os.environ.pop("XDG_CONFIG_HOME", None)
+                else:
+                    os.environ["XDG_CONFIG_HOME"] = previous_config
+
     def test_screenshot_is_png_in_external_x11_clipboard_without_main_window(self):
         """Desktop X11 smoke: copy PNG, paste via xclip, never raise ClipMint.
 
