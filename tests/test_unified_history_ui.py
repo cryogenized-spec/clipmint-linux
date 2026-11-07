@@ -14,7 +14,7 @@ from unittest.mock import patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("XDG_SESSION_TYPE", "x11")
 
-from PySide6.QtCore import QSettings
+from PySide6.QtCore import QSettings, Qt
 from PySide6.QtWidgets import QApplication
 
 from clipmint.app import ClipMintWindow
