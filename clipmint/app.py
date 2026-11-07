@@ -2076,6 +2076,7 @@ class ClipMintWindow(QMainWindow):
             kind_tag, _symbol, _color = label_type(clip.kind, clip.preview)
             item.setData(Qt.ItemDataRole.UserRole + 1, {
                 "kind": clip.kind, "preview": title,
+                "raw_preview": clip.preview,
                 "show_badges": show_labels,
                 "subtitle": (
                     ("PNG image" if clip.kind == "image" else kind_tag)
