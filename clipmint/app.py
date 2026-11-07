@@ -253,6 +253,11 @@ class ClipMintWindow(QMainWindow):
             self._clipboard_generation_changed
         )
         QApplication.clipboard().dataChanged.connect(self.clipboard_changed)
+        # Starting the watcher must not retroactively import text copied
+        # while ClipMint was explicitly QUIT. Observe the current clipboard
+        # as a baseline, then capture future changes through dataChanged
+        # and the hidden-window recovery timer.
+        self._hidden_text_probe.observe(QApplication.clipboard().mimeData())
         # Keep observing the most recent plain-text clip after the archive is
         # closed, even if a Cinnamon/X11 clipboard manager misses a signal.
         # This is a fallback for a LIVE hidden process, not a background
@@ -268,7 +273,8 @@ class ClipMintWindow(QMainWindow):
         # startup. An upgrade or an application crash cannot opt users in.
         if self._temporary_expiry_timer.isActive():
             QTimer.singleShot(0, self.expire_temporary_if_enabled)
-        QTimer.singleShot(400, self.clipboard_changed)
+        # Do not call clipboard_changed() unconditionally at startup: it
+        # would save a clip from a period in which monitoring was not active.
         QTimer.singleShot(900, self.offer_pending_recordings)
 
     def resizeEvent(self, event):
