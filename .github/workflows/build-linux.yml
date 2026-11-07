@@ -1,4 +1,4 @@
-name: Build ClipMint v0.6 integration preview (no auto release)
+name: Build and publish verified ClipMint previews
 on:
   push:
     branches: [main]
