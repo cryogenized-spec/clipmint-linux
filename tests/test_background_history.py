@@ -89,6 +89,92 @@ class BackgroundHistoryTests(unittest.TestCase):
                 else:
                     os.environ["XDG_CONFIG_HOME"] = old_config
 
+    def test_hidden_probe_recovers_text_without_data_changed_signal(self):
+        """Missed X11 signals must not lose copied text while UI is closed."""
+        with TemporaryDirectory() as root:
+            old_data = os.environ.get("XDG_DATA_HOME")
+            old_config = os.environ.get("XDG_CONFIG_HOME")
+            os.environ["XDG_DATA_HOME"] = root
+            os.environ["XDG_CONFIG_HOME"] = str(Path(root) / "settings")
+            window = None
+            disconnected = False
+            try:
+                self.app.setQuitOnLastWindowClosed(False)
+                with patch("clipmint.app.blocked_foreground", return_value=False):
+                    window = ClipMintWindow()
+                    if window.tray is not None:
+                        window.tray.hide()
+                        window.tray = None
+                    window.autosort_enabled = False
+                    window.show()
+                    self.app.processEvents()
+                    window.close()
+                    self.app.processEvents()
+                    self.assertFalse(window.isVisible())
+                    self.assertTrue(window._hidden_clipboard_timer.isActive())
+
+                    # Reproduce a missed Qt X11 notification: the window
+                    # remains alive, but the normal capture callback is
+                    # disconnected. Only the hidden probe can save this copy.
+                    self.app.clipboard().dataChanged.disconnect(
+                        window.clipboard_changed
+                    )
+                    disconnected = True
+                    sample = "Hidden clipboard recovery 20261107 unique sample"
+                    self.app.clipboard().setText(sample)
+                    self.app.processEvents()
+                    self.assertFalse(window.store.search(sample, None))
+                    window.poll_hidden_clipboard()
+                    saved = window.store.search(sample, None)
+                    self.assertEqual(len(saved), 1)
+                    self.assertEqual(window.store.get(saved[0].id),
+                                     ("text", sample.encode("utf-8")))
+
+                    # Repeated polls must never artificially 'recopy' a clip.
+                    before = window.store.conn.execute(
+                        "SELECT touch_seq FROM clips WHERE id=?", (saved[0].id,)
+                    ).fetchone()[0]
+                    window.poll_hidden_clipboard()
+                    after = window.store.conn.execute(
+                        "SELECT touch_seq FROM clips WHERE id=?", (saved[0].id,)
+                    ).fetchone()[0]
+                    self.assertEqual(before, after)
+
+                    # Pause must be respected: ignored text must not be saved
+                    # just because the user later resumes monitoring.
+                    window.monitoring = False
+                    skipped = "Do not save this while paused 20261107"
+                    self.app.clipboard().setText(skipped)
+                    window.poll_hidden_clipboard()
+                    window.monitoring = True
+                    window.poll_hidden_clipboard()
+                    self.assertEqual(window.store.search(skipped, None), [])
+
+                    next_text = "New clipboard content after resuming 20261107"
+                    self.app.clipboard().setText(next_text)
+                    window.poll_hidden_clipboard()
+                    self.assertEqual(len(window.store.search(next_text, None)), 1)
+            finally:
+                if window is not None:
+                    window._hidden_clipboard_timer.stop()
+                    if disconnected:
+                        self.app.clipboard().dataChanged.connect(
+                            window.clipboard_changed
+                        )
+                    window._closing = True
+                    if not window.store.closed:
+                        window.store.close()
+                    window.hide()
+                    window.deleteLater()
+                if old_data is None:
+                    os.environ.pop("XDG_DATA_HOME", None)
+                else:
+                    os.environ["XDG_DATA_HOME"] = old_data
+                if old_config is None:
+                    os.environ.pop("XDG_CONFIG_HOME", None)
+                else:
+                    os.environ["XDG_CONFIG_HOME"] = old_config
+
     def test_background_app_lifetime_configuration_is_explicit(self):
         # The launcher must override Qt's default "exit when last window closes".
         app_source = (Path(__file__).resolve().parents[1] / "clipmint/app.py"
