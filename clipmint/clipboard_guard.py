@@ -36,3 +36,35 @@ class OwnClipboardGuard:
         except (RuntimeError, ValueError, TypeError):
             return False
         return False
+
+
+class HiddenTextClipboardProbe:
+    """Memory-only guard for lost X11 text-change notifications.
+
+    Qt normally delivers QClipboard.dataChanged, but some desktop clipboard
+    managers can interfere with X11 ownership notifications. A lightweight
+    hidden-window timer can compare the current plain-text contents and route
+    *new* values through the same privacy-aware capture handler.
+
+    This stores only a digest, not copied text. It deliberately does not poll
+    bitmap image data: repeatedly decoding large images would be expensive.
+    """
+
+    def __init__(self):
+        self.last: bytes | None = None
+
+    def observe(self, mime) -> bool:
+        if mime is None or not mime.hasText():
+            changed = self.last is not None
+            self.last = None
+            return changed
+        text = mime.text()
+        # The normal MIME importer rejects text above 2 MiB; do not spend
+        # time hashing oversized clipboard payloads on a periodic probe.
+        if len(text) > 2 * 1024 * 1024:
+            self.last = None
+            return False
+        current = hashlib.blake2b(text.encode("utf-8"), digest_size=16).digest()
+        changed = current != self.last
+        self.last = current
+        return changed
