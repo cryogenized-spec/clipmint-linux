@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import http.client
 import io
 import json
 import os
@@ -148,7 +149,14 @@ class UpdaterTests(unittest.TestCase):
              patch("clipmint.updater.urlopen",
                    side_effect=lambda *_args, **_kw: FakeResponse(payload)), \
              patch("clipmint.updater.verify_deb") as verified:
+            cache = updater.cached_updates_dir()
+            old = cache / "clipmint_0.6.0~preview1.299.1_amd64.deb"
+            old.write_bytes(b"superseded 100MB package fixture")
+            unrelated = cache / "personal-notes.txt"
+            unrelated.write_text("must survive update cleanup")
             path = updater.download_verified_preview(candidate)
+            self.assertFalse(old.exists(), "Previous installer should be pruned")
+            self.assertEqual(unrelated.read_text(), "must survive update cleanup")
             self.assertTrue(path.is_file())
             self.assertEqual(path.read_bytes(), payload)
             self.assertEqual(verified.call_args.args[1], candidate.version)
@@ -162,6 +170,24 @@ class UpdaterTests(unittest.TestCase):
             path.write_bytes(b"corrupted old cache")
             recovered = updater.download_verified_preview(candidate)
             self.assertEqual(recovered.read_bytes(), payload)
+
+    def test_truncated_http_transfer_is_a_retryable_update_error(self):
+        class TruncatedResponse:
+            status = 200
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return None
+
+            def read(self, *_args):
+                raise http.client.IncompleteRead(b"partial", 200)
+
+        with patch("clipmint.updater.urlopen",
+                   return_value=TruncatedResponse()):
+            with self.assertRaises(updater.UpdateError):
+                updater.read_bounded(updater.API_URL, updater.MAX_API_BYTES)
 
     def test_checksum_mismatch_never_publishes_a_cached_file(self):
         candidate = updater.parse_preview_releases(
