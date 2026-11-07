@@ -1698,8 +1698,11 @@ class ClipMintWindow(QMainWindow):
                     version = candidate.version
                     if auto_download:
                         downloaded = str(download_verified_preview(candidate))
-            except (UpdateError, OSError, ValueError) as exc:
-                error = str(exc)
+            except Exception as exc:
+                # Worker failures must always unlock the Check button.
+                # urllib can raise HTTP protocol errors not covered by
+                # OSError, including truncated transfer bodies.
+                error = str(exc) or type(exc).__name__
             try:
                 signals.finished.emit(version, downloaded, error)
             except RuntimeError:
