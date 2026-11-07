@@ -278,7 +278,7 @@ def label_type(kind: str, preview: str) -> tuple[str, str, str]:
 
 
 class CrimsonClipDelegate(QStyledItemDelegate):
-    """Real Qt list rows matching the prototype: icons, type chips, time, pin."""
+    """Clean clipboard rows: small content icon, primary text, time, pin."""
 
     def sizeHint(self, option, index):
         return QSize(max(100, option.rect.width()), 77)
@@ -299,7 +299,7 @@ class CrimsonClipDelegate(QStyledItemDelegate):
             painter.fillRect(QRect(r.left()+4, r.top()+9, 3, r.height()-18), QColor("#F1A0AC"))
         meta = index.data(int(Qt.ItemDataRole.UserRole) + 1) or {}
         name = meta.get("preview", index.data(Qt.ItemDataRole.DisplayRole) or "")
-        tag, icon, colour = label_type(meta.get("kind", "text"), name)
+        kind_tag, icon, _colour = label_type(meta.get("kind", "text"), name)
         x = r.left() + 12
         y = r.top() + (r.height() - 34)//2
         painter.setPen(QPen(QColor("#9A5A67"),1))
@@ -307,13 +307,9 @@ class CrimsonClipDelegate(QStyledItemDelegate):
         painter.setPen(QColor(PORCELAIN))
         painter.setFont(QFont("DejaVu Sans Mono", 12, QFont.Weight.Bold))
         painter.drawText(QRect(x, y, 34, 34), Qt.AlignmentFlag.AlignCenter, icon)
-        tagx = x + 45
-        tagw = 39 if tag=="CODE" else 29
-        painter.fillRect(QRect(tagx, r.top()+17, tagw, 19), QColor(colour))
-        painter.setPen(QColor("#25101A"))
-        painter.setFont(QFont("DejaVu Sans Mono", 9, QFont.Weight.Bold))
-        painter.drawText(QRect(tagx, r.top()+17, tagw, 19), Qt.AlignmentFlag.AlignCenter, tag)
-        textx=tagx+tagw+8
+        # The top tabs already filter by type. Do not place redundant
+        # TXT/URL/IMG/CODE badges between the icon and ordinary clip text.
+        textx=x+45
         available=max(30, r.right()-textx-40)
         painter.setPen(QColor("#F4EEEB"))
         painter.setFont(QFont("Cormorant Garamond", 17))
@@ -321,7 +317,7 @@ class CrimsonClipDelegate(QStyledItemDelegate):
         painter.drawText(textx, r.top()+29, font.elidedText(name,Qt.TextElideMode.ElideRight,available))
         painter.setFont(QFont("DejaVu Sans Mono", 9))
         painter.setPen(QColor("#CCAFB5"))
-        subtitle = meta.get("subtitle", "Image clipboard" if tag=="IMG" else "Text clipboard")
+        subtitle = meta.get("subtitle", "Image clipboard" if kind_tag=="IMG" else "Text clipboard")
         painter.drawText(textx, r.top()+50,
             QFontMetrics(painter.font()).elidedText(subtitle,Qt.TextElideMode.ElideRight,available+17))
         painter.setPen(QColor("#E3C8C4"))
