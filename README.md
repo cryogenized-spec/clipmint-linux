@@ -26,22 +26,29 @@ After installing the updater-capable version, open **Settings → Updates ·
 verified preview channel**. The **Automatically check and download small verified
 patches (20 MB max)** option defaults to **OFF**. When you opt in, ClipMint checks
 the official `cryogenized-spec/clipmint-linux` GitHub prerelease channel at most
-once per 24 hours. Only a cryptographically verified BSDIFF4 patch of **20 MiB or
+once per 24 hours. Only a SHA-256-verified file-aware or BSDIFF4 patch of **20 MiB or
 less** can be downloaded in the background; checks and metadata use a small
 additional amount of network traffic. **A background check NEVER downloads a
 full .deb installer.** It does not trigger apt, sudo, or installation.
 
 The automatic patch path requires (1) an official complete preview release
-with `DELTA.json` and patch asset, (2) an installed version exactly matching
-the patch base, and (3) the base .deb retained in ClipMint's private update
-cache. Both the cached base and patch are checked against SHA-256; the rebuilt
+with a `DELTA.json` or alternate `DELTA-227.json` manifest and matching
+patch asset, (2) an installed version exactly matching a published patch
+base, and (3) the corresponding original .deb present either in the
+private ClipMint update cache **or in Downloads under its exact original
+filename**. ClipMint checks only the two expected filenames in these
+locations; it does not search, modify, or remove other Downloads files.
+Both the local base and patch are checked against SHA-256; the rebuilt
 installer is checked against the official `SHA256SUMS` and Debian package
 identity. If any requirement fails, ClipMint reports the new preview but
 **downloads no full installer**. A differential patch may not exist at all:
 the GitHub publisher only creates one when it reconstructs the new package
 byte-for-byte and is substantially smaller than the compressed full installer.
-The first update from a manually installed .deb ordinarily cannot use a delta
-unless that exact installer is already in the private cache.
+The first update from a manually installed .deb can now use a delta when
+that exact installer has been retained in Downloads, provided the official
+release publishes a compatible patch (including bootstrap Preview 227.1).
+If no compatible verified small patch exists, automatic checks remain
+notification-only and do not download a full package.
 
 **Check for verified preview updates** only checks for availability and never
 downloads a package. If a preview exists but no suitable small patch is
