@@ -16,6 +16,12 @@ import tempfile
 
 import bsdiff4
 
+# Executed as python packaging/build-delta.py from the repository root.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from clipmint.package_delta import (
+    DeltaLayoutError, build_patch as build_file_aware_patch, MAX_PATCH,
+)
+
 PACKAGE_RE = re.compile(
     r"clipmint_([0-9]+\.[0-9]+\.[0-9]+[~.]preview[0-9]+\.[0-9]+\.[0-9]+)_amd64\.deb"
 )
@@ -65,6 +71,34 @@ def build_delta(base: Path, target: Path, output: Path) -> bool:
     manifest = output / "DELTA.json"
     if patch.exists() or manifest.exists():
         raise ValueError("Refusing to overwrite another delta candidate")
+    # Normal production Debian archives use an xz-compressed data.tar.
+    # Whole-.deb bsdiff saw the ENTIRE xz stream change for tiny application
+    # edits and produced nearly full-size patches. Reuse unchanged tar
+    # member file bodies instead, while reconstructing the *exact* .deb.
+    # Preserve the legacy binary-diff path only for synthetic test fixtures
+    # that have no valid Debian ar/xz structure.
+    file_patch = output / name.replace(".bsdiff", ".clipdelta")
+    try:
+        usable = build_file_aware_patch(base, target, file_patch)
+    except DeltaLayoutError:
+        usable = None
+    if usable is not None:
+        if not usable:
+            return False
+        data = {
+            "format": "tar-content-xz-v1",
+            "base_version": old,
+            "base_sha256": digest(base),
+            "target_version": new,
+            "target_sha256": digest(target),
+            "patch_name": file_patch.name,
+            "patch_sha256": digest(file_patch),
+            "patch_size": file_patch.stat().st_size,
+        }
+        manifest.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n")
+        print(f"File-aware verified patch: {file_patch.stat().st_size} bytes ("
+              f"{file_patch.stat().st_size / target.stat().st_size:.1%} of installer)")
+        return True
     try:
         bsdiff4.file_diff(str(base), str(target), str(patch))
         if not 32 <= patch.stat().st_size < target.stat().st_size * MAX_PATCH_RATIO:
