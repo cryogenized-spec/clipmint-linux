@@ -6,6 +6,7 @@ and checks that the output is exactly the target Debian file.
 """
 from __future__ import annotations
 
+import bz2
 import hashlib
 import importlib.util
 import json
@@ -71,6 +72,32 @@ class BootstrapPreviewTests(unittest.TestCase):
                     package_delta._bsdiff_apply(
                         original, invalid, len(modified)
                     )
+
+    def test_stdlib_decoder_accepts_cursor_only_control_records(self):
+        # A valid BSDIFF40 operation may move the old cursor without
+        # emitting any output. The real original release diff can do this.
+        def signed(n):
+            magnitude = abs(n)
+            encoded = bytes(
+                (magnitude >> (8 * i)) & 0xFF for i in range(7)
+            )
+            return encoded + bytes([
+                (magnitude >> 56) | (0x80 if n < 0 else 0)
+            ])
+
+        control = (
+            signed(0) + signed(0) + signed(2)
+            + signed(3) + signed(0) + signed(0)
+        )
+        control_z = bz2.compress(control)
+        diff_z = bz2.compress(b"\\x00" * 3)
+        extra_z = bz2.compress(b"")
+        delta = (b"BSDIFF40" + signed(len(control_z))
+                 + signed(len(diff_z)) + signed(3)
+                 + control_z + diff_z + extra_z)
+        self.assertEqual(
+            package_delta._bsdiff_apply(b"abcdef", delta, 3), b"cde"
+        )
 
     def test_release_pinned_bootstrap_reconstructs_verified_deb_offline(self):
         old_version = "0.6.0~preview1.227.1"
