@@ -56,6 +56,9 @@ class PreviewUpdate:
     release_url: str
     package_size: int = 0
     delta_manifest_url: str | None = None
+    # Additional authenticated manifests, e.g. from the original updater
+    # bootstrap release; each is matched against the locally installed base.
+    delta_manifest_urls: tuple[str, ...] = ()
 
 
 def validate_asset_url(url: str, tag: str, filename: str) -> str:
@@ -121,8 +124,8 @@ def parse_preview_releases(raw: bytes) -> list[PreviewUpdate]:
                 packages.append((match.group(1), name, url, asset.get("size")))
             elif name == "SHA256SUMS":
                 checksums.append(url)
-            elif name == "DELTA.json":
-                delta_manifests.append((url, asset.get("size")))
+            elif name == "DELTA.json" or re.fullmatch(r"DELTA-[0-9]+\.json", name):
+                delta_manifests.append((name, url, asset.get("size")))
         if len(packages) != 1 or len(checksums) != 1:
             # Never use an incomplete release; immutable releases are created
             # only after the .deb and SHA256SUMS have been validated in CI.
@@ -137,23 +140,31 @@ def parse_preview_releases(raw: bytes) -> list[PreviewUpdate]:
             checksum_url = validate_asset_url(checksums[0], tag, "SHA256SUMS")
         except UpdateError:
             continue
-        if len(delta_manifests) > 1:
+        if len(delta_manifests) > 10:
             continue
-        delta_manifest_url = None
-        if delta_manifests:
-            delta_url, delta_size = delta_manifests[0]
+        valid_manifests: list[tuple[str, str]] = []
+        seen_manifest_names = set()
+        for delta_name, delta_url, delta_size in delta_manifests:
+            if delta_name in seen_manifest_names:
+                continue
+            seen_manifest_names.add(delta_name)
             if (type(delta_size) is int
                     and 0 < delta_size <= MAX_DELTA_MANIFEST_BYTES):
                 try:
-                    delta_manifest_url = validate_asset_url(
-                        delta_url, tag, "DELTA.json"
-                    )
+                    valid_manifests.append((
+                        delta_name,
+                        validate_asset_url(delta_url, tag, delta_name),
+                    ))
                 except UpdateError:
                     pass  # Full installer remains usable.
+        primary = next((url for name, url in valid_manifests
+                        if name == "DELTA.json"), None)
+        alternates = tuple(url for name, url in valid_manifests
+                           if name != "DELTA.json")
         found.append(PreviewUpdate(
             version, filename, package_url, checksum_url,
             f"https://github.com/{OWNER}/{REPOSITORY}/releases/tag/{tag}",
-            size, delta_manifest_url,
+            size, primary, alternates,
         ))
     return found
 
@@ -332,30 +343,58 @@ def download_verified_delta(
     update: PreviewUpdate, target: Path, expected: str, folder: Path,
     *, max_patch_bytes: int | None = None,
 ) -> bool:
-    """Reconstruct only from the exact installed, locally cached .deb.
+    """Reconstruct only from the exact installed, locally available .deb.
 
-    Every error returns control to the caller for a full verified download.
-    The system-installed application and all clipboard data are untouched.
+    Search the private update cache and exact installer filenames in Downloads
+    without scanning user folders or changing original downloaded files.
+    Every base is verified against the upstream immutable SHA-256 manifest.
     """
-    if not update.delta_manifest_url or update.package_size <= 0:
+    manifest_urls = ([update.delta_manifest_url]
+                     if update.delta_manifest_url else [])
+    manifest_urls.extend(update.delta_manifest_urls)
+    if not manifest_urls or update.package_size <= 0:
         return False
-    manifest = parse_delta_manifest(
-        update,
-        read_bounded(update.delta_manifest_url, MAX_DELTA_MANIFEST_BYTES),
-        expected,
+    current = installed_version()
+    manifest = None
+    for url in manifest_urls:
+        try:
+            candidate = parse_delta_manifest(
+                update, read_bounded(url, MAX_DELTA_MANIFEST_BYTES), expected
+            )
+        except UpdateError:
+            continue
+        if (candidate["base_version"] == current and
+                (max_patch_bytes is None or
+                 candidate["patch_size"] <= max_patch_bytes)):
+            manifest = candidate
+            break
+    if manifest is None:
+        return False
+    version = manifest["base_version"]
+    names = (
+        f"clipmint_{version.replace('~preview', '.preview')}_amd64.deb",
+        f"clipmint_{version}_amd64.deb",
     )
-    if max_patch_bytes is not None and manifest["patch_size"] > max_patch_bytes:
+    base = None
+    # Exact filenames only. Never enumerate Downloads, follow symlinks,
+    # delete an original installer, or trust an unverified local package.
+    for location in (folder, Path.home() / "Downloads"):
+        for name in names:
+            candidate = location / name
+            try:
+                if (candidate.is_symlink() or not candidate.is_file()
+                        or not 0 < candidate.stat().st_size <= MAX_PACKAGE_BYTES
+                        or sha256_file(candidate) != manifest["base_sha256"]):
+                    continue
+                verify_deb(candidate, version)
+                base = candidate
+                break
+            except (OSError, UpdateError):
+                continue
+        if base is not None:
+            break
+    if base is None:
         return False
-    if installed_version() != manifest["base_version"]:
-        return False
-    base = folder / f"clipmint_{manifest['base_version'].replace('~preview', '.preview')}_amd64.deb"
-    if not base.exists():
-        base = folder / f"clipmint_{manifest['base_version']}_amd64.deb"
-    if (base.is_symlink() or not base.is_file()
-            or base.stat().st_size > MAX_PACKAGE_BYTES
-            or sha256_file(base) != manifest["base_sha256"]):
-        return False
-    verify_deb(base, manifest["base_version"])
     patch_fd, patch_name = tempfile.mkstemp(prefix=".clipmint-delta-", dir=folder)
     out_fd, out_name = tempfile.mkstemp(prefix=".clipmint-rebuilt-", dir=folder)
     os.close(out_fd)
