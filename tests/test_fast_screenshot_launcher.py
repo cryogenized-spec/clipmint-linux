@@ -108,7 +108,7 @@ class FastLauncherTests(unittest.TestCase):
         self.assertTrue(launcher.startswith("#!/usr/bin/python3"))
         self.assertIn('mv "$root/opt/clipmint/ClipMint" "$root/opt/clipmint/ClipMintApp"', package)
         self.assertIn('install -m 755 packaging/clipmint-launcher.py', package)
-        self.assertIn("python3, xdotool", package)
+        self.assertIn("python3, xz-utils, xdotool", package)
         self.assertIn('test -x "$tmp/unpacked/opt/clipmint/ClipMintApp"', verifier)
         self.assertIn('with_name("ClipMint")', app)
         self.assertIn("250 if had_visible_window else 0", app)
