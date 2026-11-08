@@ -296,7 +296,7 @@ def parse_delta_manifest(update: PreviewUpdate, raw: bytes, target_sha: str) -> 
     if not isinstance(data, dict) or set(data) != keys:
         raise UpdateError("Unsupported delta manifest")
     base, target = data["base_version"], data["target_version"]
-    if (data["format"] != "bsdiff4-v1"
+    if (data["format"] not in ("bsdiff4-v1", "tar-content-xz-v1")
             or not isinstance(base, str)
             or not PREVIEW_VERSION.fullmatch(base)
             or target != update.version
@@ -308,7 +308,8 @@ def parse_delta_manifest(update: PreviewUpdate, raw: bytes, target_sha: str) -> 
     if data["target_sha256"] != target_sha:
         raise UpdateError("Delta target does not match the full package checksum")
     # GitHub's asset store replaces the tilde in Debian versions with a dot.
-    legacy_name = f"clipmint_delta_from_{base}_to_{target}_amd64.bsdiff"
+    extension = ".clipdelta" if data["format"] == "tar-content-xz-v1" else ".bsdiff"
+    legacy_name = f"clipmint_delta_from_{base}_to_{target}_amd64{extension}"
     expected_name = legacy_name.replace("~preview", ".preview")
     if data["patch_name"] not in (expected_name, legacy_name):
         raise UpdateError("Unexpected delta filename")
@@ -385,17 +386,27 @@ def download_verified_delta(
         if (size != manifest["patch_size"]
                 or digest.hexdigest() != manifest["patch_sha256"]):
             raise UpdateError("Delta checksum or transfer size mismatch")
-        with open(patch_name, "rb") as patch_stream:
-            header = patch_stream.read(32)
-        if header[:8] != b"BSDIFF40" or len(header) != 32:
-            raise UpdateError("Invalid bsdiff header")
-        encoded_size = int.from_bytes(header[24:32], "little")
-        if encoded_size & (1 << 63):
-            raise UpdateError("Negative bsdiff output size")
-        if encoded_size != update.package_size:
-            raise UpdateError("Unexpected reconstructed package size")
-        import bsdiff4
-        bsdiff4.file_patch(str(base), out_name, patch_name)
+        if manifest["format"] == "tar-content-xz-v1":
+            # The patch carries exact target tar headers and only changed
+            # file contents. Reassemble the official Debian archive byte for
+            # byte, then verify its SHA-256 and Debian package identity below.
+            from .package_delta import apply_patch, DeltaLayoutError
+            try:
+                apply_patch(base, Path(patch_name), Path(out_name))
+            except (DeltaLayoutError, ValueError, OSError) as exc:
+                raise UpdateError("File-aware delta reconstruction failed") from exc
+        else:
+            with open(patch_name, "rb") as patch_stream:
+                header = patch_stream.read(32)
+            if header[:8] != b"BSDIFF40" or len(header) != 32:
+                raise UpdateError("Invalid bsdiff header")
+            encoded_size = int.from_bytes(header[24:32], "little")
+            if encoded_size & (1 << 63):
+                raise UpdateError("Negative bsdiff output size")
+            if encoded_size != update.package_size:
+                raise UpdateError("Unexpected reconstructed package size")
+            import bsdiff4
+            bsdiff4.file_patch(str(base), out_name, patch_name)
         rebuilt = Path(out_name)
         if (rebuilt.stat().st_size != update.package_size
                 or sha256_file(rebuilt) != expected):

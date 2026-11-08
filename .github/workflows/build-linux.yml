@@ -228,7 +228,7 @@ jobs:
           fi
           if ! python packaging/build-delta.py "${old[0]}" "dist-packages/clipmint_${CLIPMINT_VERSION/\~/.}_amd64.deb" dist-packages; then
             echo "Delta verification failed; full installer remains available"
-            rm -f dist-packages/DELTA.json dist-packages/clipmint_delta_from_*_amd64.bsdiff
+            rm -f dist-packages/DELTA.json dist-packages/clipmint_delta_from_*_amd64.*
           fi
       - name: Publish immutable GitHub prerelease (automatic update channel)
         shell: bash
@@ -260,7 +260,7 @@ jobs:
               assets="$(gh release view "$tag" --json assets --jq '.assets[].name' | sort)"
               assets_to_publish=("dist-packages/clipmint_${version/\~/.}_amd64.deb" dist-packages/SHA256SUMS)
               if [[ -f dist-packages/DELTA.json ]]; then
-                patches=(dist-packages/clipmint_delta_from_*_amd64.bsdiff)
+                patches=(dist-packages/clipmint_delta_from_*_amd64.*)
                 if [[ "${#patches[@]}" -ne 1 || ! -f "${patches[0]}" ]]; then
                   echo "Incomplete delta candidate" >&2
                   exit 1
@@ -281,7 +281,7 @@ jobs:
           fi
           assets_to_publish=("dist-packages/clipmint_${version/\~/.}_amd64.deb" dist-packages/SHA256SUMS)
           if [[ -f dist-packages/DELTA.json ]]; then
-            patches=(dist-packages/clipmint_delta_from_*_amd64.bsdiff)
+            patches=(dist-packages/clipmint_delta_from_*_amd64.*)
             if [[ "${#patches[@]}" -ne 1 || ! -f "${patches[0]}" ]]; then
               echo "Incomplete delta candidate" >&2
               exit 1
