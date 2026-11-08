@@ -82,7 +82,10 @@ class DeltaUpdateTests(unittest.TestCase):
             make_fixture(self.base, self.target)
         )
 
-    def download(self, base_is_cached=True, patch_bytes=None):
+    def download(
+        self, base_is_cached=True, patch_bytes=None, *, smaller_only=False,
+        unavailable=False,
+    ):
         if patch_bytes is None:
             patch_bytes = self.patch_bytes
         with TemporaryDirectory() as root, patch.dict(
@@ -115,7 +118,19 @@ class DeltaUpdateTests(unittest.TestCase):
 
             with patch("clipmint.updater.read_bounded", side_effect=metadata), \
                  patch("clipmint.updater.urlopen", side_effect=transfer):
-                result = updater.download_verified_preview(self.candidate)
+                if unavailable:
+                    with self.assertRaises(updater.SmallerUpdateUnavailable):
+                        updater.download_verified_preview(
+                            self.candidate, smaller_only=smaller_only,
+                        )
+                    self.assertFalse(
+                        (folder / self.candidate.filename).exists()
+                    )
+                    self.assertFalse(list(folder.glob(".clipmint-*")))
+                    return requests
+                result = updater.download_verified_preview(
+                    self.candidate, smaller_only=smaller_only,
+                )
                 self.assertEqual(result.read_bytes(), self.target)
                 self.assertTrue(result.exists())
                 self.assertEqual(verified.call_args.args[1], NEW_VERSION)
@@ -129,6 +144,37 @@ class DeltaUpdateTests(unittest.TestCase):
         self.assertEqual(urls, [PREFIX + (
             f"clipmint_delta_from_{OLD_VERSION}_to_{NEW_VERSION}_amd64.bsdiff"
         )])
+
+    def test_automatic_delta_only_never_fetches_full_deb_when_base_missing(self):
+        urls = self.download(
+            base_is_cached=False, smaller_only=True, unavailable=True,
+        )
+        self.assertEqual(urls, [])
+
+    def test_automatic_delta_only_never_fetches_full_deb_when_patch_corrupt(self):
+        urls = self.download(
+            patch_bytes=b"damaged", smaller_only=True, unavailable=True,
+        )
+        self.assertEqual(urls, [
+            PREFIX + f"clipmint_delta_from_{OLD_VERSION}_to_{NEW_VERSION}_amd64.bsdiff",
+        ])
+
+    def test_automatic_delta_only_stages_verified_patch_without_full_download(self):
+        urls = self.download(smaller_only=True)
+        self.assertEqual(len(urls), 1)
+        self.assertTrue(urls[0].endswith(".bsdiff"))
+
+    def test_automatic_delta_only_skips_patch_over_transfer_cap(self):
+        with patch.object(updater, "MAX_AUTO_DELTA_BYTES", len(self.patch_bytes) - 1):
+            urls = self.download(smaller_only=True, unavailable=True)
+        self.assertEqual(urls, [])
+
+    def test_automatic_delta_only_rejects_invalid_manifest_without_full_download(self):
+        manifest = json.loads(self.metadata)
+        manifest["target_sha256"] = "f" * 64
+        self.metadata = json.dumps(manifest).encode()
+        urls = self.download(smaller_only=True, unavailable=True)
+        self.assertEqual(urls, [])
 
     def test_no_exact_cached_base_uses_full_installer(self):
         urls = self.download(base_is_cached=False)
