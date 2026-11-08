@@ -163,6 +163,14 @@ jobs:
           code=$?
           set -e
           if [[ "$code" -ne 124 ]]; then echo "Unexpected app exit status: $code"; exit 1; fi
+      - name: Exercise actual MP4 X11 capture with bundled FFmpeg
+        env:
+          XDG_SESSION_TYPE: x11
+          QT_QPA_PLATFORM: xcb
+          CLIPMINT_FFMPEG_TEST_BINARY: ${{ github.workspace }}/vendor/ffmpeg
+        run: |
+          xvfb-run -a -s "-screen 0 800x600x24" \
+            python -m unittest tools.verify_recording_x11 -v
       - name: Select preview or tagged Debian version
         id: version
         shell: bash
