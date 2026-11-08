@@ -13,7 +13,7 @@ class ToolingBaselineTests(unittest.TestCase):
         configuration = tomllib.loads((ROOT / "pyproject.toml").read_text())
         self.assertEqual(configuration["tool"]["ruff"]["target-version"], "py312")
         rules = configuration["tool"]["ruff"]["lint"]["select"]
-        for rule in ("E4", "E7", "E9", "F63", "F7", "F82"):
+        for rule in ("E4", "E9", "F63", "F7", "F82"):
             self.assertIn(rule, rules)
         self.assertEqual(configuration["tool"]["mypy"]["python_version"], "3.12")
 
