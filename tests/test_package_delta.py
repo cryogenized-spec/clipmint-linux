@@ -14,7 +14,7 @@ from clipmint.package_delta import (
 )
 
 
-def make_deb(base: Path, version: str, *, modified: bool) -> Path:
+def make_deb(base: Path, version: str, *, modified: bool, compression: str = "xz") -> Path:
     root = base / ("new" if modified else "old")
     (root / "DEBIAN").mkdir(parents=True)
     (root / "opt" / "clipmint").mkdir(parents=True)
@@ -32,7 +32,7 @@ def make_deb(base: Path, version: str, *, modified: bool) -> Path:
     )
     output = base / ("new.deb" if modified else "old.deb")
     subprocess.run(
-        ["dpkg-deb", "--root-owner-group", "-Zxz", "--build", str(root), str(output)],
+        ["dpkg-deb", "--root-owner-group", f"-Z{compression}", "--build", str(root), str(output)],
         capture_output=True, text=True, check=True,
     )
     return output
@@ -54,6 +54,21 @@ class FileAwareDebianPatchTests(unittest.TestCase):
                 [x[0] for x in _ar_members(output.read_bytes())],
                 ["debian-binary", "control.tar.xz", "data.tar.xz"],
             )
+
+    def test_old_zstd_package_can_upgrade_to_new_xz_release(self):
+        with TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            old = make_deb(
+                folder, "0.6.0~preview1.301.1",
+                modified=False, compression="zstd",
+            )
+            new = make_deb(folder, "0.6.0~preview1.302.1", modified=True)
+            patch = folder / "changes.clipdelta"
+            self.assertTrue(build_patch(old, new, patch))
+            self.assertLess(patch.stat().st_size, new.stat().st_size // 4)
+            rebuilt = folder / "rebuilt.deb"
+            apply_patch(old, patch, rebuilt)
+            self.assertEqual(rebuilt.read_bytes(), new.read_bytes())
 
     def test_wrong_cached_base_cannot_rebuild_official_package(self):
         with TemporaryDirectory() as tmp:
