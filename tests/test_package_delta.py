@@ -32,7 +32,7 @@ def make_deb(base: Path, version: str, *, modified: bool, compression: str = "xz
     )
     output = base / ("new.deb" if modified else "old.deb")
     subprocess.run(
-        ["dpkg-deb", "--root-owner-group", f"-Z{compression}", "--build", str(root), str(output)],
+        ["dpkg-deb", "--root-owner-group", f"-Z{compression}", "--threads-max=1", "--build", str(root), str(output)],
         capture_output=True, text=True, check=True,
     )
     return output
