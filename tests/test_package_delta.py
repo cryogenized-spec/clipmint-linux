@@ -88,6 +88,36 @@ class FileAwareDebianPatchTests(unittest.TestCase):
             apply_patch(old, patch, rebuilt)
             self.assertEqual(rebuilt.read_bytes(), new.read_bytes())
 
+    def test_multiblock_xz_package_rebuilds_byte_for_byte(self):
+        """A large Debian data.tar uses multiple XZ blocks, unlike Python lzma."""
+        with TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            old = make_deb(folder, "0.6.0~preview1.301.1", modified=False)
+            new = make_deb(folder, "0.6.0~preview1.302.1", modified=True)
+            for root, output in ((folder / "old", old), (folder / "new", new)):
+                with (root / "opt/clipmint/zeros.bin").open("wb") as handle:
+                    handle.truncate(36 * 1024 * 1024)
+                subprocess.run([
+                    "dpkg-deb", "--root-owner-group", "-Zxz",
+                    "--threads-max=1", "--build", str(root), str(output),
+                ], capture_output=True, text=True, check=True)
+            xz_data = next(
+                data for name, _h, data, _p in _ar_members(new.read_bytes())
+                if name == "data.tar.xz"
+            )
+            raw = lzma.decompress(xz_data)
+            self.assertGreater(len(raw), 36 * 1024 * 1024)
+            self.assertNotEqual(
+                xz_data,
+                lzma.compress(raw, preset=6, format=lzma.FORMAT_XZ),
+                "The fixture must exercise dpkg's different multiblock layout",
+            )
+            patch = folder / "multiblock.clipdelta"
+            self.assertTrue(build_patch(old, new, patch))
+            rebuilt = folder / "rebuilt.deb"
+            apply_patch(old, patch, rebuilt)
+            self.assertEqual(rebuilt.read_bytes(), new.read_bytes())
+
     def test_old_zstd_package_can_upgrade_to_new_xz_release(self):
         with TemporaryDirectory() as tmp:
             folder = Path(tmp)
