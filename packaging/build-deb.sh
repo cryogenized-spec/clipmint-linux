@@ -11,6 +11,11 @@ root="build/clipmint-deb"
 rm -rf "$root"
 mkdir -p "$root/DEBIAN" "$root/opt/clipmint" "$root/usr/share/applications" "$root/usr/share/icons/hicolor/scalable/apps" "$root/usr/share/doc/clipmint" dist-packages
 cp -a dist/ClipMint/. "$root/opt/clipmint/"
+# Keep the expensive PyInstaller executable for genuine cold starts only.
+# Preserve the existing /opt/clipmint/ClipMint shortcut path using a tiny
+# Python stdlib IPC entrypoint instead of forcing every hotkey through Qt.
+mv "$root/opt/clipmint/ClipMint" "$root/opt/clipmint/ClipMintApp"
+install -m 755 packaging/clipmint-launcher.py "$root/opt/clipmint/ClipMint"
 install -m 644 packaging/clipmint.desktop "$root/usr/share/applications/clipmint.desktop"
 install -m 644 packaging/clipmint.svg "$root/usr/share/icons/hicolor/scalable/apps/clipmint.svg"
 install -m 644 LICENSE "$root/usr/share/doc/clipmint/LICENSE-ClipMint"
@@ -42,7 +47,7 @@ Section: utils
 Priority: optional
 Architecture: amd64
 Maintainer: ClipMint contributors
-Depends: libc6 (>= 2.39), xdotool
+Depends: libc6 (>= 2.39), python3, xdotool
 Recommends: tesseract-ocr, tesseract-ocr-eng
 Description: Clipboard manager, screenshot tool, and screen recorder
  Native application for Linux Mint 22 Cinnamon/X11 with bundled
