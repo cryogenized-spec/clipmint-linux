@@ -60,7 +60,13 @@ class RecordingRecoveryTests(unittest.TestCase):
             os.utime(clip, (time.time() - 120, time.time() - 120))
             original = folder / "recovered-recording-20261105-130000-123456.mp4"
             original.write_bytes(b"existing")
-            recovered = resolve_pending(clip, "recover")
+            # /proc may be briefly unreadable in shared CI runners, which
+            # correctly causes production's conservative writer check to
+            # fail closed. Mock that external state in this deterministic
+            # filename/bytes test; the active-writer safeguard is tested below.
+            with patch("clipmint.recording_recovery._writer_may_be_active",
+                       return_value=False):
+                recovered = resolve_pending(clip, "recover")
             self.assertEqual(recovered.name, "recovered-recording-20261105-130000-123456-1.mp4")
             self.assertEqual(recovered.read_bytes(), b"partial MP4 data")
             self.assertEqual(original.read_bytes(), b"existing")
@@ -82,7 +88,9 @@ class RecordingRecoveryTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "still be in use"):
                     resolve_pending(clip, "discard")
                 self.assertTrue(clip.exists())
-            self.assertIsNone(resolve_pending(clip, "discard"))
+            with patch("clipmint.recording_recovery._writer_may_be_active",
+                       return_value=False):
+                self.assertIsNone(resolve_pending(clip, "discard"))
             self.assertFalse(clip.exists())
             self.assertFalse(log.exists())
             self.assertTrue(keep.exists())
