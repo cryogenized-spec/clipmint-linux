@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import os
+import random
+import lzma
 from pathlib import Path
 import subprocess
 from tempfile import TemporaryDirectory
@@ -23,7 +25,7 @@ def make_deb(base: Path, version: str, *, modified: bool) -> Path:
     # The unchanged random payload makes compressed-.deb bsdiff impractical,
     # but it must cost zero bytes in the new file-aware patch.
     (root / "opt" / "clipmint" / "unchanged.bin").write_bytes(
-        b"stable-prefix" + bytes(range(256)) * 16_384
+        b"stable-prefix" + random.Random(42).randbytes(4 * 1024 * 1024)
     )
     (root / "opt" / "clipmint" / "changed.txt").write_bytes(
         ("updated app logic" if modified else "original app logic").encode()
@@ -64,7 +66,7 @@ class FileAwareDebianPatchTests(unittest.TestCase):
             contents = bytearray(old.read_bytes())
             contents[-40] ^= 1
             damaged.write_bytes(contents)
-            with self.assertRaises((DeltaLayoutError, OSError, ValueError)):
+            with self.assertRaises((DeltaLayoutError, OSError, ValueError, lzma.LZMAError)):
                 apply_patch(damaged, patch, folder / "invalid.deb")
 
     def test_unknown_ar_layout_rejected(self):
