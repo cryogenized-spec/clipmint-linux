@@ -21,6 +21,12 @@ jobs:
           sudo apt-get install -y libegl1 libopengl0 libxcb-cursor0 libxkbcommon-x11-0 libxcb-icccm4 libxcb-shape0 libxcb-keysyms1 libxcb-image0 libxcb-randr0 libxcb-render-util0 libxcb-xfixes0 libxcb-xkb1 tesseract-ocr tesseract-ocr-eng xvfb xclip xdotool
       - name: Install application dependencies
         run: python -m pip install -r requirements.txt
+      - name: Static correctness checks (pinned Ruff and incremental mypy)
+        run: |
+          python -m pip install --disable-pip-version-check "ruff==0.14.2" "mypy==1.18.2"
+          ruff check clipmint tests packaging launcher.py
+          mypy --config-file pyproject.toml \
+            packaging/generate-preview-bootstrap.py clipmint/recording_recovery.py
       - name: Fetch and verify open-licensed DotGothic16 on GitHub runner only
         shell: bash
         run: |
