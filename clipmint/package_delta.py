@@ -70,7 +70,7 @@ def _ar_members(data: bytes) -> list[tuple[str, bytes, bytes, bytes]]:
         offset = end + size % 2
     names = [member[0] for member in result]
     if names != ["debian-binary", "control.tar.xz", "data.tar.xz"]:
-        raise DeltaLayoutError("Requires standard three-member xz Debian archive")
+        raise DeltaLayoutError(f"Requires three-member xz Debian archive; saw {names!r}")
     return result
 
 
