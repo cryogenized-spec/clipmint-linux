@@ -9,7 +9,7 @@ test "$(dpkg-deb -f "$pkg" Package)" = "clipmint"
 test "$(dpkg-deb -f "$pkg" Version)" = "$version"
 test "$(dpkg-deb -f "$pkg" Architecture)" = "amd64"
 depends="$(dpkg-deb -f "$pkg" Depends)"
-for package in 'libc6 (>= 2.39)' 'xdotool'; do
+for package in 'libc6 (>= 2.39)' 'python3' 'xdotool'; do
   [[ ", $depends," == *"$package"* ]] || { echo "Missing dependency $package"; exit 1; }
 done
 recommends="$(dpkg-deb -f "$pkg" Recommends)"
@@ -19,6 +19,8 @@ done
 dpkg-deb --extract "$pkg" "$tmp/unpacked"
 dpkg-deb --control "$pkg" "$tmp/control"
 test -x "$tmp/unpacked/opt/clipmint/ClipMint"
+test -x "$tmp/unpacked/opt/clipmint/ClipMintApp"
+head -n 1 "$tmp/unpacked/opt/clipmint/ClipMint" | grep -Fqx '#!/usr/bin/python3'
 test -f "$tmp/unpacked/opt/clipmint/_internal/assets/manga/kohaku_card.png"
 echo "585800ce776353d84a9d60e798ff591d06b580f95be0943a46ae67c1c107817a  $tmp/unpacked/opt/clipmint/_internal/assets/manga/kohaku_card.png" | sha256sum --check
 test -x "$tmp/unpacked/opt/clipmint/_internal/tools/ffmpeg"
@@ -48,6 +50,7 @@ for script in preinst postinst prerm postrm config triggers; do
 done
 sudo dpkg --install "$pkg"
 test -x /opt/clipmint/ClipMint
+test -x /opt/clipmint/ClipMintApp
 set +e
 QT_QPA_PLATFORM=xcb XDG_DATA_HOME="$tmp/appdata" \
   xvfb-run -a timeout 10s /opt/clipmint/ClipMint
