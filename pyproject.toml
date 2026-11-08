@@ -1,0 +1,19 @@
+# Incremental quality baseline for ClipMint's current Python 3.12 preview.
+# New code should satisfy the selected correctness checks. Style-only
+# reformatting and broad type changes are a separate, carefully tested phase.
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+extend-exclude = [".venv", "build", "dist", "dist-packages", "vendor"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F63", "F7", "F82"]
+
+[tool.mypy]
+python_version = "3.12"
+follow_imports = "skip"
+ignore_missing_imports = true
+warn_unused_configs = true
+# Build confidence gradually: begin on non-Qt integration boundaries,
+# then widen coverage as controllers are extracted from app.py.
+check_untyped_defs = true
