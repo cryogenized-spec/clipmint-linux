@@ -360,18 +360,18 @@ jobs:
             # Every manifest MUST point to a present, SHA256-matching patch.
             for manifest in "${manifests[@]}"; do
               python - "$manifest" <<'PY'
-import hashlib
-import json
-from pathlib import Path
-import sys
-manifest = Path(sys.argv[1])
-data = json.loads(manifest.read_text())
-patch = manifest.parent / data["patch_name"]
-if (not patch.is_file() or patch.is_symlink()
-        or patch.stat().st_size != data["patch_size"]
-        or hashlib.sha256(patch.read_bytes()).hexdigest() != data["patch_sha256"]):
-    raise SystemExit(f"Unverified delta asset in {manifest.name}")
-PY
+          import hashlib
+          import json
+          from pathlib import Path
+          import sys
+          manifest = Path(sys.argv[1])
+          data = json.loads(manifest.read_text())
+          patch = manifest.parent / data["patch_name"]
+          if (not patch.is_file() or patch.is_symlink()
+                  or patch.stat().st_size != data["patch_size"]
+                  or hashlib.sha256(patch.read_bytes()).hexdigest() != data["patch_sha256"]):
+              raise SystemExit(f"Unverified delta asset in {manifest.name}")
+          PY
             done
             assets_to_publish+=("${manifests[@]}" "${patches[@]}")
           fi
