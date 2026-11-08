@@ -11,9 +11,10 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("XDG_SESSION_TYPE", "x11")
 
 from PySide6.QtCore import QSettings
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMessageBox
 
 from clipmint.app import ClipMintWindow
+from clipmint.updater import PreviewUpdate, SmallerUpdateUnavailable
 
 
 class UpdateSettingsTests(unittest.TestCase):
@@ -69,6 +70,76 @@ class UpdateSettingsTests(unittest.TestCase):
             )
             w._auto_check_updates()
             check.assert_called_once_with(manual=False)
+
+    def _candidate(self):
+        return PreviewUpdate(
+            "0.6.0~preview1.302.1",
+            "clipmint_0.6.0.preview1.302.1_amd64.deb",
+            "https://github.com/cryogenized-spec/clipmint-linux/releases/download/"
+            "clipmint-preview-302-1/clipmint_0.6.0.preview1.302.1_amd64.deb",
+            "https://github.com/cryogenized-spec/clipmint-linux/releases/download/"
+            "clipmint-preview-302-1/SHA256SUMS",
+            "https://github.com/cryogenized-spec/clipmint-linux/releases/"
+            "tag/clipmint-preview-302-1",
+            132_000_000,
+        )
+
+    @staticmethod
+    def _inline_thread(*_args, **kwargs):
+        class FakeThread:
+            def start(self):
+                kwargs["target"]()
+        return FakeThread()
+
+    def test_manual_check_never_downloads_and_full_download_needs_consent(self):
+        w = self.window
+        candidate = self._candidate()
+        with patch("clipmint.app.check_for_preview_update",
+                   return_value=candidate), patch(
+            "clipmint.app.download_verified_preview"
+        ) as download, patch(
+            "clipmint.app.threading.Thread",
+            side_effect=self._inline_thread
+        ):
+            w.check_for_updates(manual=True)
+            self.app.processEvents()
+            download.assert_not_called()
+            self.assertTrue(w.download_update_button.isEnabled())
+            self.assertIn("Nothing large was downloaded", w.update_status.text())
+            with patch.object(
+                QMessageBox, "question",
+                return_value=QMessageBox.StandardButton.No
+            ):
+                w.download_available_preview()
+            download.assert_not_called()
+            with patch.object(
+                QMessageBox, "question",
+                return_value=QMessageBox.StandardButton.Yes
+            ):
+                download.return_value = Path("/tmp/verified-preview.deb")
+                w.download_available_preview()
+            self.app.processEvents()
+            download.assert_called_once_with(candidate)
+            self.assertTrue(w.install_update_button.isEnabled())
+
+    def test_opt_in_auto_checks_never_request_a_full_installer(self):
+        w = self.window
+        candidate = self._candidate()
+        w.settings.setValue("updates/automatic", True)
+        with patch("clipmint.app.check_for_preview_update",
+                   return_value=candidate), patch(
+            "clipmint.app.download_verified_preview",
+            side_effect=SmallerUpdateUnavailable("No small patch")
+        ) as download, patch(
+            "clipmint.app.threading.Thread",
+            side_effect=self._inline_thread
+        ):
+            w.check_for_updates(manual=False)
+            self.app.processEvents()
+            download.assert_called_once_with(candidate, smaller_only=True)
+            self.assertTrue(w.download_update_button.isEnabled())
+            self.assertIn("Nothing large was downloaded", w.update_status.text())
+            self.assertFalse(w.install_update_button.isEnabled())
 
     def test_download_notification_never_installs_without_user_action(self):
         w = self.window
