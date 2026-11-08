@@ -9,7 +9,7 @@ test "$(dpkg-deb -f "$pkg" Package)" = "clipmint"
 test "$(dpkg-deb -f "$pkg" Version)" = "$version"
 test "$(dpkg-deb -f "$pkg" Architecture)" = "amd64"
 depends="$(dpkg-deb -f "$pkg" Depends)"
-for package in 'libc6 (>= 2.39)' 'python3' 'xdotool'; do
+for package in 'libc6 (>= 2.39)' 'python3' 'xz-utils' 'xdotool'; do
   [[ ", $depends," == *"$package"* ]] || { echo "Missing dependency $package"; exit 1; }
 done
 recommends="$(dpkg-deb -f "$pkg" Recommends)"
