@@ -47,12 +47,12 @@ def _hash(data: bytes) -> str:
 
 
 def _ar_members(data: bytes) -> list[tuple[str, bytes, bytes, bytes]]:
-    if not data.startswith(b"!<arch>\\n") or len(data) > MAX_DEB:
+    if not data.startswith(b"!<arch>\n") or len(data) > MAX_DEB:
         raise DeltaLayoutError("Unsupported Debian ar archive")
     offset, result = 8, []
     while offset < len(data):
         header = data[offset:offset + 60]
-        if len(header) != 60 or header[-2:] != b"`\\n":
+        if len(header) != 60 or header[-2:] != b"`\n":
             raise DeltaLayoutError("Invalid Debian ar header")
         try:
             name = header[:16].decode("ascii").strip().rstrip("/")
@@ -75,7 +75,7 @@ def _ar_members(data: bytes) -> list[tuple[str, bytes, bytes, bytes]]:
 
 
 def _xz_region(data: bytes) -> tuple[int, int]:
-    if (len(data) < 44 or not data.startswith(b"\\xfd7zXZ\\x00")
+    if (len(data) < 44 or not data.startswith(b"\xfd7zXZ\x00")
             or data[-2:] != b"YZ"):
         raise DeltaLayoutError("Requires single-stream xz compressed tar")
     beginning = 12 + (data[12] + 1) * 4
@@ -245,13 +245,13 @@ def apply_patch(base: Path, patch: Path, output: Path) -> None:
         meta = json.loads(source.read("meta.json"))
         if meta.get("format") != FORMAT or len(meta.get("ar", [])) != 3:
             raise DeltaLayoutError("Unsupported content-delta format")
-        result = bytearray(b"!<arch>\\n")
+        result = bytearray(b"!<arch>\n")
         for item in meta["ar"]:
             name = item["name"]
             if name not in old:
                 raise DeltaLayoutError("Unexpected Debian member")
             header, padding = _decode(item["header"]), _decode(item["padding"])
-            if len(header) != 60 or header[-2:] != b"`\\n":
+            if len(header) != 60 or header[-2:] != b"`\n":
                 raise DeltaLayoutError("Invalid patched ar header")
             plan = item["payload"]
             if plan["type"] == "inline" and name == "debian-binary":
