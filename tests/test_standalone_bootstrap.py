@@ -10,6 +10,8 @@ import hashlib
 import importlib.util
 import json
 import os
+import random
+import zipfile
 from pathlib import Path
 import runpy
 import subprocess
@@ -38,6 +40,12 @@ def _make_deb(directory: Path, version: str, *, modified: bool) -> Path:
     (root / "opt" / "clipmint" / "changed.txt").write_text(
         "Improved" if modified else "Original"
     )
+    # Force at least one native BSDIFF40 payload in the release delta, so
+    # the standalone Python-only decoder is exercised end-to-end.
+    body = random.Random(83).randbytes(262_144)
+    if modified:
+        body = body[:100_000] + b"NEW-REPAIR-LOGIC!" + body[100_017:]
+    (root / "opt" / "clipmint" / "changed.bin").write_bytes(body)
     output = directory / ("target.deb" if modified else "base.deb")
     subprocess.run(
         ["dpkg-deb", "--root-owner-group", "-Zxz",
@@ -80,6 +88,15 @@ class BootstrapPreviewTests(unittest.TestCase):
             patch_path = root / "upgrade.clipdelta"
             self.assertTrue(package_delta.build_patch(old, target, patch_path))
             patch_bytes = patch_path.read_bytes()
+            with zipfile.ZipFile(patch_path) as archive:
+                metadata = json.loads(archive.read("meta.json"))
+                sources = [
+                    p["source"]
+                    for member in metadata["ar"]
+                    if member["payload"]["type"] == "tarxz"
+                    for p in member["payload"]["parts"]
+                ]
+                self.assertIn("bsdiff", sources)
             new_hash = hashlib.sha256(target.read_bytes()).hexdigest()
             name = "clipmint_0.6.0.preview1.249.1_amd64.deb"
             patch_name = ("clipmint_delta_from_0.6.0.preview1.227.1_to_"
