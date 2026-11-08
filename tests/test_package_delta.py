@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import os
 import random
+import zipfile
+import json
 import lzma
 from pathlib import Path
 import subprocess
@@ -54,6 +56,37 @@ class FileAwareDebianPatchTests(unittest.TestCase):
                 [x[0] for x in _ar_members(output.read_bytes())],
                 ["debian-binary", "control.tar.xz", "data.tar.xz"],
             )
+
+    def test_large_changed_binary_uses_compact_per_file_diff(self):
+        with TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            old = make_deb(folder, "0.6.0~preview1.301.1", modified=False)
+            new = make_deb(folder, "0.6.0~preview1.302.1", modified=True)
+            body = random.Random(7).randbytes(2 * 1024 * 1024)
+            (folder / "old/opt/clipmint/changed.bin").write_bytes(body)
+            (folder / "new/opt/clipmint/changed.bin").write_bytes(
+                body[:123456] + b"new binary code" + body[123471:]
+            )
+            for root, output in ((folder / "old", old), (folder / "new", new)):
+                subprocess.run([
+                    "dpkg-deb", "--root-owner-group", "-Zxz",
+                    "--threads-max=1", "--build", str(root), str(output),
+                ], capture_output=True, text=True, check=True)
+            patch = folder / "changes.clipdelta"
+            self.assertTrue(build_patch(old, new, patch))
+            with zipfile.ZipFile(patch) as archive:
+                metadata = json.loads(archive.read("meta.json"))
+                sources = [
+                    p["source"]
+                    for member in metadata["ar"]
+                    if member["payload"]["type"] == "tarxz"
+                    for p in member["payload"]["parts"]
+                ]
+                self.assertIn("bsdiff", sources)
+            self.assertLess(patch.stat().st_size, 512 * 1024)
+            rebuilt = folder / "verified.deb"
+            apply_patch(old, patch, rebuilt)
+            self.assertEqual(rebuilt.read_bytes(), new.read_bytes())
 
     def test_old_zstd_package_can_upgrade_to_new_xz_release(self):
         with TemporaryDirectory() as tmp:
