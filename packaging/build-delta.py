@@ -80,7 +80,12 @@ def build_delta(base: Path, target: Path, output: Path) -> bool:
     file_patch = output / name.replace(".bsdiff", ".clipdelta")
     try:
         usable = build_file_aware_patch(base, target, file_patch)
-    except DeltaLayoutError:
+    except DeltaLayoutError as exc:
+        # Do not silently spend minutes diffing an already-compressed
+        # production package after a file-aware format mismatch.
+        print(f"File-aware delta rejected: {exc}", flush=True)
+        if target.stat().st_size > 1024 * 1024:
+            return False
         usable = None
     if usable is not None:
         if not usable:
