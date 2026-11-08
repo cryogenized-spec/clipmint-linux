@@ -354,7 +354,10 @@ def _bsdiff_apply(original: bytes, patch: bytes, expected_size: int) -> bytes:
         y = signed64(control[control_pos + 8:control_pos + 16])
         z = signed64(control[control_pos + 16:control_pos + 24])
         control_pos += 24
-        if (x < 0 or y < 0 or x + y == 0
+        # BSDIFF40 permits a cursor-only control (x=y=0, z!=0): this
+        # legitimately repositions the old-file offset before writing.
+        # Only a completely stationary instruction is invalid.
+        if (x < 0 or y < 0 or (x + y == 0 and z == 0)
                 or x + y > expected_size - new_pos
                 or x > len(difference) - diff_pos
                 or y > len(extra) - extra_pos):

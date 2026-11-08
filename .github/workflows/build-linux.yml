@@ -42,6 +42,28 @@ jobs:
         run: |
           python -m compileall -q clipmint tests launcher.py
           python -m unittest discover -s tests -v
+      - name: Verify real published 227-to-247 patch with stdlib-only decoder
+        if: github.event_name == 'pull_request'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/clipmint-real-patch/base /tmp/clipmint-real-patch/target
+          gh release download clipmint-preview-227-1 --repo "$GH_REPO" \
+            --pattern 'clipmint_0.6.0.preview1.227.1_amd64.deb' \
+            --pattern SHA256SUMS --dir /tmp/clipmint-real-patch/base
+          (cd /tmp/clipmint-real-patch/base && sha256sum --check SHA256SUMS)
+          gh release download clipmint-preview-247-1 --repo "$GH_REPO" \
+            --pattern '*227.1_to_*247.1*_amd64.clipdelta' \
+            --pattern DELTA-227.json --pattern SHA256SUMS \
+            --dir /tmp/clipmint-real-patch/target
+          python -S packaging/verify-real-preview-delta.py \
+            /tmp/clipmint-real-patch/base/clipmint_0.6.0.preview1.227.1_amd64.deb \
+            /tmp/clipmint-real-patch/target/clipmint_delta_from_0.6.0.preview1.227.1_to_0.6.0.preview1.247.1_amd64.clipdelta \
+            /tmp/clipmint-real-patch/target/DELTA-227.json \
+            /tmp/clipmint-real-patch/target/SHA256SUMS
       - name: Bundle checksum-verified static FFmpeg (GitHub runner only)
         shell: bash
         env:
