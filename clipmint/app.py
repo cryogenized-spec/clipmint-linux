@@ -2670,10 +2670,13 @@ class ClipMintWindow(QMainWindow):
 
     def _clipmint_launcher_command(self, action: str) -> str:
         """Match the installed app launcher; never shell-expand user content."""
-        executable = (shlex.quote(sys.executable)
-                      if getattr(sys, "frozen", False) else
-                      shlex.quote(sys.executable) + " " +
-                      shlex.quote(str(Path(__file__).resolve().parent.parent / "launcher.py")))
+        if getattr(sys, "frozen", False):
+            # The packaged stdlib launcher forwards commands straight to the
+            # running watcher, avoiding a second PyInstaller/Qt startup.
+            executable = shlex.quote(str(Path(sys.executable).with_name("ClipMint")))
+        else:
+            executable = (shlex.quote(sys.executable) + " " +
+                          shlex.quote(str(Path(__file__).resolve().parent.parent / "launcher.py")))
         return executable + " " + action
 
     def register_cinnamon_screenshot_hotkey(self):
@@ -3058,8 +3061,14 @@ class ClipMintWindow(QMainWindow):
         self._capture_restore_main = self.isVisible() and self.isActiveWindow()
         if self.screenshot_notice is not None:
             self.screenshot_notice.hide()
+        # A visible UI needs a compositor frame to disappear from captures.
+        # When ClipMint is already hidden, waiting 250ms serves no purpose.
+        had_visible_window = self.isVisible()
         self.hide()
-        QTimer.singleShot(250, lambda: self.begin_selection(purpose))
+        QTimer.singleShot(
+            250 if had_visible_window else 0,
+            lambda: self.begin_selection(purpose),
+        )
 
     def begin_selection(self, purpose):
         try:
@@ -3410,7 +3419,7 @@ def main():
         QTimer.singleShot(150, window.toggle_quick_popup)
     elif command == "screenshot-area":
         # A cold-start global screenshot key must not reveal the main window.
-        QTimer.singleShot(150, window.choose_screenshot)
+        QTimer.singleShot(0, window.choose_screenshot)
     elif command == "record-area":
         window.show()
         QTimer.singleShot(150, lambda: window.choose_recording("MP4"))
