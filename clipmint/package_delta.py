@@ -18,10 +18,12 @@ import hashlib
 import io
 import json
 import lzma
+import os
 import subprocess
 from pathlib import Path
 import tarfile
 import zipfile
+import tempfile
 import zlib
 
 import bsdiff4
@@ -113,6 +115,41 @@ def _base_tar(base: Path, kind: str, member_data: bytes, member_name: str) -> by
     return raw
 
 
+def _xz_compress(raw: bytes) -> bytes:
+    """Match dpkg-deb's multiblock xz stream, even for large frozen archives.
+
+    Python's lzma.compress emits a single XZ block. dpkg-deb uses the
+    multithreaded XZ encoder (even with --threads-max=1), which divides
+    large inputs into blocks. A different XZ block layout cannot reproduce
+    the official .deb hash. Fixed xz -T2 produces the same byte stream as
+    dpkg-deb -Zxz --threads-max=1; the exact target hash is still checked.
+    Input/output files avoid duplicating hundreds of MB across pipe buffers.
+    """
+    if len(raw) > MAX_RAW_TAR:
+        raise DeltaLayoutError("Tar exceeds XZ encoding size limit")
+    environment = dict(os.environ)
+    environment.pop("XZ_OPT", None)
+    environment.pop("XZ_DEFAULTS", None)
+    with tempfile.TemporaryFile() as source, tempfile.TemporaryFile() as target:
+        source.write(raw)
+        source.seek(0)
+        try:
+            result = subprocess.run(
+                ["/usr/bin/xz", "-6", "--threads=2", "--stdout"],
+                stdin=source, stdout=target, stderr=subprocess.PIPE,
+                timeout=600, check=False, env=environment,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise DeltaLayoutError("Cannot reproduce Debian XZ stream") from exc
+        if result.returncode:
+            raise DeltaLayoutError("XZ encoder could not reproduce Debian stream")
+        target.seek(0)
+        compressed = target.read(MAX_DEB + 1)
+    if len(compressed) > MAX_DEB:
+        raise DeltaLayoutError("Compressed tar exceeds Debian size limit")
+    return compressed
+
+
 def _xz_region(data: bytes) -> tuple[int, int]:
     if (len(data) < 44 or not data.startswith(b"\xfd7zXZ\x00")
             or data[-2:] != b"YZ"):
@@ -130,7 +167,7 @@ def _contents_and_layout(target_xz: bytes):
     target_raw = lzma.decompress(target_xz)
     if len(target_raw) > MAX_RAW_TAR:
         raise DeltaLayoutError("Uncompressed tar exceeds safety limit")
-    regenerated = lzma.compress(target_raw, preset=6, format=lzma.FORMAT_XZ)
+    regenerated = _xz_compress(target_raw)
     left, right = _xz_region(target_xz)
     new_left, new_right = _xz_region(regenerated)
     if target_xz[left:right] != regenerated[new_left:new_right]:
@@ -317,7 +354,7 @@ def _rebuild_tar(old: bytes, plan: dict, archive: zipfile.ZipFile) -> bytes:
 
 
 def _rebuild_xz(raw: bytes, plan: dict) -> bytes:
-    compressed = lzma.compress(raw, preset=6, format=lzma.FORMAT_XZ)
+    compressed = _xz_compress(raw)
     start, end = _xz_region(compressed)
     rebuilt = (_decode(plan["xz_prefix"]) + compressed[start:end]
                + _decode(plan["xz_suffix"]))
