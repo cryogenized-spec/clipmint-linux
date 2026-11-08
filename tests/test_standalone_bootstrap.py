@@ -90,7 +90,7 @@ class BootstrapPreviewTests(unittest.TestCase):
             + signed(3) + signed(0) + signed(0)
         )
         control_z = bz2.compress(control)
-        diff_z = bz2.compress(b"\\x00" * 3)
+        diff_z = bz2.compress(b"\x00" * 3)
         extra_z = bz2.compress(b"")
         delta = (b"BSDIFF40" + signed(len(control_z))
                  + signed(len(diff_z)) + signed(3)
