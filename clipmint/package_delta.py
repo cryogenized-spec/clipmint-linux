@@ -4,7 +4,8 @@ Debian's xz-compressed data.tar changes almost completely when one source
 file changes. Diffing the compressed .deb is therefore expensive and rarely
 useful. This transport reuses unchanged tar *file bodies*, carries the exact
 new tar headers and changed bodies, then re-creates the exact xz and ar bytes.
-No extraction, path execution, shell commands or package installation occur.
+The system dpkg-deb tool is used only to read trusted cached base tar data;
+no extraction to disk, shell commands, or package installation occurs.
 
 A candidate is released ONLY if application reproduces the SHA256 of the
 official new Debian installer. The updater separately checks the release
@@ -17,6 +18,7 @@ import hashlib
 import io
 import json
 import lzma
+import subprocess
 from pathlib import Path
 import tarfile
 import zipfile
@@ -46,7 +48,7 @@ def _hash(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def _ar_members(data: bytes) -> list[tuple[str, bytes, bytes, bytes]]:
+def _ar_members(data: bytes, *, require_xz: bool = False) -> list[tuple[str, bytes, bytes, bytes]]:
     if not data.startswith(b"!<arch>\n") or len(data) > MAX_DEB:
         raise DeltaLayoutError("Unsupported Debian ar archive")
     offset, result = 8, []
@@ -69,9 +71,42 @@ def _ar_members(data: bytes) -> list[tuple[str, bytes, bytes, bytes]]:
         result.append((name, header, data[begin:end], padding))
         offset = end + size % 2
     names = [member[0] for member in result]
-    if names != ["debian-binary", "control.tar.xz", "data.tar.xz"]:
-        raise DeltaLayoutError(f"Requires three-member xz Debian archive; saw {names!r}")
+    valid = (
+        len(names) == 3 and names[0] == "debian-binary"
+        and names[1] in ("control.tar.xz", "control.tar.zst", "control.tar.gz")
+        and names[2] in ("data.tar.xz", "data.tar.zst", "data.tar.gz")
+    )
+    if not valid or (require_xz and names != [
+        "debian-binary", "control.tar.xz", "data.tar.xz"
+    ]):
+        raise DeltaLayoutError(f"Unsupported Debian members: {names!r}")
     return result
+
+
+def _base_tar(base: Path, kind: str, member_data: bytes, member_name: str) -> bytes:
+    """Read an older xz/zstd/gzip installer without adding runtime libraries.
+
+    dpkg-deb is already required to validate and install the .deb; its
+    fixed-argument tarfile output is not executed or extracted to disk.
+    """
+    if member_name.endswith(".xz"):
+        raw = lzma.decompress(member_data)
+    else:
+        option = "--ctrl-tarfile" if kind == "control" else "--fsys-tarfile"
+        try:
+            result = subprocess.run(
+                ["/usr/bin/dpkg-deb", option, str(base)],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                timeout=120, check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise DeltaLayoutError("Cannot decompress previous Debian package") from exc
+        if result.returncode:
+            raise DeltaLayoutError("Previous Debian package could not be decompressed")
+        raw = result.stdout
+    if len(raw) > MAX_RAW_TAR:
+        raise DeltaLayoutError("Previous Debian tar exceeds limit")
+    return raw
 
 
 def _xz_region(data: bytes) -> tuple[int, int]:
@@ -113,8 +148,7 @@ def _tar_entries(raw: bytes) -> list[tarfile.TarInfo]:
         raise DeltaLayoutError("Invalid Debian tar layout") from exc
 
 
-def _member_plan(old_xz: bytes, target_xz: bytes, archive: zipfile.ZipFile, group: int):
-    old_raw = lzma.decompress(old_xz)
+def _member_plan(old_raw: bytes, target_xz: bytes, archive: zipfile.ZipFile, group: int):
     new_raw, meta = _contents_and_layout(target_xz)
     if len(old_raw) > MAX_RAW_TAR:
         raise DeltaLayoutError("Uncompressed base tar exceeds safety limit")
@@ -148,7 +182,7 @@ def build_patch(base: Path, target: Path, patch: Path) -> bool:
     base_bytes = base.read_bytes()
     target_bytes = target.read_bytes()
     old_members = _ar_members(base_bytes)
-    new_members = _ar_members(target_bytes)
+    new_members = _ar_members(target_bytes, require_xz=True)
     metadata = {"format": FORMAT, "ar": []}
     try:
         with zipfile.ZipFile(patch, "w", compression=zipfile.ZIP_DEFLATED,
@@ -157,7 +191,7 @@ def build_patch(base: Path, target: Path, patch: Path) -> bool:
                           (new_name, header, new_data, padding)) in enumerate(
                               zip(old_members, new_members)
                           ):
-                if old_name != new_name:
+                if old_name.split(".tar.", 1)[0] != new_name.split(".tar.", 1)[0]:
                     raise DeltaLayoutError("Debian archive member changed")
                 entry = {"name": new_name, "header": _b64(header),
                          "padding": _b64(padding)}
@@ -166,7 +200,13 @@ def build_patch(base: Path, target: Path, patch: Path) -> bool:
                 else:
                     entry["payload"] = {
                         "type": "tarxz",
-                        **_member_plan(old_data, new_data, output, ordinal),
+                        **_member_plan(
+                            _base_tar(
+                                base, new_name.split(".tar.", 1)[0],
+                                old_data, old_name,
+                            ),
+                            new_data, output, ordinal,
+                        ),
                     }
                 metadata["ar"].append(entry)
             output.writestr("meta.json", json.dumps(
@@ -189,8 +229,7 @@ def build_patch(base: Path, target: Path, patch: Path) -> bool:
         raise
 
 
-def _rebuild_tar(old_xz: bytes, plan: dict, archive: zipfile.ZipFile) -> bytes:
-    old = lzma.decompress(old_xz)
+def _rebuild_tar(old: bytes, plan: dict, archive: zipfile.ZipFile) -> bytes:
     if len(old) > MAX_RAW_TAR:
         raise DeltaLayoutError("Base tar too large")
     output = bytearray()
@@ -236,8 +275,10 @@ def _rebuild_xz(raw: bytes, plan: dict) -> bytes:
 
 def apply_patch(base: Path, patch: Path, output: Path) -> None:
     """Apply a verified patch without unpacking files or invoking any commands."""
-    old = dict((name, data) for name, _h, data, _p in
-               _ar_members(base.read_bytes()))
+    old_members = _ar_members(base.read_bytes())
+    old = {name.split(".tar.", 1)[0]: (
+        name, data
+    ) for name, _h, data, _p in old_members}
     with zipfile.ZipFile(patch) as source:
         meta_info = source.getinfo("meta.json")
         if meta_info.file_size > MAX_META:
@@ -248,7 +289,8 @@ def apply_patch(base: Path, patch: Path, output: Path) -> None:
         result = bytearray(b"!<arch>\n")
         for item in meta["ar"]:
             name = item["name"]
-            if name not in old:
+            key = name.split(".tar.", 1)[0]
+            if key not in old:
                 raise DeltaLayoutError("Unexpected Debian member")
             header, padding = _decode(item["header"]), _decode(item["padding"])
             if len(header) != 60 or header[-2:] != b"`\n":
@@ -257,7 +299,13 @@ def apply_patch(base: Path, patch: Path, output: Path) -> None:
             if plan["type"] == "inline" and name == "debian-binary":
                 payload = _decode(plan["data"])
             elif plan["type"] == "tarxz" and name.endswith(".tar.xz"):
-                payload = _rebuild_xz(_rebuild_tar(old[name], plan, source), plan)
+                old_name, old_data = old[key]
+                payload = _rebuild_xz(
+                    _rebuild_tar(
+                        _base_tar(base, key, old_data, old_name), plan, source
+                    ),
+                    plan,
+                )
             else:
                 raise DeltaLayoutError("Unsupported patched ar payload")
             if int(header[48:58].decode("ascii").strip()) != len(payload):
@@ -269,7 +317,7 @@ def apply_patch(base: Path, patch: Path, output: Path) -> None:
             result.extend(padding)
             if len(result) > MAX_DEB:
                 raise DeltaLayoutError("Reconstructed Debian exceeds size limit")
-        if [a[0] for a in _ar_members(bytes(result))] != [
+        if [a[0] for a in _ar_members(bytes(result), require_xz=True)] != [
                 "debian-binary", "control.tar.xz", "data.tar.xz"]:
             raise DeltaLayoutError("Invalid reconstructed Debian member sequence")
     output.write_bytes(result)
