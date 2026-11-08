@@ -3059,11 +3059,15 @@ class ClipMintWindow(QMainWindow):
         # Only return to ClipMint if the user was working in its foreground
         # window. Global Cinnamon grabs must not summon it over Firefox.
         self._capture_restore_main = self.isVisible() and self.isActiveWindow()
+        # The main window AND the screenshot notice can appear in a capture
+        # unless the compositor has had time to hide a previously visible UI.
+        had_visible_window = self.isVisible() or (
+            self.screenshot_notice is not None
+            and self.screenshot_notice.isVisible()
+        )
         if self.screenshot_notice is not None:
             self.screenshot_notice.hide()
-        # A visible UI needs a compositor frame to disappear from captures.
-        # When ClipMint is already hidden, waiting 250ms serves no purpose.
-        had_visible_window = self.isVisible()
+        # An already hidden UI needs no compositor settling delay.
         self.hide()
         QTimer.singleShot(
             250 if had_visible_window else 0,
