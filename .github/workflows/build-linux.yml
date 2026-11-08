@@ -44,16 +44,43 @@ jobs:
           python -m unittest discover -s tests -v
       - name: Bundle checksum-verified static FFmpeg (GitHub runner only)
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           mkdir -p vendor /tmp/clipmint-ffmpeg
           url="https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-10-31-12-59/ffmpeg-N-128227-g4811625b5f-linux64-gpl.tar.xz"
-          curl --fail --location --retry 3 --output /tmp/clipmint-ffmpeg.tar.xz "$url"
-          echo "67929be39bbb696f41d3295686597a439aeac902f61d82be660ccc1453c1fdfb  /tmp/clipmint-ffmpeg.tar.xz" | sha256sum --check
-          tar -xJf /tmp/clipmint-ffmpeg.tar.xz -C /tmp/clipmint-ffmpeg
-          binary="$(find /tmp/clipmint-ffmpeg -path "*/bin/ffmpeg" -type f -print -quit)"
-          test -n "$binary"
-          install -m 755 "$binary" vendor/ffmpeg
+          expected="67929be39bbb696f41d3295686597a439aeac902f61d82be660ccc1453c1fdfb"
+          if curl --fail --location --retry 2 --retry-all-errors --connect-timeout 15 --max-time 120 --output /tmp/clipmint-ffmpeg.tar.xz "$url"; then
+            echo "$expected  /tmp/clipmint-ffmpeg.tar.xz" | sha256sum --check
+            tar -xJf /tmp/clipmint-ffmpeg.tar.xz -C /tmp/clipmint-ffmpeg
+            binary="$(find /tmp/clipmint-ffmpeg -path "*/bin/ffmpeg" -type f -print -quit)"
+            test -n "$binary"
+            install -m 755 "$binary" vendor/ffmpeg
+          else
+            # BtbN's old release intermittently returns HTTP 504.
+            # Instead reuse the SAME already-vetted static FFmpeg executable
+            # bundled in our immutable, checksum-verified Preview 240.1.
+            # This downloads bytes only on the GitHub runner, not user devices.
+            echo "Primary FFmpeg archive unavailable; use verified ClipMint preview fallback"
+            mkdir -p /tmp/clipmint-ffmpeg/fallback
+            fallback_tag="clipmint-preview-240-1"
+            fallback_deb="clipmint_0.6.0.preview1.240.1_amd64.deb"
+            gh release download "$fallback_tag" --repo "$GH_REPO" \
+              --pattern "$fallback_deb" --pattern SHA256SUMS \
+              --dir /tmp/clipmint-ffmpeg/fallback
+            (cd /tmp/clipmint-ffmpeg/fallback && sha256sum --check SHA256SUMS)
+            deb="/tmp/clipmint-ffmpeg/fallback/$fallback_deb"
+            test "$(dpkg-deb -f "$deb" Package)" = "clipmint"
+            test "$(dpkg-deb -f "$deb" Version)" = "0.6.0~preview1.240.1"
+            test "$(dpkg-deb -f "$deb" Architecture)" = "amd64"
+            dpkg-deb --fsys-tarfile "$deb" | \
+              tar -xOf - ./opt/clipmint/_internal/tools/ffmpeg \
+              > /tmp/clipmint-ffmpeg/reused-ffmpeg
+            test -s /tmp/clipmint-ffmpeg/reused-ffmpeg
+            install -m 755 /tmp/clipmint-ffmpeg/reused-ffmpeg vendor/ffmpeg
+          fi
           vendor/ffmpeg -hide_banner -devices 2>&1 | grep -q x11grab
           vendor/ffmpeg -hide_banner -encoders 2>&1 | grep -q libx264
           echo "Bundled video encoder supports X11 area input and H264"

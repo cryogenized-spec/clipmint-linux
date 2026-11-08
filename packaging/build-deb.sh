@@ -47,7 +47,7 @@ Section: utils
 Priority: optional
 Architecture: amd64
 Maintainer: ClipMint contributors
-Depends: libc6 (>= 2.39), python3, xdotool
+Depends: libc6 (>= 2.39), python3, xz-utils, xdotool
 Recommends: tesseract-ocr, tesseract-ocr-eng
 Description: Clipboard manager, screenshot tool, and screen recorder
  Native application for Linux Mint 22 Cinnamon/X11 with bundled

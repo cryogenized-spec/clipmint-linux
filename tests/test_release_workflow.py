@@ -21,6 +21,21 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn("contents: read", workflow)
         self.assertIn('[[ "$GITHUB_REF_NAME" =~ ^v', workflow)
 
+    def test_ffmpeg_fallback_uses_verified_existing_preview(self):
+        workflow = (ROOT / ".github/workflows/build-linux.yml").read_text()
+        ffmpeg = workflow.split(
+            "      - name: Bundle checksum-verified static FFmpeg", 1
+        )[1].split("      - name: Fetch OFL DotGothic16", 1)[0]
+        self.assertIn("if curl --fail", ffmpeg)
+        self.assertIn("clipmint-preview-240-1", ffmpeg)
+        self.assertIn("gh release download", ffmpeg)
+        self.assertIn("sha256sum --check SHA256SUMS", ffmpeg)
+        self.assertIn('dpkg-deb --fsys-tarfile "$deb"', ffmpeg)
+        self.assertIn('test "$(dpkg-deb -f "$deb" Version)"', ffmpeg)
+        self.assertIn("tar -xOf - ./opt/clipmint/_internal/tools/ffmpeg", ffmpeg)
+        self.assertIn("grep -q x11grab", ffmpeg)
+        self.assertIn("grep -q libx264", ffmpeg)
+
     def test_publisher_keeps_artifact_and_normalizes_github_filename(self):
         workflow = (ROOT / ".github/workflows/build-linux.yml").read_text()
         publisher = workflow.split("  publish-preview:", 1)[1].split(
