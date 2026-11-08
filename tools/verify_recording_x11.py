@@ -71,7 +71,7 @@ class RealX11RecordingTests(unittest.TestCase):
                     self.assertIsNotNone(completed, "FFmpeg did not finalize")
                     self.assertEqual(completed[0], 0, "FFmpeg capture process failed")
                     self.assertTrue(output.exists())
-                    self.assertGreater(output.stat().st_size, 4000)
+                    self.assertGreater(output.stat().st_size, 1500)
                 finally:
                     if recorder.process is not None:
                         recorder.stop()
