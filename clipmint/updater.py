@@ -32,12 +32,19 @@ MAX_CHECKSUM_BYTES = 16 * 1024
 MAX_PACKAGE_BYTES = 350 * 1024 * 1024
 MAX_DELTA_MANIFEST_BYTES = 8 * 1024
 MAX_DELTA_RATIO = 0.85
+# Automatic preview updates never download a large .deb. This is a strict
+# per-update patch transfer ceiling, not merely a hint to the UI.
+MAX_AUTO_DELTA_BYTES = 20 * 1024 * 1024
 PREVIEW_VERSION = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+~preview[0-9]+\.[0-9]+\.[0-9]+$")
 SHA256_HEX = re.compile(r"^[a-f0-9]{64}$")
 
 
 class UpdateError(RuntimeError):
     """Release metadata, network, package, or checksum verification failed."""
+
+
+class SmallerUpdateUnavailable(UpdateError):
+    """No trustworthy, affordable delta is available for this installed base."""
 
 
 @dataclass(frozen=True)
@@ -321,7 +328,8 @@ def parse_delta_manifest(update: PreviewUpdate, raw: bytes, target_sha: str) -> 
 
 
 def download_verified_delta(
-    update: PreviewUpdate, target: Path, expected: str, folder: Path
+    update: PreviewUpdate, target: Path, expected: str, folder: Path,
+    *, max_patch_bytes: int | None = None,
 ) -> bool:
     """Reconstruct only from the exact installed, locally cached .deb.
 
@@ -335,6 +343,8 @@ def download_verified_delta(
         read_bounded(update.delta_manifest_url, MAX_DELTA_MANIFEST_BYTES),
         expected,
     )
+    if max_patch_bytes is not None and manifest["patch_size"] > max_patch_bytes:
+        return False
     if installed_version() != manifest["base_version"]:
         return False
     base = folder / f"clipmint_{manifest['base_version'].replace('~preview', '.preview')}_amd64.deb"
@@ -400,8 +410,15 @@ def download_verified_delta(
                 os.unlink(name)
 
 
-def download_verified_preview(update: PreviewUpdate) -> Path:
-    """Download into a private cache, atomically accept only verified .deb."""
+def download_verified_preview(
+    update: PreviewUpdate, *, smaller_only: bool = False,
+) -> Path:
+    """Stage a verified installer; smaller_only NEVER downloads the full .deb.
+
+    Background calls use smaller_only=True, so a missing/incompatible delta,
+    a corrupt patch or a missing base installer can never trigger a 130MB
+    fallback. Full packages require a separate, explicit manual choice.
+    """
     if not ASSET_PATTERN.fullmatch(update.filename):
         raise UpdateError("Invalid preview package filename")
     if update.filename not in (
@@ -429,15 +446,26 @@ def download_verified_preview(update: PreviewUpdate) -> Path:
                 prune_superseded_previews(folder, target)
                 return target
         target.unlink()
-    # Try the smaller, authenticated delta first. A missing base, an invalid
-    # manifest, a failed patch or an unsupported dependency all fall back to
-    # the complete .deb using the existing SHA-256/package verification.
+    # Always attempt a verified small delta before the full installer.
+    # Crucially, the automatic path must NOT fall back to a large .deb.
     try:
-        if download_verified_delta(update, target, expected, folder):
+        if download_verified_delta(
+            update, target, expected, folder,
+            max_patch_bytes=MAX_AUTO_DELTA_BYTES if smaller_only else None,
+        ):
             prune_superseded_previews(folder, target)
             return target
-    except Exception:
+    except Exception as exc:
+        if smaller_only:
+            raise SmallerUpdateUnavailable(
+                "No usable verified small patch; full package was not downloaded"
+            ) from exc
+        # Manual users approved a possible full-package fallback.
         pass
+    if smaller_only:
+        raise SmallerUpdateUnavailable(
+            "No verified patch within the 20 MB limit for this installation"
+        )
 
     request = Request(
         update.package_url, headers={"User-Agent": "ClipMint-Updater/0.6"}
