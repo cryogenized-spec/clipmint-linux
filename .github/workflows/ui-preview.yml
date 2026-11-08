@@ -15,13 +15,13 @@ on:
       - ".github/workflows/ui-preview.yml"
   workflow_dispatch:
 permissions:
-  contents: write
+  contents: read
 jobs:
   capture:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"
       - name: Install renderer only on GitHub runner
@@ -37,21 +37,7 @@ jobs:
           mkdir -p docs
           xvfb-run -a -s "-screen 0 1280x850x24" python -m tools.render_ui_preview docs/clipmint-ui-preview.png
           file docs/clipmint-*-preview.png
-          for img in docs/clipmint-*-preview.png; do base64 -w 0 "$img" > "$img.b64"; done
-      - name: Commit changed previews on main only
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add docs/clipmint-*-preview.png docs/clipmint-*-preview.png.b64
-          if git diff --cached --quiet; then
-            echo "Preview matches committed images; no commit needed."
-          else
-            git commit -m "Refresh ClipMint Qt UI screenshots after interface changes"
-            git pull --rebase origin main
-            git push origin HEAD:main
-          fi
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: clipmint-ui-preview
           path: docs/clipmint-*-preview.png
