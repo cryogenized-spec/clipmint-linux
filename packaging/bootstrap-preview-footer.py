@@ -60,7 +60,7 @@ def _bootstrap_run():
             "releases/download/" + tag + "/")
     if not re.fullmatch(r"clipmint-preview-[0-9]+-[0-9]+", tag):
         raise ValueError("Invalid embedded release tag")
-    if not re.fullmatch(r"0\\.6\\.0~preview1\\.[0-9]+\\.[0-9]+", version):
+    if not re.fullmatch(r"0\.6\.0~preview1\.[0-9]+\.[0-9]+", version):
         raise ValueError("Invalid embedded target version")
     print("ClipMint verified small-data bootstrap: " + base_version + " → " + version)
     print("This tool will NOT download the full installer or install software.")
@@ -90,7 +90,7 @@ def _bootstrap_run():
     checksum = _bootstrap_fetch(root + "SHA256SUMS", 2048)
     import re as _re
     expected_line = _re.fullmatch(
-        rb"([a-fA-F0-9]{64})  " + target_name.encode() + rb"\\r?\\n?",
+        rb"([a-fA-F0-9]{64})  " + target_name.encode() + rb"\r?\n?",
         checksum,
     )
     if expected_line is None:
@@ -106,8 +106,8 @@ def _bootstrap_run():
             or manifest["target_sha256"] != target_hash
             or not isinstance(patch_name, str)
             or not _re.fullmatch(
-                r"clipmint_delta_from_0\\.6\\.0\\.preview1\\.227\\.1_to_"
-                r"0\\.6\\.0\\.preview1\\.[0-9]+\\.[0-9]+_amd64\\.clipdelta",
+                r"clipmint_delta_from_0\.6\.0\.preview1\.227\.1_to_"
+                r"0\.6\.0\.preview1\.[0-9]+\.[0-9]+_amd64\.clipdelta",
                 patch_name,
             )
             or not isinstance(manifest["patch_size"], int)
