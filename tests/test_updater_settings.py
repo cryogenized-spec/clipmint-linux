@@ -169,7 +169,7 @@ class UpdateSettingsTests(unittest.TestCase):
             self.app.processEvents()
             self.assertFalse(w._update_busy)
             self.assertTrue(w.check_update_button.isEnabled())
-            self.assertIn("Update check failed", w.update_status.text())
+            self.assertIn("Update check/download failed", w.update_status.text())
 
     def test_missing_staged_package_cannot_be_opened(self):
         w = self.window
