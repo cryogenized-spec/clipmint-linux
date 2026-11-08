@@ -22,12 +22,16 @@ import subprocess
 from pathlib import Path
 import tarfile
 import zipfile
+import zlib
+
+import bsdiff4
 
 FORMAT = "tar-content-xz-v1"
 MAX_DEB = 350 * 1024 * 1024
 MAX_RAW_TAR = 1024 * 1024 * 1024
 MAX_META = 16 * 1024 * 1024
 MAX_PATCH = 20 * 1024 * 1024
+MAX_BSDIFF_FILE = 64 * 1024 * 1024
 
 
 class DeltaLayoutError(ValueError):
@@ -166,10 +170,37 @@ def _member_plan(old_raw: bytes, target_xz: bytes, archive: zipfile.ZipFile, gro
                 and old_raw[existing.offset_data:existing.offset_data + existing.size] == body):
             item.update({"source": "old", "offset": existing.offset_data})
         else:
-            identifier = f"payload/{group}/{ordinal}"
-            archive.writestr(identifier, body, compress_type=zipfile.ZIP_DEFLATED,
-                             compresslevel=6)
-            item.update({"source": "zip", "entry": identifier})
+            # Large files (including frozen app binaries) can change by a few
+            # bytes while a ZIP-compressed replacement costs many megabytes.
+            # Make a bounded binary patch against the matching previous file.
+            # Keep the compressed full body if it is actually cheaper.
+            used_bsdiff = False
+            if (existing is not None and 4096 <= entry.size <= MAX_BSDIFF_FILE
+                    and 0 < existing.size <= MAX_BSDIFF_FILE):
+                old_body = old_raw[
+                    existing.offset_data:existing.offset_data + existing.size
+                ]
+                difference = bsdiff4.diff(old_body, body)
+                compressed_body_size = len(zlib.compress(body, 6))
+                if (len(difference) < compressed_body_size * .90
+                        and len(difference) < MAX_PATCH):
+                    identifier = f"payload/{group}/{ordinal}.bsdiff"
+                    archive.writestr(
+                        identifier, difference, compress_type=zipfile.ZIP_STORED
+                    )
+                    item.update({
+                        "source": "bsdiff", "entry": identifier,
+                        "old_offset": existing.offset_data,
+                        "old_size": existing.size,
+                    })
+                    used_bsdiff = True
+            if not used_bsdiff:
+                identifier = f"payload/{group}/{ordinal}"
+                archive.writestr(
+                    identifier, body, compress_type=zipfile.ZIP_DEFLATED,
+                    compresslevel=6,
+                )
+                item.update({"source": "zip", "entry": identifier})
         plans.append(item)
         cursor = entry.offset_data + entry.size
     meta["parts"] = plans
@@ -213,6 +244,11 @@ def build_patch(base: Path, target: Path, patch: Path) -> bool:
                 metadata, separators=(",", ":"), sort_keys=True,
             ), compress_type=zipfile.ZIP_DEFLATED, compresslevel=6)
         if not 0 < patch.stat().st_size <= MAX_PATCH:
+            print(
+                f"File-aware candidate {patch.stat().st_size} bytes is above "
+                f"{MAX_PATCH} byte automatic limit",
+                flush=True,
+            )
             patch.unlink(missing_ok=True)
             return False
         # Publish no candidate that is not exactly the signed full installer.
@@ -252,6 +288,23 @@ def _rebuild_tar(old: bytes, plan: dict, archive: zipfile.ZipFile) -> bytes:
             if archive.getinfo(entry).file_size != size:
                 raise DeltaLayoutError("Wrong delta payload size")
             output.extend(archive.read(entry))
+        elif item["source"] == "bsdiff":
+            entry = item["entry"]
+            offset, old_size = item["old_offset"], item["old_size"]
+            if (not isinstance(entry, str)
+                    or not entry.startswith("payload/")
+                    or entry not in archive.namelist()
+                    or not isinstance(offset, int) or not isinstance(old_size, int)
+                    or old_size <= 0 or old_size > MAX_BSDIFF_FILE
+                    or offset < 0 or offset > len(old) - old_size
+                    or archive.getinfo(entry).file_size > MAX_PATCH):
+                raise DeltaLayoutError("Invalid delta binary patch reference")
+            new_body = bsdiff4.patch(
+                old[offset:offset + old_size], archive.read(entry)
+            )
+            if len(new_body) != size:
+                raise DeltaLayoutError("Wrong binary patch output size")
+            output.extend(new_body)
         else:
             raise DeltaLayoutError("Invalid delta source")
         if len(output) > MAX_RAW_TAR:
