@@ -44,7 +44,10 @@ from .quick_popup import QuickPopup, paste_to_window
 from .productivity import PasteQueue
 from .organizer_ui import TemplatesDialog, TransformDialog
 from .history_filters import populate_filter_tabs, selected_category
-from .updater import check_for_preview_update, download_verified_preview, installed_version, UpdateError
+from .updater import (
+    check_for_preview_update, download_verified_preview, installed_version,
+    PreviewUpdate, SmallerUpdateUnavailable, UpdateError, MAX_AUTO_DELTA_BYTES,
+)
 from .single_instance import InstanceServer, send_command
 from .cinnamon_hotkey import (install_shortcut, restore_screenshot_takeover,
                               shortcut_conflicts, ShortcutSetupError)
@@ -164,7 +167,7 @@ class WheelSafeHistoryLimitComboBox(QComboBox):
 
 class _UpdateSignals(QObject):
     """Deliver worker results on Qt's UI thread without blocking clipboard events."""
-    finished = Signal(str, str, str)
+    finished = Signal(object, str, str)
 
 
 class ClipMintWindow(QMainWindow):
@@ -179,6 +182,7 @@ class ClipMintWindow(QMainWindow):
         self._temporary_exit_cleaned = False
         self._update_busy = False
         self._verified_update_path = None
+        self._available_update: PreviewUpdate | None = None
         self._update_signals = _UpdateSignals(self)
         self._update_signals.finished.connect(self._on_update_result)
         self._auto_update_timer = QTimer(self)
@@ -1270,16 +1274,18 @@ class ClipMintWindow(QMainWindow):
         update_group = QGroupBox("Updates · verified preview channel")
         update_layout = QVBoxLayout(update_group)
         update_help = QLabel(
-            "Check for updates manually by default, or opt in to automatic "
-            "checking and downloading from official ClipMint GitHub releases. No GitHub "
-            "login is needed. Installing a system .deb still requires your "
-            "approval in Linux Mint's package manager; ClipMint will never "
-            "run sudo or silently install privileged software."
+            "Manual checking is the default. You may opt in to automatic "
+            "checks and VERIFIED DIFFERENTIAL PATCH downloads up to 20 MB "
+            "from ClipMint's official preview channel. If a suitable patch "
+            "is unavailable, ClipMint will NOT download a full installer "
+            "automatically. Full package downloads require your explicit "
+            "approval, and installation still requires Linux Mint's "
+            "package-manager approval. No automatic sudo or installation."
         )
         update_help.setWordWrap(True)
         update_layout.addWidget(update_help)
         self.auto_update_toggle = QCheckBox(
-            "Automatically check and download updates (opt-in)"
+            "Automatically check and download small verified patches (20 MB max)"
         )
         self.auto_update_toggle.setChecked(
             self.settings.value("updates/automatic", False, type=bool)
@@ -1291,11 +1297,17 @@ class ClipMintWindow(QMainWindow):
         ))
         self.update_status.setWordWrap(True)
         update_layout.addWidget(self.update_status)
-        self.check_update_button = QPushButton("Check and download updates now")
+        self.check_update_button = QPushButton("Check for verified preview updates")
         self.check_update_button.clicked.connect(
             lambda: self.check_for_updates(manual=True)
         )
         update_layout.addWidget(self.check_update_button)
+        self.download_update_button = QPushButton(
+            "Download available preview… (confirm data usage)"
+        )
+        self.download_update_button.setEnabled(False)
+        self.download_update_button.clicked.connect(self.download_available_preview)
+        update_layout.addWidget(self.download_update_button)
         self.install_update_button = QPushButton(
             "Open verified installer in Linux Mint…"
         )
@@ -1677,48 +1689,103 @@ class ClipMintWindow(QMainWindow):
         self.check_for_updates(manual=False)
 
     def check_for_updates(self, manual: bool = False):
-        """Use a background daemon thread, never block screenshot/clipboard UI."""
+        """Find an official preview, but automatically stage small deltas only."""
         if self._update_busy or self._closing:
             return
         self._update_busy = True
+        self._available_update = None
+        self.download_update_button.setEnabled(False)
         self.check_update_button.setEnabled(False)
         self.update_status.setText("Checking official ClipMint previews…")
+        # The manual Check button NEVER starts a download. Opted-in checks may
+        # stage a verified delta up to the strict 20 MB transfer ceiling.
         auto_download = bool(
-            manual or self.settings.value("updates/automatic", False, type=bool)
+            not manual and self.settings.value("updates/automatic", False, type=bool)
         )
         signals = self._update_signals
 
         def check_worker():
-            version = ""
+            candidate = None
             downloaded = ""
             error = ""
             try:
                 candidate = check_for_preview_update()
-                if candidate is not None:
-                    version = candidate.version
-                    if auto_download:
-                        downloaded = str(download_verified_preview(candidate))
+                if candidate is not None and auto_download:
+                    try:
+                        downloaded = str(download_verified_preview(
+                            candidate, smaller_only=True
+                        ))
+                    except SmallerUpdateUnavailable:
+                        # An unavailable patch is normal, not a failed check.
+                        pass
             except Exception as exc:
-                # Worker failures must always unlock the Check button.
-                # urllib can raise HTTP protocol errors not covered by
-                # OSError, including truncated transfer bodies.
                 error = str(exc) or type(exc).__name__
             try:
-                signals.finished.emit(version, downloaded, error)
+                signals.finished.emit(candidate, downloaded, error)
             except RuntimeError:
-                # Window/process could have been shut down while downloading.
                 pass
 
         threading.Thread(
             target=check_worker, name="ClipMint-update-check", daemon=True
         ).start()
 
-    def _on_update_result(self, version: str, downloaded: str, error: str):
+    def download_available_preview(self):
+        """Explicit approval before any possible full-installer transfer."""
+        candidate = self._available_update
+        if self._update_busy or self._closing or candidate is None:
+            return
+        size_mb = candidate.package_size / (1024 * 1024)
+        reply = QMessageBox.question(
+            self, "Approve ClipMint preview download?",
+            f"ClipMint {candidate.version} may require downloading a full "
+            f"{size_mb:.1f} MiB installer. A smaller verified patch will be "
+            "tried first if available, but may fall back to the full package.\n\n"
+            "This is a manual network-data download, NOT an automatic update. "
+            "Proceed?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        self._update_busy = True
+        self.check_update_button.setEnabled(False)
+        self.download_update_button.setEnabled(False)
+        self.update_status.setText("Downloading approved verified preview…")
+        signals = self._update_signals
+
+        def download_worker():
+            path, error = "", ""
+            try:
+                path = str(download_verified_preview(candidate))
+            except Exception as exc:
+                error = str(exc) or type(exc).__name__
+            try:
+                signals.finished.emit(candidate, path, error)
+            except RuntimeError:
+                pass
+
+        threading.Thread(
+            target=download_worker, name="ClipMint-preview-download", daemon=True
+        ).start()
+
+    def _on_update_result(
+        self, candidate: PreviewUpdate | str | None, downloaded: str, error: str
+    ):
         self._update_busy = False
         self.check_update_button.setEnabled(True)
         self.settings.setValue("updates/last_checked", int(time.time()))
+        self._available_update = (
+            candidate if isinstance(candidate, PreviewUpdate) else None
+        )
+        self.download_update_button.setEnabled(
+            self._available_update is not None and not downloaded
+        )
+        version = (
+            candidate.version if isinstance(candidate, PreviewUpdate)
+            else (candidate or "")
+        )
         if error:
-            self.update_status.setText("Update check failed: " + error)
+            self.update_status.setText("Update check/download failed: " + error)
             return
         if not version:
             self.update_status.setText(
@@ -1738,6 +1805,14 @@ class ClipMintWindow(QMainWindow):
                     "Verified preview downloaded; approve install in Settings.",
                     QSystemTrayIcon.MessageIcon.Information, 4000,
                 )
+        elif self._available_update is not None:
+            size_mb = self._available_update.package_size / (1024 * 1024)
+            self.update_status.setText(
+                f"New verified preview {version} available. No suitable "
+                f"automatic patch within {MAX_AUTO_DELTA_BYTES // (1024 * 1024)} "
+                f"MB; full installer is {size_mb:.1f} MiB. "
+                "Nothing large was downloaded. Choose Download to approve it."
+            )
         else:
             self.update_status.setText(
                 f"New ClipMint preview {version} is available."
