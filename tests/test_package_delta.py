@@ -17,8 +17,8 @@ def make_deb(base: Path, version: str, *, modified: bool) -> Path:
     (root / "DEBIAN").mkdir(parents=True)
     (root / "opt" / "clipmint").mkdir(parents=True)
     (root / "DEBIAN" / "control").write_text(
-        f"Package: clipmint\\nVersion: {version}\\nArchitecture: amd64\\n"
-        "Maintainer: ClipMint tests\\nDescription: Delta test\\n"
+        f"Package: clipmint\nVersion: {version}\nArchitecture: amd64\n"
+        "Maintainer: ClipMint tests\nDescription: Delta test\n"
     )
     # The unchanged random payload makes compressed-.deb bsdiff impractical,
     # but it must cost zero bytes in the new file-aware patch.
