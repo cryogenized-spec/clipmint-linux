@@ -1,0 +1,23 @@
+# Incremental quality baseline for ClipMint's current Python 3.12 preview.
+# New code should satisfy the selected correctness checks. Style-only
+# reformatting and broad type changes are a separate, carefully tested phase.
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+extend-exclude = [".venv", "build", "dist", "dist-packages", "vendor", "packaging/bootstrap-preview-footer.py"]
+
+[tool.ruff.lint]
+# Legacy tests contain one-line if/else statements; phase in E7 only after
+# a targeted cleanup. The bootstrap footer is deliberately concatenated with
+# package_delta.py to make one standalone script, so it has imported names
+# only in its generated form.
+select = ["E4", "E9", "F63", "F7", "F82"]
+
+[tool.mypy]
+python_version = "3.12"
+follow_imports = "skip"
+ignore_missing_imports = true
+warn_unused_configs = true
+# Build confidence gradually: begin on non-Qt integration boundaries,
+# then widen coverage as controllers are extracted from app.py.
+check_untyped_defs = true
