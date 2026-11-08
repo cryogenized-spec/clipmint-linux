@@ -85,6 +85,16 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn("digest(rebuilt) != digest(target)", script)
         self.assertIn("MAX_PATCH_RATIO = 0.85", script)
 
+    def test_bootstrap_delta_publisher_has_manifest_hash_and_size_guards(self):
+        workflow = (ROOT / ".github/workflows/build-linux.yml").read_text()
+        self.assertIn("Prepare optional verified delta from updater bootstrap Preview 227.1", workflow)
+        self.assertIn('base_tag="clipmint-preview-227-1"', workflow)
+        self.assertIn("dist-packages/DELTA-227.json", workflow)
+        self.assertIn("(cd base-227 && sha256sum --check SHA256SUMS)", workflow)
+        self.assertIn('data["patch_sha256"]', workflow)
+        self.assertIn('data["patch_size"]', workflow)
+        self.assertIn('assets_to_publish+=("${manifests[@]}" "${patches[@]}")', workflow)
+
     def test_preview_debian_versions_change_for_each_run_and_rerun(self):
         """Repeated preview1 packages caused apt to keep an old screenshot build."""
         workflow = (ROOT / ".github/workflows/build-linux.yml").read_text()
