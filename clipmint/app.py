@@ -3345,7 +3345,10 @@ class ClipMintWindow(QMainWindow):
 
     def cancel_recorder(self):
         if self.recorder.process is None:
+            # Cancelling before Start releases the recorder session; otherwise
+            # the main window's Record controls remain disabled indefinitely.
             self.recorder_window = None
+            self.update_buttons()
             self.show_window()
 
     def launch_recorder(self, quality: str, file_format: str):
