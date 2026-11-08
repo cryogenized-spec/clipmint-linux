@@ -299,6 +299,18 @@ jobs:
           else
             echo "No affordable legacy bootstrap delta; no large patch published"
           fi
+      - name: Prepare standalone small-data bootstrap for Preview 227.1
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f dist-packages/DELTA-227.json ]]; then
+            version="${CLIPMINT_VERSION:?Missing built preview version}"
+            tag="clipmint-preview-${GITHUB_RUN_NUMBER}-${version##*.}"
+            python packaging/generate-preview-bootstrap.py \
+              "$tag" "$version" dist-packages/clipmint-bootstrap-from-227.py
+            python -m py_compile dist-packages/clipmint-bootstrap-from-227.py
+            (cd dist-packages && sha256sum clipmint-bootstrap-from-227.py > BOOTSTRAP-SHA256SUMS)
+          fi
       - name: Publish immutable GitHub prerelease (automatic update channel)
         shell: bash
         env:
@@ -337,6 +349,10 @@ jobs:
                 fi
                 assets_to_publish+=("${manifests[@]}" "${patches[@]}")
               fi
+              if [[ -f dist-packages/clipmint-bootstrap-from-227.py ]]; then
+                (cd dist-packages && sha256sum --check BOOTSTRAP-SHA256SUMS)
+                assets_to_publish+=(dist-packages/clipmint-bootstrap-from-227.py dist-packages/BOOTSTRAP-SHA256SUMS)
+              fi
               expected="$(printf '%s\n' "${assets_to_publish[@]##*/}" | sort)"
               if [[ "$assets" != "$expected" ]]; then
                 echo "Published preview exists with incomplete or unexpected assets" >&2
@@ -374,6 +390,10 @@ jobs:
           PY
             done
             assets_to_publish+=("${manifests[@]}" "${patches[@]}")
+          fi
+          if [[ -f dist-packages/clipmint-bootstrap-from-227.py ]]; then
+            (cd dist-packages && sha256sum --check BOOTSTRAP-SHA256SUMS)
+            assets_to_publish+=(dist-packages/clipmint-bootstrap-from-227.py dist-packages/BOOTSTRAP-SHA256SUMS)
           fi
           gh release create "$tag" "${assets_to_publish[@]}" \
             --prerelease --target "$GITHUB_SHA" \

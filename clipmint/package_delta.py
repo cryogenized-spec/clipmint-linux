@@ -14,6 +14,7 @@ manifest, cached old .deb identity, downloaded patch digest and new .deb.
 from __future__ import annotations
 
 import base64
+import bz2
 import hashlib
 import io
 import json
@@ -26,7 +27,6 @@ import zipfile
 import tempfile
 import zlib
 
-import bsdiff4
 
 FORMAT = "tar-content-xz-v1"
 MAX_DEB = 350 * 1024 * 1024
@@ -217,6 +217,10 @@ def _member_plan(old_raw: bytes, target_xz: bytes, archive: zipfile.ZipFile, gro
                 old_body = old_raw[
                     existing.offset_data:existing.offset_data + existing.size
                 ]
+                # The *builder* uses the optional native extension, but
+                # the shipped bootstrap/reconstruction code needs only Python
+                # stdlib. Do not import bsdiff4 at module load time.
+                import bsdiff4
                 difference = bsdiff4.diff(old_body, body)
                 compressed_body_size = len(zlib.compress(body, 6))
                 if (len(difference) < compressed_body_size * .90
@@ -302,6 +306,75 @@ def build_patch(base: Path, target: Path, patch: Path) -> bool:
         raise
 
 
+def _bsdiff_apply(original: bytes, patch: bytes, expected_size: int) -> bytes:
+    """Apply a bounded BSDIFF40 file delta using only Python's standard library.
+
+    Bootstrap upgrades must work on Linux Mint without pip, apt or extra
+    downloads. The three bzip2 streams use bsdiff's signed-magnitude 64-bit
+    offsets; all output is separately SHA-256 validated by the updater.
+    """
+    if (len(original) > MAX_BSDIFF_FILE or len(patch) > MAX_PATCH
+            or not 0 <= expected_size <= MAX_BSDIFF_FILE
+            or len(patch) < 32 or patch[:8] != b"BSDIFF40"):
+        raise DeltaLayoutError("Invalid bounded BSDIFF40 patch")
+
+    def signed64(raw: bytes) -> int:
+        if len(raw) != 8:
+            raise DeltaLayoutError("Truncated BSDIFF40 offset")
+        number = raw[7] & 127
+        for i in range(6, -1, -1):
+            number = number * 256 + raw[i]
+        return -number if raw[7] & 128 else number
+
+    control_length = signed64(patch[8:16])
+    difference_length = signed64(patch[16:24])
+    target_length = signed64(patch[24:32])
+    if (control_length < 0 or difference_length < 0
+            or target_length != expected_size
+            or 32 + control_length + difference_length > len(patch)):
+        raise DeltaLayoutError("BSDIFF40 block lengths invalid")
+    try:
+        control = bz2.decompress(patch[32:32 + control_length])
+        difference = bz2.decompress(
+            patch[32 + control_length:32 + control_length + difference_length]
+        )
+        extra = bz2.decompress(patch[32 + control_length + difference_length:])
+    except (OSError, EOFError, ValueError) as exc:
+        raise DeltaLayoutError("Corrupt BSDIFF40 compressed blocks") from exc
+    if (len(control) > MAX_BSDIFF_FILE * 3
+            or len(difference) > MAX_BSDIFF_FILE
+            or len(extra) > MAX_BSDIFF_FILE):
+        raise DeltaLayoutError("Oversized BSDIFF40 block")
+    result = bytearray(expected_size)
+    new_pos = old_pos = control_pos = diff_pos = extra_pos = 0
+    while new_pos < expected_size:
+        if control_pos + 24 > len(control):
+            raise DeltaLayoutError("Truncated BSDIFF40 control block")
+        x = signed64(control[control_pos:control_pos + 8])
+        y = signed64(control[control_pos + 8:control_pos + 16])
+        z = signed64(control[control_pos + 16:control_pos + 24])
+        control_pos += 24
+        if (x < 0 or y < 0 or x + y == 0
+                or x + y > expected_size - new_pos
+                or x > len(difference) - diff_pos
+                or y > len(extra) - extra_pos):
+            raise DeltaLayoutError("Invalid BSDIFF40 control instruction")
+        for index in range(x):
+            src = old_pos + index
+            value = original[src] if 0 <= src < len(original) else 0
+            result[new_pos + index] = (
+                difference[diff_pos + index] + value
+            ) & 0xFF
+        new_pos += x
+        old_pos += x
+        diff_pos += x
+        result[new_pos:new_pos + y] = extra[extra_pos:extra_pos + y]
+        new_pos += y
+        extra_pos += y
+        old_pos += z
+    return bytes(result)
+
+
 def _rebuild_tar(old: bytes, plan: dict, archive: zipfile.ZipFile) -> bytes:
     if len(old) > MAX_RAW_TAR:
         raise DeltaLayoutError("Base tar too large")
@@ -336,8 +409,8 @@ def _rebuild_tar(old: bytes, plan: dict, archive: zipfile.ZipFile) -> bytes:
                     or offset < 0 or offset > len(old) - old_size
                     or archive.getinfo(entry).file_size > MAX_PATCH):
                 raise DeltaLayoutError("Invalid delta binary patch reference")
-            new_body = bsdiff4.patch(
-                old[offset:offset + old_size], archive.read(entry)
+            new_body = _bsdiff_apply(
+                old[offset:offset + old_size], archive.read(entry), size
             )
             if len(new_body) != size:
                 raise DeltaLayoutError("Wrong binary patch output size")
