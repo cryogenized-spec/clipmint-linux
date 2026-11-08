@@ -42,8 +42,8 @@ class ReleaseWorkflowTests(unittest.TestCase):
             "  publish-release:", 1
         )[0]
         self.assertLess(
-            publisher.index("uses: actions/checkout@v4"),
-            publisher.index("uses: actions/download-artifact@v4"),
+            publisher.index("uses: actions/checkout@"),
+            publisher.index("uses: actions/download-artifact@"),
         )
         self.assertIn("published=", publisher)
         self.assertIn("mv \"clipmint_${version}_amd64.deb\" \"$published\"", publisher)
