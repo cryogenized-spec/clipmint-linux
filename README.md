@@ -20,51 +20,47 @@ Without Tesseract, OCR actions report that the optional tool is missing.
 
 The installer bundles Python, Qt, and FFmpeg. GitHub downloads build-time dependencies on the **GitHub runner**, not on your laptop. The app doesn't run pip/apt or fetch packages on first use.
 
-## Automatic preview updates (new bootstrap release)
+## Verified preview updates — small automatic downloads only
 
-After installing the first version that includes the updater, open
-**Settings → Updates · verified preview channel**. The
-**Automatically check and download updates (opt-in)** checkbox
-defaults to **OFF**. Use **Check and download updates now** when you want to
-check manually. If you explicitly enable automatic downloads, ClipMint checks
-the official
-`cryogenized-spec/clipmint-linux` GitHub **preview releases** no more than once
-per 24 hours (with a manual **Check for updates now** option). A successful
-`main`-branch build can now publish an **immutable, public GitHub prerelease**
-containing an `amd64.deb` and its `SHA256SUMS`.
+After installing the updater-capable version, open **Settings → Updates ·
+verified preview channel**. The **Automatically check and download small verified
+patches (20 MB max)** option defaults to **OFF**. When you opt in, ClipMint checks
+the official `cryogenized-spec/clipmint-linux` GitHub prerelease channel at most
+once per 24 hours. Only a cryptographically verified BSDIFF4 patch of **20 MiB or
+less** can be downloaded in the background; checks and metadata use a small
+additional amount of network traffic. **A background check NEVER downloads a
+full .deb installer.** It does not trigger apt, sudo, or installation.
 
-Updates download to a private user cache only after version validation. Where
-the exact previous preview installer is already cached, ClipMint first tries a
-**BSDIFF4 binary delta**. The publisher supplies one only when it is less than
-85% of the full .deb and demonstrates that the patch reconstructs the next .deb
-byte-for-byte. The client checks the old installer hash, patch hash, resulting
-full .deb checksum and Debian package identity before offering installation.
-If the base installer is absent (including first-time upgrades), the patch
-is invalid or the requested versions do not match, it downloads and verifies
-the original full .deb instead. A delta is **not guaranteed to be 5–15 MB**:
-actual savings depend on changes in the compressed installer.
+The automatic patch path requires (1) an official complete preview release
+with `DELTA.json` and patch asset, (2) an installed version exactly matching
+the patch base, and (3) the base .deb retained in ClipMint's private update
+cache. Both the cached base and patch are checked against SHA-256; the rebuilt
+installer is checked against the official `SHA256SUMS` and Debian package
+identity. If any requirement fails, ClipMint reports the new preview but
+**downloads no full installer**. A differential patch may not exist at all:
+the GitHub publisher only creates one when it reconstructs the new package
+byte-for-byte and is substantially smaller than the compressed full installer.
+The first update from a manually installed .deb ordinarily cannot use a delta
+unless that exact installer is already in the private cache.
 
-The verified download cache retains the installed preview and staged preview
-to make later deltas possible, instead of deleting the old installer prematurely.
-The old package may consume disk space until it is superseded.
-There are no update-server credentials, untrusted shell commands, package
-hooks, or automatic privileged installation. A normal GitHub login is **not**
-needed to check or download updates. Network access is required only for update
-checks and downloads; all existing clipboard functions remain local.
+**Check for verified preview updates** only checks for availability and never
+downloads a package. If a preview exists but no suitable small patch is
+available, use **Download available preview…** only if you are comfortable with
+its displayed full size. ClipMint shows a confirmation dialog specifying the
+potential full .deb transfer; declining it uses no package-download data.
+An explicitly approved manual download tries the small delta first, but can
+fall back to the full installer. All verified installers are staged privately;
+select **Open verified installer in Linux Mint…** and approve installation
+separately in the native package manager.
 
-**Important distinction:** ClipMint can **automatically check and download**,
-but it cannot silently replace a system-owned `/opt/clipmint` installation.
-Select **Open verified installer in Linux Mint…**, approve the installation
-in your native package manager, and then fully **Quit ClipMint and restart** it.
-Closing its main window only hides it; the previous background process remains
-active until you quit. If you enabled **Clear unpinned Temporary clips when I
-quit ClipMint**, disable that option first if you want to retain those entries.
+Closing the main window keeps ClipMint's background process running. After a
+package installation, explicitly **Quit ClipMint** and restart to load the new
+code. If you enabled **Clear unpinned Temporary clips when I quit ClipMint**,
+disable that option first if you want to preserve those entries.
 
-This updater is **not retroactively present in older installed .deb files**.
-Install this bootstrap .deb **once**; subsequent updates can be found and
-downloaded from inside the application. ClipMint's preview update channel uses
-`clipmint-preview-NUMBER-ATTEMPT` release tags; official stable releases remain
-separate and are not silently replaced with a downgrade.
+The official preview tag convention is
+`clipmint-preview-NUMBER-ATTEMPT`. No login credentials are needed for
+checking public GitHub releases, and existing clipboard functions work offline.
 
 ## Background clipboard history
 
