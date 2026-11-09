@@ -60,7 +60,11 @@ class HistoryControllerRefactorTests(unittest.TestCase):
         state = SimpleNamespace(
             selected_id=lambda: 42, store=store, error=Mock(),
         )
-        HistoryControllerMixin.make_selected_template(state)
+        # Production first asks for the snippet title, then checks the text.
+        # Simulate only that modal dialog; never show real Qt UI in this test.
+        with patch("clipmint.history_controller.QInputDialog.getText",
+                   return_value=("Unsafe snippet", True)):
+            HistoryControllerMixin.make_selected_template(state)
         store.save_template.assert_not_called()
         state.error.assert_called_once()
         self.assertEqual(state.error.call_args.args[0], "Snippet templates")
