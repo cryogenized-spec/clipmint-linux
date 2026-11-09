@@ -94,11 +94,11 @@ class UpdateSettingsTests(unittest.TestCase):
     def test_manual_check_never_downloads_and_full_download_needs_consent(self):
         w = self.window
         candidate = self._candidate()
-        with patch("clipmint.app.check_for_preview_update",
+        with patch("clipmint.update_controller.check_for_preview_update",
                    return_value=candidate), patch(
-            "clipmint.app.download_verified_preview"
+            "clipmint.update_controller.download_verified_preview"
         ) as download, patch(
-            "clipmint.app.threading.Thread",
+            "clipmint.update_controller.threading.Thread",
             side_effect=self._inline_thread
         ):
             w.check_for_updates(manual=True)
@@ -126,12 +126,12 @@ class UpdateSettingsTests(unittest.TestCase):
         w = self.window
         candidate = self._candidate()
         w.settings.setValue("updates/automatic", True)
-        with patch("clipmint.app.check_for_preview_update",
+        with patch("clipmint.update_controller.check_for_preview_update",
                    return_value=candidate), patch(
-            "clipmint.app.download_verified_preview",
+            "clipmint.update_controller.download_verified_preview",
             side_effect=SmallerUpdateUnavailable("No small patch")
         ) as download, patch(
-            "clipmint.app.threading.Thread",
+            "clipmint.update_controller.threading.Thread",
             side_effect=self._inline_thread
         ):
             w.check_for_updates(manual=False)
@@ -161,9 +161,9 @@ class UpdateSettingsTests(unittest.TestCase):
                 def start(self):
                     kwargs["target"]()
             return FakeThread()
-        with patch("clipmint.app.check_for_preview_update",
+        with patch("clipmint.update_controller.check_for_preview_update",
                    side_effect=RuntimeError("truncated update stream")), \
-             patch("clipmint.app.threading.Thread",
+             patch("clipmint.update_controller.threading.Thread",
                    side_effect=run_synchronously):
             w.check_for_updates(manual=True)
             self.app.processEvents()
