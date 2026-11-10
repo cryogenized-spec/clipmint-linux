@@ -115,7 +115,11 @@ class FastLauncherTests(unittest.TestCase):
             ROOT / "clipmint" / "hotkey_popup_controller.py"
         ).read_text()
         self.assertIn('with_name("ClipMint")', hotkey_controller)
-        self.assertIn("250 if had_visible_window else 0", app)
+        # Selection delay moved into the screenshot capture controller.
+        capture = (
+            ROOT / "clipmint" / "screenshot_capture_controller.py"
+        ).read_text()
+        self.assertIn("250 if had_visible_window else 0", capture)
 
 
 if __name__ == "__main__":
