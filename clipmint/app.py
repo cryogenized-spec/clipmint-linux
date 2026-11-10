@@ -51,6 +51,7 @@ from .library_controller import LibraryControllerMixin, ImagePreviewLabel
 from .hotkey_popup_controller import HotkeyPopupControllerMixin
 from .clipboard_monitor import ClipboardMonitorMixin
 from .history_maintenance_controller import HistoryMaintenanceMixin
+from .history_security_controller import HistorySecurityControllerMixin
 from .settings_controller import SettingsControllerMixin, SHORTCUT_SPECS, WheelSafeHistoryLimitComboBox
 from .single_instance import InstanceServer, send_command
 from .cinnamon_hotkey import (install_shortcut, restore_screenshot_takeover,
@@ -112,7 +113,7 @@ QStatusBar {font-family:"DejaVu Sans";font-size:12px;
 """
 
 
-class ClipMintWindow(HistoryMaintenanceMixin, ClipboardMonitorMixin, HotkeyPopupControllerMixin, LibraryControllerMixin, SettingsControllerMixin, HistoryControllerMixin, UpdateControllerMixin, AutosortControllerMixin, VaultControllerMixin, RecordingControllerMixin, QMainWindow):
+class ClipMintWindow(HistorySecurityControllerMixin, HistoryMaintenanceMixin, ClipboardMonitorMixin, HotkeyPopupControllerMixin, LibraryControllerMixin, SettingsControllerMixin, HistoryControllerMixin, UpdateControllerMixin, AutosortControllerMixin, VaultControllerMixin, RecordingControllerMixin, QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("ClipMint · Clipboard & Capture")
@@ -133,25 +134,7 @@ class ClipMintWindow(HistoryMaintenanceMixin, ClipboardMonitorMixin, HotkeyPopup
         self._temporary_expiry_timer = QTimer(self)
         self._temporary_expiry_timer.setInterval(5 * 60 * 1000)
         self._temporary_expiry_timer.timeout.connect(self.expire_temporary_if_enabled)
-        self.history_secure = False
-        self.history_security_error = ""
-        self.history_integrity_warning = ""
-        if self.settings.value("privacy/history_secure", False, type=bool):
-            try:
-                if not secure_path().is_file():
-                    raise HistorySecurityError("Encrypted history file not found")
-                key = key_from_secret_service(create=False)
-                encrypted = EncryptedClipStore(secure_path(), key)
-                self.store.close()
-                self.store = encrypted
-                self.history_secure = True
-                if encrypted.corrupt_row_ids:
-                    self.history_integrity_warning = (
-                        f"Warning: {len(encrypted.corrupt_row_ids)} unreadable "
-                        "encrypted history item(s) hidden, not deleted."
-                    )
-            except (HistorySecurityError, OSError) as exc:
-                self.history_security_error = str(exc)
+        self._initialize_encrypted_history()
         history_mb = self.settings.value("history/max_total_mb", 0, type=int)
         self.store.max_total_bytes = (
             history_mb * 1024 * 1024
@@ -632,49 +615,6 @@ class ClipMintWindow(HistoryMaintenanceMixin, ClipboardMonitorMixin, HotkeyPopup
             item.data(Qt.ItemDataRole.UserRole)
         )
         self.inform("Copied", "Saved snippet copied to the system clipboard")
-
-    def enable_encrypted_history(self):
-        if self.history_secure:
-            return
-        confirmation = QMessageBox.question(
-            self, "Encrypt clipboard history",
-            "This creates a separate encrypted SQLite database using your unlocked "
-            "desktop Secret Service keyring. The original plaintext database is "
-            "preserved for recovery. After verification, you may optionally remove "
-            "the old plaintext database in Settings. Continue?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        if confirmation != QMessageBox.StandardButton.Yes:
-            return
-        try:
-            key = key_from_secret_service(create=True)
-            secure = EncryptedClipStore.migrate_legacy(
-                self.store, secure_path(), key
-            )
-        except (HistorySecurityError, OSError, ValueError) as exc:
-            self.error("Encrypted history", str(exc))
-            return
-        secure.max_total_bytes = self.store.max_total_bytes
-        self.store.close()
-        self.store = secure
-        self.quick_popup.store = secure
-        self.history_secure = True
-        self.history_security_error = ""
-        # Enabling encrypted history also resumes monitoring. Just like
-        # Resume, baseline the current clipboard first so paused text cannot
-        # leak into the new encrypted archive on the next hidden poll.
-        self._hidden_text_probe.observe(QApplication.clipboard().mimeData())
-        self.monitoring = True
-        self.settings.setValue("privacy/history_secure", True)
-        self.secure_history_button.setText("Encrypted history active")
-        self.secure_history_button.setEnabled(False)
-        self.remove_legacy_button.setEnabled(True)
-        self.refresh()
-        self.inform(
-            "History encrypted",
-            "New captures are encrypted. The old plaintext history still exists."
-        )
 
     def select_area(self, purpose: str):
         if self.selector is not None or self.recorder_window is not None:
