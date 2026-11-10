@@ -62,8 +62,8 @@ class ScreenshotGalleryTests(unittest.TestCase):
             window = None
             try:
                 with (
-                    patch("clipmint.app.screenshots_dir", return_value=screenshots),
-                    patch("clipmint.app.recordings_dir", return_value=recordings),
+                    patch("clipmint.library_controller.screenshots_dir", return_value=screenshots),
+                    patch("clipmint.library_controller.recordings_dir", return_value=recordings),
                 ):
                     window = ClipMintWindow()
                     window.resize(1380, 900)
