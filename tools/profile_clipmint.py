@@ -20,6 +20,12 @@ import sys
 import tempfile
 import time
 
+# Invoking tools/profile_clipmint.py makes tools/ sys.path[0]; resolve
+# the checkout package explicitly without altering installed modules.
+_REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPOSITORY_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPOSITORY_ROOT))
+
 
 def milliseconds(fn, samples: int) -> dict[str, float]:
     values = []
