@@ -58,8 +58,8 @@ def main(destination: Path) -> None:
         fake_capture(shots / "Screenshot - Dashboard.png", "Dashboard / Demo", "#BD5876")
         fake_capture(shots / "Screenshot - Workshop.png", "Workshop / Demo", "#DCA37E")
         fake_capture(shots / "Screenshot - Project.png", "Projects / Demo", "#8DAFA0")
-        with patch("clipmint.app.screenshots_dir", return_value=shots), \
-             patch("clipmint.app.recordings_dir", return_value=recordings):
+        with patch("clipmint.library_controller.screenshots_dir", return_value=shots), \
+             patch("clipmint.library_controller.recordings_dir", return_value=recordings):
             window = ClipMintWindow()
             try:
                 window.resize(1507, 1044)
