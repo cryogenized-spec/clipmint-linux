@@ -268,9 +268,9 @@ class BackgroundHistoryTests(unittest.TestCase):
                     QMessageBox, "question",
                     return_value=QMessageBox.StandardButton.Yes
                 ), patch(
-                    "clipmint.app.key_from_secret_service", return_value=key
+                    "clipmint.history_security_controller.key_from_secret_service", return_value=key
                 ), patch(
-                    "clipmint.app.secure_path", return_value=secret_file
+                    "clipmint.history_security_controller.secure_path", return_value=secret_file
                 ), patch(
                     "clipmint.clipboard_monitor.blocked_foreground", return_value=False
                 ):
