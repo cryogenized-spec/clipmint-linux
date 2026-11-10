@@ -249,7 +249,7 @@ class VisibleHistoryUiTests(unittest.TestCase):
                 window.autosort_rules = default_smart_rules()
                 window.autosort_enabled = True
 
-                with patch("clipmint.app.blocked_foreground", return_value=False):
+                with patch("clipmint.clipboard_monitor.blocked_foreground", return_value=False):
                     self.app.clipboard().setText(
                         "A normal note about sunshine and window curtains"
                     )

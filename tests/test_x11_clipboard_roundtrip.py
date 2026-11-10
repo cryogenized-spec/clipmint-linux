@@ -90,7 +90,7 @@ class X11ClipboardRoundTripTests(unittest.TestCase):
             os.environ["XDG_CONFIG_HOME"] = str(Path(root) / "config")
             try:
                 self.app.setQuitOnLastWindowClosed(False)
-                with patch("clipmint.app.blocked_foreground", return_value=False):
+                with patch("clipmint.clipboard_monitor.blocked_foreground", return_value=False):
                     window = ClipMintWindow()
                     if window.tray is not None:
                         window.tray.hide()
@@ -145,7 +145,7 @@ class X11ClipboardRoundTripTests(unittest.TestCase):
             os.environ["XDG_CONFIG_HOME"] = str(Path(root) / "config")
             try:
                 self.app.setQuitOnLastWindowClosed(False)
-                with patch("clipmint.app.blocked_foreground", return_value=False):
+                with patch("clipmint.clipboard_monitor.blocked_foreground", return_value=False):
                     window = ClipMintWindow()
                     if window.tray is not None:
                         window.tray.hide()
@@ -209,7 +209,7 @@ class X11ClipboardRoundTripTests(unittest.TestCase):
             os.environ["XDG_CONFIG_HOME"] = str(Path(root) / "config")
             try:
                 self.app.setQuitOnLastWindowClosed(False)
-                with patch("clipmint.app.blocked_foreground", return_value=False), \
+                with patch("clipmint.clipboard_monitor.blocked_foreground", return_value=False), \
                      patch("clipmint.app.play_capture_sound"), \
                      patch("clipmint.app.screenshots_dir", return_value=Path(root)):
                     window = ClipMintWindow()

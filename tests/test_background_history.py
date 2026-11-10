@@ -34,7 +34,7 @@ class BackgroundHistoryTests(unittest.TestCase):
                 # Explicitly exercise the no-tray path. Monitoring must not
                 # depend on Qt's panel/tray icon availability.
                 self.app.setQuitOnLastWindowClosed(False)
-                with patch("clipmint.app.blocked_foreground", return_value=False):
+                with patch("clipmint.clipboard_monitor.blocked_foreground", return_value=False):
                     window = ClipMintWindow()
                     if window.tray is not None:
                         window.tray.hide()
@@ -116,7 +116,7 @@ class BackgroundHistoryTests(unittest.TestCase):
                 self.assertEqual(window.store.search(old_copy, None), [])
 
                 new_copy = "New copy after ClipMint background watcher starts"
-                with patch("clipmint.app.blocked_foreground", return_value=False):
+                with patch("clipmint.clipboard_monitor.blocked_foreground", return_value=False):
                     self.app.clipboard().setText(new_copy)
                     QTest.qWait(250)
                 self.assertEqual(len(window.store.search(new_copy, None)), 1)
@@ -148,7 +148,7 @@ class BackgroundHistoryTests(unittest.TestCase):
             disconnected = False
             try:
                 self.app.setQuitOnLastWindowClosed(False)
-                with patch("clipmint.app.blocked_foreground", return_value=False):
+                with patch("clipmint.clipboard_monitor.blocked_foreground", return_value=False):
                     window = ClipMintWindow()
                     if window.tray is not None:
                         window.tray.hide()
@@ -272,7 +272,7 @@ class BackgroundHistoryTests(unittest.TestCase):
                 ), patch(
                     "clipmint.app.secure_path", return_value=secret_file
                 ), patch(
-                    "clipmint.app.blocked_foreground", return_value=False
+                    "clipmint.clipboard_monitor.blocked_foreground", return_value=False
                 ):
                     window.enable_encrypted_history()
                     self.assertTrue(window.monitoring)
