@@ -210,8 +210,8 @@ class X11ClipboardRoundTripTests(unittest.TestCase):
             try:
                 self.app.setQuitOnLastWindowClosed(False)
                 with patch("clipmint.clipboard_monitor.blocked_foreground", return_value=False), \
-                     patch("clipmint.app.play_capture_sound"), \
-                     patch("clipmint.app.screenshots_dir", return_value=Path(root)):
+                     patch("clipmint.screenshot_capture_controller.play_capture_sound"), \
+                     patch("clipmint.screenshot_capture_controller.screenshots_dir", return_value=Path(root)):
                     window = ClipMintWindow()
                     window.monitoring = False
                     if window.tray is not None:
