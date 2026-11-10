@@ -110,7 +110,11 @@ class FastLauncherTests(unittest.TestCase):
         self.assertIn('install -m 755 packaging/clipmint-launcher.py', package)
         self.assertIn("python3, xz-utils, xdotool", package)
         self.assertIn('test -x "$tmp/unpacked/opt/clipmint/ClipMintApp"', verifier)
-        self.assertIn('with_name("ClipMint")', app)
+        # Global hotkey launch commands now live in the extracted controller.
+        hotkey_controller = (
+            ROOT / "clipmint" / "hotkey_popup_controller.py"
+        ).read_text()
+        self.assertIn('with_name("ClipMint")', hotkey_controller)
         self.assertIn("250 if had_visible_window else 0", app)
 
 

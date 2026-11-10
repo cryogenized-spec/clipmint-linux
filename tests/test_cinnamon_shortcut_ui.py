@@ -71,7 +71,7 @@ class GlobalShortcutUiTests(unittest.TestCase):
             window = None
             try:
                 window = self._window(root)
-                with patch("clipmint.app.install_shortcut", side_effect=[
+                with patch("clipmint.hotkey_popup_controller.install_shortcut", side_effect=[
                     ShortcutSetupError(
                         "Cinnamon's built-in screenshot action already uses this "
                         "combination. Explicit permission is needed before ClipMint "
@@ -106,7 +106,7 @@ class GlobalShortcutUiTests(unittest.TestCase):
             window = None
             try:
                 window = self._window(root)
-                with patch("clipmint.app.install_shortcut", side_effect=[
+                with patch("clipmint.hotkey_popup_controller.install_shortcut", side_effect=[
                     ShortcutSetupError("Explicit permission is needed")
                 ]) as installer, patch.object(
                     QMessageBox, "question", return_value=QMessageBox.StandardButton.No
@@ -128,12 +128,12 @@ class GlobalShortcutUiTests(unittest.TestCase):
             window = None
             try:
                 window = self._window(root)
-                with patch("clipmint.app.install_shortcut",
+                with patch("clipmint.hotkey_popup_controller.install_shortcut",
                            return_value="<Primary><Shift>r") as installer:
                     window.register_cinnamon_recording_hotkey()
                 self.assertIn("--record-area", installer.call_args.args[0])
                 self.assertEqual(installer.call_args.args[1], "Ctrl+Shift+R")
-                with patch("clipmint.app.shortcut_conflicts",
+                with patch("clipmint.hotkey_popup_controller.shortcut_conflicts",
                            side_effect=lambda seq: [{
                                "source": "custom", "command":
                                window._clipmint_launcher_command(
