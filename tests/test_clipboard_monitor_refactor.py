@@ -32,8 +32,8 @@ class ClipboardMonitorRefactorTests(unittest.TestCase):
             _own_clipboard_guard=SimpleNamespace(consume=Mock(return_value=False)),
             monitoring=False, _closing=False, store=SimpleNamespace(closed=False),
         )
-        with patch("clipmint.clipboard_monitor.QApplication.clipboard") as clipboard:
-            clipboard.return_value.mimeData.return_value = data
+        with patch("clipmint.clipboard_monitor.QApplication") as app:
+            app.clipboard.return_value.mimeData.return_value = data
             ClipboardMonitorMixin.clipboard_changed(state)
         state._hidden_text_probe.observe.assert_called_once_with(data)
         state._own_clipboard_guard.consume.assert_called_once_with(data)
@@ -45,9 +45,9 @@ class ClipboardMonitorRefactorTests(unittest.TestCase):
             _own_clipboard_guard=SimpleNamespace(consume=Mock(return_value=True)),
             monitoring=True, _closing=False, store=SimpleNamespace(closed=False),
         )
-        with patch("clipmint.clipboard_monitor.QApplication.clipboard") as clipboard, \
+        with patch("clipmint.clipboard_monitor.QApplication") as app, \
              patch("clipmint.clipboard_monitor.from_mime") as decode:
-            clipboard.return_value.mimeData.return_value = data
+            app.clipboard.return_value.mimeData.return_value = data
             ClipboardMonitorMixin.clipboard_changed(state)
         decode.assert_not_called()
 
@@ -60,24 +60,24 @@ class ClipboardMonitorRefactorTests(unittest.TestCase):
             monitoring=False, history_security_error="",
             clipboard_changed=Mock(),
         )
-        with patch("clipmint.clipboard_monitor.QApplication.clipboard") as clipboard:
-            clipboard.return_value.mimeData.return_value = data
+        with patch("clipmint.clipboard_monitor.QApplication") as app:
+            app.clipboard.return_value.mimeData.return_value = data
             ClipboardMonitorMixin.poll_hidden_clipboard(state)
         state._hidden_text_probe.observe.assert_called_once_with(data)
         state.clipboard_changed.assert_not_called()
 
     def test_expiry_token_does_not_clear_new_clipboard_value(self):
         state = SimpleNamespace(_sensitive_clipboard_token=4)
-        with patch("clipmint.clipboard_monitor.QApplication.clipboard") as clipboard:
+        with patch("clipmint.clipboard_monitor.QApplication") as app:
             ClipboardMonitorMixin.expire_sensitive_clipboard(
                 state, 3, "secret never persisted"
             )
-            clipboard.assert_not_called()
-            clipboard.return_value.text.return_value = "newer clipboard"
+            app.clipboard.assert_not_called()
+            app.clipboard.return_value.text.return_value = "newer clipboard"
             ClipboardMonitorMixin.expire_sensitive_clipboard(
                 state, 4, "secret never persisted"
             )
-            clipboard.return_value.clear.assert_not_called()
+            app.clipboard.return_value.clear.assert_not_called()
 
     def test_resuming_monitoring_baselines_existing_clipboard(self):
         data = object()
@@ -88,8 +88,8 @@ class ClipboardMonitorRefactorTests(unittest.TestCase):
             pause_button=SimpleNamespace(setText=Mock()),
             refresh=Mock(), inform=Mock(),
         )
-        with patch("clipmint.clipboard_monitor.QApplication.clipboard") as clipboard:
-            clipboard.return_value.mimeData.return_value = data
+        with patch("clipmint.clipboard_monitor.QApplication") as app:
+            app.clipboard.return_value.mimeData.return_value = data
             ClipboardMonitorMixin.toggle_monitoring(state)
         self.assertTrue(state.monitoring)
         probe.observe.assert_called_once_with(data)
