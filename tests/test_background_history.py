@@ -309,8 +309,13 @@ class BackgroundHistoryTests(unittest.TestCase):
         self.assertIn("app.setQuitOnLastWindowClosed(False)", app_source)
         self.assertIn("elif hidden:", app_source)
         self.assertIn("self.hide()\n        event.ignore()", app_source)
+        # Settings construction was extracted from app.py; the explicit
+        # quit action must remain wired to stop background monitoring.
+        settings_source = (
+            Path(__file__).resolve().parents[1] / "clipmint/settings_controller.py"
+        ).read_text(encoding="utf-8")
         self.assertIn("quit_background_button.clicked.connect(self.quit_app)",
-                      app_source)
+                      settings_source)
 
 
 if __name__ == "__main__":
