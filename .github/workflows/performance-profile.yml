@@ -1,0 +1,44 @@
+name: ClipMint synthetic performance baseline
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "clipmint/**"
+      - "tools/profile_clipmint.py"
+      - ".github/workflows/performance-profile.yml"
+  push:
+    branches: [main]
+    paths:
+      - "clipmint/**"
+      - "tools/profile_clipmint.py"
+      - ".github/workflows/performance-profile.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  baseline:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      XDG_SESSION_TYPE: x11
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - name: Install isolated Qt benchmark dependencies (CI runner only)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y libegl1 libopengl0 libxcb-cursor0 libxkbcommon-x11-0
+          python -m pip install --disable-pip-version-check -r requirements.txt
+      - name: Profile synthetic SQLite history
+        run: python tools/profile_clipmint.py --case store --rows 400 --samples 25 --output perf/store.json
+      - name: Profile fresh UI construction and peak resident memory
+        run: python tools/profile_clipmint.py --case ui --rows 100 --output perf/ui.json
+      - name: Preserve machine-readable measurements
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: clipmint-synthetic-perf
+          path: perf/*.json
+          retention-days: 14
