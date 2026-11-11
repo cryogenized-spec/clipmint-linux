@@ -132,7 +132,8 @@ def build_crimson_ui(w, image_preview_class):
     # Masthead
     mast=QHBoxLayout()
     mast.setSpacing(15)
-    w.wordmark=w.wordmark.__class__(w.brand_family)
+    # The coordinator already constructed the wordmark; reusing it avoids
+    # creating and discarding an identical Qt widget on every startup.
     w.wordmark.display_font.setPixelSize(53)
     w.wordmark.setFixedSize(w.wordmark.sizeHint())
     mast.addWidget(w.wordmark)
@@ -151,7 +152,9 @@ def build_crimson_ui(w, image_preview_class):
     workspace.setContentsMargins(0,0,0,0)
     workspace.setSpacing(12)
 
-    w.manga_dock=KohakuCardFrame()
+    w.manga_dock=KohakuCardFrame(
+        defer_image=bool(getattr(w, "_deferred_initial_history_refresh", False))
+    )
     w.manga_dock.setFixedWidth(354)
     alcove=QVBoxLayout(w.manga_dock)
     alcove.setContentsMargins(16,15,16,14)

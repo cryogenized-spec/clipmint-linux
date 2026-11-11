@@ -44,7 +44,7 @@ from . import window_actions
 
 
 class ClipMintWindow(OcrControllerMixin, AppLifecycleMixin, ScreenshotCaptureControllerMixin, HistorySecurityControllerMixin, HistoryMaintenanceMixin, ClipboardMonitorMixin, HotkeyPopupControllerMixin, LibraryControllerMixin, SettingsControllerMixin, HistoryControllerMixin, UpdateControllerMixin, AutosortControllerMixin, VaultControllerMixin, RecordingControllerMixin, QMainWindow):
-    def __init__(self):
+    def __init__(self, *, fast_capture: bool = False):
         super().__init__()
         self.setWindowTitle("ClipMint · Clipboard & Capture")
         self.brand_family = register_display_font()
@@ -106,6 +106,9 @@ class ClipMintWindow(OcrControllerMixin, AppLifecycleMixin, ScreenshotCaptureCon
         self.capture_format = "MP4"
         self._privacy_skipped = 0
         self._closing = False
+        # Cold global-hotkey launches need the selector, not an initial
+        # 1,000-row history query. Populate the archive on first reveal.
+        self._deferred_initial_history_refresh = bool(fast_capture)
         self._own_clipboard_guard = OwnClipboardGuard()
         self._hidden_text_probe = HiddenTextClipboardProbe()
         self._hidden_clipboard_timer = QTimer(self)
@@ -279,7 +282,9 @@ def main():
         QMessageBox.warning(None, "ClipMint", str(exc))
         return
     try:
-        window = ClipMintWindow()
+        window = (ClipMintWindow(fast_capture=True)
+                  if command in ("screenshot-area", "record-area")
+                  else ClipMintWindow())
         instance.setParent(window)
         window._instance_server = instance
     except BaseException:
@@ -292,8 +297,10 @@ def main():
         # A cold-start global screenshot key must not reveal the main window.
         QTimer.singleShot(0, window.choose_screenshot)
     elif command == "record-area":
-        window.show()
-        QTimer.singleShot(150, lambda: window.choose_recording("MP4"))
+        # A global recording shortcut must launch the selector in the
+        # background, just like screenshot-area. No main-window flash or
+        # artificial 150 ms delay on a cold start.
+        QTimer.singleShot(0, lambda: window.choose_recording("MP4"))
     elif hidden:
         # Login startup runs headlessly regardless of the desktop's tray
         # support. Reopen through the app launcher (single-instance 'show').

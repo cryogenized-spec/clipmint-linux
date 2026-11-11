@@ -51,6 +51,11 @@ class HistoryControllerMixin:
             self.settings.value("history/show_clip_labels", False, type=bool)
             and category == "All"
         )
+        # Query tooltip tags once per bounded group rather than up to 1,000
+        # individual SELECT statements on every tab switch or startup.
+        tags_for_ids = getattr(self.store, "tags_for_ids", None)
+        bulk_tags = (tags_for_ids([clip.id for clip in clips])
+                     if callable(tags_for_ids) else None)
         for i, clip in enumerate(clips):
             # Both the stored preview and default UI are free of prefixes.
             # Optional collection labels are presentation-only in All clips.
@@ -73,8 +78,10 @@ class HistoryControllerMixin:
                 "favorite": clip.favorite,
                 "bin": clip.bin, "type": kind_tag,
             })
+            tags = (bulk_tags.get(clip.id, []) if bulk_tags is not None
+                    else self.store.tags(clip.id))
             item.setToolTip(f"{classify(clip)} · {clip.created_at} · {clip.bin} · "
-                            + ", ".join(self.store.tags(clip.id)))
+                            + ", ".join(tags))
             self.history.addItem(item)
             if clip.id == previous:
                 self.history.setCurrentItem(item)

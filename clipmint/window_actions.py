@@ -29,15 +29,29 @@ def new_bin(w):
     w.bin_filter.setCurrentIndex(w.bin_filter.count() - 1)
 
 def open_section(w, index: int):
+    # Do not rebuild an unchanged secondary page just because its button was
+    # clicked again. Clipboard retains its explicit refresh affordance.
+    if index != 0 and getattr(w, "_active_section", None) == index:
+        # A repeated gallery click is cheap, but still checks for externally
+        # added or removed files. Without this check, new files remain stale
+        # until the user visits another page or presses Refresh.
+        if index == 1:
+            w.refresh_library_if_changed("Screenshots")
+        elif index == 2:
+            w.refresh_library_if_changed("Recordings")
+        return
     w.pages.setCurrentIndex(index)
     w.preview_panel.setVisible(index == 0)
     for i, button in enumerate(w.nav_buttons.values()):
         button.setChecked(index == i)
+    w._active_section = index
     if index == 1:
-        w.refresh_library("Screenshots")
+        w.refresh_library_if_changed("Screenshots")
     elif index == 2:
-        w.refresh_library("Recordings")
-    elif index == 0:
+        w.refresh_library_if_changed("Recordings")
+    elif index == 0 and not getattr(
+        w, "_deferred_initial_history_refresh", False
+    ):
         w.refresh()
 
 def _schedule_history_search(w, *_args):

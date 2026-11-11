@@ -79,8 +79,10 @@ class RecordingControllerMixin:
         self.capture_origin = self.selector.screen_rect.topLeft() if self.selector else None
         QTimer.singleShot(0, self.clear_selection)
         self.capture_rect = rect
-        # Main ClipMint remains hidden, and the selection overlay has exited.
-        QTimer.singleShot(300, self.show_recorder)
+        # AreaSelector hides before emitting selected, so the recording
+        # controls can appear on the next event-loop turn. No 300 ms hold
+        # is needed: recording itself still requires an explicit Start.
+        QTimer.singleShot(0, self.show_recorder)
 
     def show_recorder(self):
         self.recorder_window = RecorderWindow(self.capture_rect, self.capture_format)

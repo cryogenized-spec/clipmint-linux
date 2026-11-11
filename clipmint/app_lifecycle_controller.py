@@ -57,6 +57,9 @@ class AppLifecycleMixin:
             self.show_window()
 
     def show_window(self):
+        if getattr(self, "_deferred_initial_history_refresh", False):
+            self._deferred_initial_history_refresh = False
+            self.refresh()
         if not self.isVisible():
             # Last-chance recovery if the desktop skipped a clipboard signal
             # while the archive was hidden. This can only retrieve the current

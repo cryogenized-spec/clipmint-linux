@@ -18,12 +18,23 @@ pass/fail limits: normal CI variance should not block corrective changes.
 
 Metrics: SQLite open/reopen, corpus seed time, median/p95 search and duplicate
 latency, first Qt import, QApplication creation, main-window constructor,
-first event-processing pass, live widget count and Linux process peak RSS.
+first event-processing pass, **navigation switch-pair latency**
+(Settings↔Vault, Screenshots↔Recordings, Settings↔Clipboard),
+live widget count and Linux process peak RSS.
 
-The UI profile is a cold **window-construction** measurement, not a complete
-cold-launch-to-visible-screen measurement. The benchmark does not simulate
-X11 clipboard events, FTS index rebuilds for damaged databases, or real desktop
-painting. These must be separately profiled before asserting end-user speedups.
+The UI workflow now profiles both a 100-row baseline and a larger 500-row
+synthetic archive. Each profile uses a temporary HOME as well as temporary
+XDG data/config directories, so navigation never scans or creates archives
+under the operator's real ~/Pictures or ~/Videos. Library scans skip unchanged
+directory metadata on repeated navigation; the visible Refresh archive button
+still forces a rescan (including images edited in place).
+
+The UI profile measures cold **window construction** and synthetic section
+switches, not real cold-launch-to-visible-screen time. It does not simulate
+physical Cinnamon shortcuts, X11 IPC/screenshot latency, compositor painting,
+real disk contention, FTS rebuilds for damaged databases or real-world image
+archives. These must be measured on the user's Linux Mint laptop before
+asserting end-to-end speedups or sub-second capture selectors.
 
 SQLite queries must retain the data semantics and safety contracts established
 by the existing unit tests. A faster result obtained by bypassing privacy,
