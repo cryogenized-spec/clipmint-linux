@@ -16,11 +16,13 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("XDG_SESSION_TYPE", "x11")
 
 from PySide6.QtCore import QSettings
+from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QApplication
 
 from clipmint import app as app_module
 from clipmint.app import ClipMintWindow
 from clipmint.window_actions import open_section
+from clipmint.kohaku_card import KohakuCardFrame, card_asset_path
 from clipmint.recording_controller import RecordingControllerMixin
 
 
@@ -28,6 +30,30 @@ class FastNavigationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.app = QApplication.instance() or QApplication([])
+
+    def test_capture_only_art_is_loaded_only_on_first_actual_display(self):
+        asset = card_asset_path()
+        self.assertIsNotNone(asset)
+        with patch("clipmint.kohaku_card.QPixmap", wraps=QPixmap) as pixmap:
+            frame = KohakuCardFrame(defer_image=True)
+            self.assertTrue(frame.has_card_art)
+            self.assertEqual(frame._pending_asset, asset)
+            self.assertFalse(any(
+                call.args and call.args[0] == str(asset)
+                for call in pixmap.call_args_list
+            ))
+            frame._load_deferred_art()
+            self.assertIsNone(frame._pending_asset)
+            self.assertTrue(frame.has_card_art)
+            self.assertTrue(any(
+                call.args and call.args[0] == str(asset)
+                for call in pixmap.call_args_list
+            ))
+            frame._load_deferred_art()
+            self.assertEqual(
+                sum(call.args and call.args[0] == str(asset)
+                    for call in pixmap.call_args_list), 1
+            )
 
     def test_duplicate_secondary_click_avoids_page_reload(self):
         state = SimpleNamespace(
