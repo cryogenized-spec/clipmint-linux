@@ -52,6 +52,19 @@ middle of a working day. Back up existing application data first.
       detecting edited-in-place images.
 - [ ] Copy image/text/HTML/Nemo file paths where supported; verify X11
       clipboard ownership after the source application exits.
+- [ ] All history rows visibly show correct rectangular type labels:
+      IMAGE, TEXT, LINK, FILES, CODE and HEX. Collection prefixes remain
+      optional; no tags are stored in copied content.
+- [ ] Right-click different saved screenshots and choose **Copy image**;
+      confirm original full-resolution PNG reaches GIMP/Pinta and an image
+      paste target, with no new duplicate history item. OCR and Edit remain.
+- [ ] Drag a saved long text string into LibreOffice and a Firefox text field
+      without truncation. Drag a link to a browser URL field. Drag saved file
+      entries to an accepting file target and an image-history entry to an
+      HTML file-upload drop target in Firefox. Verify CopyAction (no move),
+      no system clipboard overwrite, no secret drag from a locked profile,
+      and temporary upload PNG cleanup. Real sites may implement their own
+      drag handlers; document specific incompatibilities.
 - [ ] Test resuming after suspend/restart and opt-in start-at-login.
 - [ ] Test a non-secret faux credential and known concealment MIME hint:
       sensitive items must never persist in ordinary history.
