@@ -126,10 +126,26 @@ def bench_ui(rows: int, root: Path):
         t0 = time.perf_counter_ns()
         app.processEvents()
         events_ms = round((time.perf_counter_ns() - t0) / 1_000_000, 3)
+        # These synthetic navigation timings exercise already-created pages.
+        # They do not measure compositor painting or a physical hotkey.
+        window.open_section(1)  # prime screenshot gallery once
+        window.open_section(2)  # prime recordings list once
+        nav = {
+            "settings_vault": milliseconds(
+                lambda: (window.open_section(5), window.open_section(3)), 30,
+            ),
+            "screenshots_recordings": milliseconds(
+                lambda: (window.open_section(1), window.open_section(2)), 30,
+            ),
+            "settings_clipboard": milliseconds(
+                lambda: (window.open_section(5), window.open_section(0)), 15,
+            ),
+        }
         return {
             "seed_rows": rows, "imports_ms": imports_ms,
             "qt_application_ms": qt_init_ms, "window_construct_ms": construct_ms,
             "first_event_pass_ms": events_ms,
+            "navigation": nav,
             "live_qt_widgets": len(QApplication.allWidgets()),
         }
     finally:
@@ -165,8 +181,11 @@ def main():
         root = Path(directory)
         old_env = {
             name: os.environ.get(name)
-            for name in ("XDG_DATA_HOME", "XDG_CONFIG_HOME")
+            for name in ("XDG_DATA_HOME", "XDG_CONFIG_HOME", "HOME")
         }
+        # Capture-library builders use Path.home(); keep synthetic profiling
+        # strictly within the temporary sandbox, never ~/Pictures or ~/Videos.
+        os.environ["HOME"] = str(root)
         os.environ["XDG_DATA_HOME"] = str(root)
         os.environ["XDG_CONFIG_HOME"] = str(root / "config")
         try:
