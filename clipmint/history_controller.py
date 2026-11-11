@@ -86,7 +86,10 @@ class HistoryControllerMixin:
             if clip.id == previous:
                 self.history.setCurrentItem(item)
         self.history.blockSignals(False)
-        self.count_label.setText(f"{len(clips):02d} / {self.store.count(bin_name):02d}")
+        # A count may walk thousands of rows. Reuse it for all three
+        # presentation labels rather than issuing redundant SQLite queries.
+        total_count = self.store.count(bin_name)
+        self.count_label.setText(f"{len(clips):02d} / {total_count:02d}")
         self.search.setToolTip(self.store.index_status())
         if self.history_secure and self.store.corrupt_row_ids:
             self.statusBar().showMessage(
@@ -100,12 +103,12 @@ class HistoryControllerMixin:
                      else "MONITORING ACTIVE" if self.monitoring
                      else "MONITORING PAUSED")
             self.footer_status.setText(
-                f"● {state}   |   HISTORY {self.store.count(bin_name):02d}"
+                f"● {state}   |   HISTORY {total_count:02d}"
             )
         if hasattr(self, "footer_status"):
             scope = "all collections" if bin_name is None else bin_name
             self.footer_status.setToolTip(
-                f"{self.store.count(bin_name)} clips in {scope}"
+                f"{total_count} clips in {scope}"
             )
         if self.history.currentItem() is None:
             self.clear_preview()
