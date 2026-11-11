@@ -51,8 +51,8 @@ class FastNavigationTests(unittest.TestCase):
             ))
             frame._load_deferred_art()
             self.assertEqual(
-                sum(call.args and call.args[0] == str(asset)
-                    for call in pixmap.call_args_list), 1
+                sum(1 for call in pixmap.call_args_list
+                    if call.args and call.args[0] == str(asset)), 1
             )
 
     def test_duplicate_secondary_click_avoids_page_reload(self):
