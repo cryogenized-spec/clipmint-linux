@@ -105,18 +105,18 @@ def _add_startup_updates(self, layout):
     update_group = QGroupBox("Updates · verified preview channel")
     update_layout = QVBoxLayout(update_group)
     update_help = QLabel(
-        "Manual checking is the default. You may opt in to automatic "
-        "checks and VERIFIED DIFFERENTIAL PATCH downloads up to 20 MB "
-        "from ClipMint's official preview channel. If a suitable patch "
-        "is unavailable, ClipMint will NOT download a full installer "
-        "automatically. Full package downloads require your explicit "
-        "approval, and installation still requires Linux Mint's "
-        "package-manager approval. No automatic sudo or installation."
+        "Manual checking is the default. You may opt into background "
+        "availability checks, but ClipMint never downloads packages in "
+        "the background while independent release signing is pending. "
+        "Download available preview requires explicit approval and shows "
+        "the full installer size, even if a smaller patch is available. "
+        "Checksums verify integrity, NOT independent publisher identity. "
+        "Installation always requires Linux Mint package-manager approval."
     )
     update_help.setWordWrap(True)
     update_layout.addWidget(update_help)
     self.auto_update_toggle = QCheckBox(
-        "Automatically check and download small verified patches (20 MB max)"
+        "Check for new previews automatically (no background downloads)"
     )
     self.auto_update_toggle.setChecked(
         self.settings.value("updates/automatic", False, type=bool)

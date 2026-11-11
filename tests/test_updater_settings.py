@@ -14,7 +14,7 @@ from PySide6.QtCore import QSettings
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from clipmint.app import ClipMintWindow
-from clipmint.updater import PreviewUpdate, SmallerUpdateUnavailable
+from clipmint.updater import PreviewUpdate
 
 
 class UpdateSettingsTests(unittest.TestCase):
@@ -105,7 +105,7 @@ class UpdateSettingsTests(unittest.TestCase):
             self.app.processEvents()
             download.assert_not_called()
             self.assertTrue(w.download_update_button.isEnabled())
-            self.assertIn("Nothing large was downloaded", w.update_status.text())
+            self.assertIn("Nothing was downloaded", w.update_status.text())
             with patch.object(
                 QMessageBox, "question",
                 return_value=QMessageBox.StandardButton.No
@@ -122,23 +122,22 @@ class UpdateSettingsTests(unittest.TestCase):
             download.assert_called_once_with(candidate)
             self.assertTrue(w.install_update_button.isEnabled())
 
-    def test_opt_in_auto_checks_never_request_a_full_installer(self):
+    def test_opt_in_auto_checks_never_stage_even_a_small_patch(self):
         w = self.window
         candidate = self._candidate()
         w.settings.setValue("updates/automatic", True)
         with patch("clipmint.update_controller.check_for_preview_update",
                    return_value=candidate), patch(
-            "clipmint.update_controller.download_verified_preview",
-            side_effect=SmallerUpdateUnavailable("No small patch")
+            "clipmint.update_controller.download_verified_preview"
         ) as download, patch(
             "clipmint.update_controller.threading.Thread",
             side_effect=self._inline_thread
         ):
             w.check_for_updates(manual=False)
             self.app.processEvents()
-            download.assert_called_once_with(candidate, smaller_only=True)
+            download.assert_not_called()
             self.assertTrue(w.download_update_button.isEnabled())
-            self.assertIn("Nothing large was downloaded", w.update_status.text())
+            self.assertIn("Nothing was downloaded", w.update_status.text())
             self.assertFalse(w.install_update_button.isEnabled())
 
     def test_download_notification_never_installs_without_user_action(self):

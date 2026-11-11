@@ -4,7 +4,7 @@
 
 ClipMint is an experimental desktop application that can handle clipboard data and propose system-level `.deb` installers. **Its current GitHub release `SHA256SUMS` file is served from the same account as the installer and is NOT an independently authenticated signature.** A malicious release uploaded using compromised publisher credentials could replace both. CI green status alone does not remove that threat.
 
-**Do not enable automatic installation.** ClipMint does not perform privileged installation; package-manager approval remains separate. Automatic downloads are disabled by default and cannot fetch a full installer without explicit consent. The automatic delta transfer ceiling is 20 MiB.
+**No automatic package staging in the v0.6.0 manual-update beta.** ClipMint does not perform privileged installation; Linux Mint package-manager approval remains separate. An older saved automatic-update opt-in now allows **availability checks only**, never downloads. Manual Download shows the full-installer size and requires explicit approval, even when a smaller patch may be used. The patch size ceiling remains 20 MiB when that future authenticated automation is permitted; it does not authorize staging today.
 
 ## Planned signing protocol (not yet activated)
 
