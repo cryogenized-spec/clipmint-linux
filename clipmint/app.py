@@ -252,8 +252,14 @@ def main():
         QMessageBox.warning(None, "X11 required",
                             "ClipMint currently requires an X11 session (e.g. Cinnamon X11).")
         raise SystemExit(1)
-    window = ClipMintWindow()
+    # Acquire the user-only instance lock BEFORE constructing ClipMintWindow.
+    # Otherwise a stalled primary instance could briefly allow a second
+    # process to open the same history archive and start a competing watcher.
+    window = None
+
     def on_command(action):
+        if window is None:
+            return
         if action == "toggle":
             window.toggle_quick_popup()
         elif action == "show":
@@ -264,13 +270,22 @@ def main():
             QTimer.singleShot(0, lambda: window.choose_recording("MP4"))
         elif action == "quit":
             window.quit_app()
+
     try:
-        window._instance_server = InstanceServer(
-            on_command, window, occupied_command="ping" if hidden else "show"
+        instance = InstanceServer(
+            on_command, occupied_command="ping" if hidden else "show"
         )
     except RuntimeError as exc:
         QMessageBox.warning(None, "ClipMint", str(exc))
         return
+    try:
+        window = ClipMintWindow()
+        instance.setParent(window)
+        window._instance_server = instance
+    except BaseException:
+        # A failed startup must never strand the socket or instance lock.
+        instance.close()
+        raise
     if command == "toggle":
         QTimer.singleShot(150, window.toggle_quick_popup)
     elif command == "screenshot-area":
