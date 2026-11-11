@@ -29,7 +29,7 @@ def card_asset_path() -> Path | None:
 class KohakuCardFrame(QFrame):
     """One supplied card illustration, aspect-preserved, with no overlay graphics."""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, *, defer_image: bool = False):
         super().__init__(parent)
         self.setObjectName("maidAlcove")
         self.setAccessibleName("Kohaku 琥珀 — The Ephemeral Catch")
@@ -40,11 +40,31 @@ class KohakuCardFrame(QFrame):
             "every last one is sealed within the hollow of my palm."
         )
         self.asset_path = card_asset_path()
-        self.card_pixmap = QPixmap(str(self.asset_path)) if self.asset_path else QPixmap()
-        self.has_card_art = not self.card_pixmap.isNull()
+        # A cold global capture shortcut never reveals the main window.
+        # Avoid decoding this large decorative PNG until it is actually painted.
+        self._pending_asset = self.asset_path if defer_image else None
+        self.card_pixmap = (QPixmap(str(self.asset_path))
+                            if self.asset_path and not defer_image else QPixmap())
+        self.has_card_art = bool(self.asset_path) if defer_image else not self.card_pixmap.isNull()
         self.setToolTip("Kohaku 琥珀 · The Ephemeral Catch")
 
+    def _load_deferred_art(self):
+        if self._pending_asset is None:
+            return
+        path, self._pending_asset = self._pending_asset, None
+        self.card_pixmap = QPixmap(str(path))
+        self.has_card_art = not self.card_pixmap.isNull()
+        if not self.has_card_art and self.layout() is not None:
+            # Retain the original accessible, live text fallback when a PNG
+            # that existed during startup is no longer readable at first show.
+            self.layout().setContentsMargins(16, 15, 16, 14)
+            for index in range(self.layout().count()):
+                item = self.layout().itemAt(index)
+                if item and item.widget():
+                    item.widget().show()
+
     def paintEvent(self, event):
+        self._load_deferred_art()
         if not self.has_card_art:
             # Offline source tree fallback remains a usable ordinary Qt card.
             super().paintEvent(event)
