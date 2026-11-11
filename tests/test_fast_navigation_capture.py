@@ -21,6 +21,7 @@ from PySide6.QtWidgets import QApplication
 from clipmint import app as app_module
 from clipmint.app import ClipMintWindow
 from clipmint.window_actions import open_section
+from clipmint.recording_controller import RecordingControllerMixin
 
 
 class FastNavigationTests(unittest.TestCase):
@@ -100,6 +101,25 @@ class FastNavigationTests(unittest.TestCase):
                     window.poller.stop()
                     window.store.close()
                     window.close()
+
+    def test_recording_controls_do_not_wait_after_area_release(self):
+        selector = SimpleNamespace(
+            pixel_scale=(1.0, 1.0),
+            screen_rect=SimpleNamespace(topLeft=lambda: object()),
+        )
+        state = SimpleNamespace(
+            selector=selector, capture_rect=None,
+            capture_scale=None, capture_origin=None,
+            clear_selection=Mock(), show_recorder=Mock(),
+        )
+        callbacks = []
+        with patch("clipmint.recording_controller.QTimer.singleShot",
+                   side_effect=lambda delay, cb: callbacks.append((delay, cb))):
+            RecordingControllerMixin.start_video(state, "selection", None)
+        self.assertEqual([ms for ms, _ in callbacks], [0, 0])
+        self.assertEqual(state.capture_rect, "selection")
+        callbacks[-1][1]()
+        state.show_recorder.assert_called_once_with()
 
     def test_cold_recording_shortcut_never_reveals_archive(self):
         for command, callback in (
