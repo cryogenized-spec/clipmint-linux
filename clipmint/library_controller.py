@@ -8,10 +8,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QSize, QTimer
+from PySide6.QtCore import Qt, QSize, QTimer, QMimeData
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import (
-    QAbstractItemView, QFrame, QHBoxLayout, QLabel, QListView, QListWidget,
+    QAbstractItemView, QApplication, QFrame, QHBoxLayout, QLabel, QListView, QListWidget,
     QListWidgetItem, QMenu, QPushButton, QSizePolicy, QVBoxLayout, QWidget,
 )
 
@@ -307,6 +307,30 @@ class LibraryControllerMixin:
         if path is not None:
             self.start_ocr_file(path)
 
+    def copy_selected_screenshot(self) -> bool:
+        """Copy the full-resolution, bounded PNG, not its gallery thumbnail."""
+        path = self.selected_screenshot_path()
+        if path is None or path.is_symlink():
+            return False
+        result = read_screenshot(path, QSize(18000, 18000))
+        if result is None:
+            self.error("Copy image", "The selected PNG cannot be safely read.")
+            return False
+        image, _dimensions = result
+        try:
+            png = path.read_bytes()
+        except OSError:
+            self.error("Copy image", "The selected PNG is no longer readable.")
+            return False
+        mime = QMimeData()
+        mime.setData("image/png", png)
+        mime.setImageData(image)
+        # Suppress re-ingesting our own clipboard write as a second entry.
+        self._own_clipboard_guard.note_entry("image", png)
+        QApplication.clipboard().setMimeData(mime)
+        self.inform("Image copied", path.name)
+        return True
+
     def open_saved_file(self, item):
         target = Path(item.data(Qt.ItemDataRole.UserRole))
         if target.is_file():
@@ -320,11 +344,15 @@ class LibraryControllerMixin:
         if item is None:
             return
         target = Path(item.data(Qt.ItemDataRole.UserRole))
+        listing.setCurrentItem(item)
         menu = QMenu(self)
+        copy = menu.addAction("Copy image")
         ocr = menu.addAction("OCR · Extract text")
         edit = menu.addAction("Open in image editor")
         choice = menu.exec(listing.viewport().mapToGlobal(position))
-        if choice == ocr:
+        if choice == copy:
+            self.copy_selected_screenshot()
+        elif choice == ocr:
             self.start_ocr_file(target)
         elif choice == edit:
             self._last_screenshot_path = target

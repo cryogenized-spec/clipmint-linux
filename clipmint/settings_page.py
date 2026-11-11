@@ -220,15 +220,15 @@ def _add_history_retention(self, layout):
     labels_group = QGroupBox("Clipboard row appearance")
     labels_layout = QVBoxLayout(labels_group)
     labels_help = QLabel(
-        "Keep All clips uncluttered. Optional type badges (TXT, URL, IMG, "
-        "etc.) and collection prefixes ([Work], [Writing], etc.) can be "
-        "shown when needed. This changes only the display, never clip "
-        "content, tags, collections, or Autosort rules."
+        "Every history row now has a visible rectangular type tag "
+        "(IMAGE, TEXT, LINK, FILES, CODE or HEX). Optionally show a "
+        "collection prefix ([Work], [Writing], etc.) and a decorative "
+        "type icon in All clips. These are display-only changes."
     )
     labels_help.setWordWrap(True)
     labels_layout.addWidget(labels_help)
     self.clip_labels_toggle = QCheckBox(
-        "Show labels before entries in All clips"
+        "Show collection prefix and icon in All clips"
     )
     self.clip_labels_toggle.setChecked(
         self.settings.value("history/show_clip_labels", False, type=bool)

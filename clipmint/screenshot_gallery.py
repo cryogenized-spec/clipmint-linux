@@ -38,8 +38,11 @@ def read_screenshot(path: Path, bounds: QSize) -> tuple[QImage, QSize] | None:
             or source_size.height() > MAX_IMAGE_DIMENSION
             or source_size.width() * source_size.height() > MAX_PIXELS):
         return None
-    scaled_size = source_size.scaled(bounds, Qt.AspectRatioMode.KeepAspectRatio)
-    if scaled_size != source_size:
+    # The provided bounds are a maximum, never a request to upscale.
+    # Enlarging a small image for Copy image wastes memory and changes the
+    # original image dimensions. Only scale down oversized previews.
+    if source_size.width() > bounds.width() or source_size.height() > bounds.height():
+        scaled_size = source_size.scaled(bounds, Qt.AspectRatioMode.KeepAspectRatio)
         reader.setScaledSize(scaled_size)
     image = reader.read()
     if image.isNull():

@@ -41,6 +41,11 @@ class ScreenshotGalleryTests(unittest.TestCase):
             self.assertLessEqual(scaled.width(), 200)
             self.assertLessEqual(scaled.height(), 120)
             self.assertIsNotNone(screenshot_thumbnail_icon(good))
+            tiny = folder / "tiny.png"
+            create_png(tiny, 40, 30)
+            full = read_screenshot(tiny, QSize(18000, 18000))
+            self.assertIsNotNone(full)
+            self.assertEqual((full[0].width(), full[0].height()), (40, 30))
             invalid = folder / "broken.png"
             invalid.write_bytes(b"not a real PNG")
             self.assertIsNone(read_screenshot(invalid, QSize(200, 120)))
