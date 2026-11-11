@@ -94,11 +94,13 @@ class InstanceServer(QObject):
             raise
 
     def close(self) -> None:
-        """Release the IPC server and its advisory lock (also on normal exit)."""
-        self.server.close()
-        if self._lock_fd is not None:
-            os.close(self._lock_fd)
-            self._lock_fd = None
+        """Release the IPC server and its advisory lock, even on socket errors."""
+        fd, self._lock_fd = self._lock_fd, None
+        try:
+            self.server.close()
+        finally:
+            if fd is not None:
+                os.close(fd)
 
     def _handle(self):
         while self.server.hasPendingConnections():
