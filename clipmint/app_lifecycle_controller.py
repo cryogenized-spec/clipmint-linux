@@ -93,6 +93,24 @@ class AppLifecycleMixin:
         event.ignore()
 
     def quit_app(self):
+        if getattr(self, "_quit_pending", False) or getattr(self, "_quit_complete", False):
+            return
+        if self.recorder.process is not None:
+            self.error("Recording active", "Finish recording before quitting")
+            return
+        # QThread must not be destroyed with its parent QWidget while running.
+        # Allow offline OCR to finish (bounded by Tesseract's timeout), but
+        # suppress any late OCR result once shutdown has been requested.
+        if any(worker.isRunning() for worker in getattr(self, "_ocr_workers", ())):
+            self._closing = True
+            self._quit_pending = True
+            self.statusBar().showMessage("Finishing OCR before quitting ClipMint…")
+            return
+        AppLifecycleMixin._finish_quit(self)
+
+    def _finish_quit(self):
+        if getattr(self, "_quit_complete", False):
+            return
         if self.recorder.process is not None:
             self.error("Recording active", "Finish recording before quitting")
             return
@@ -101,12 +119,22 @@ class AppLifecycleMixin:
             self.recorder_window.deleteLater()
             self.recorder_window = None
         self._closing = True
-        self._auto_update_timer.stop()
-        self._hidden_clipboard_timer.stop()
+        self._quit_pending = False
+        runtime = getattr(self, "_runtime_timers", None)
+        if runtime is None:
+            # Standalone integration tests and pre-registration startup paths.
+            self._auto_update_timer.stop()
+            self._hidden_clipboard_timer.stop()
+        else:
+            runtime.stop_all()
         self.lock_vault()
         self.clear_temporary_on_normal_exit()
         self.store.close()
         if self.tray is not None:
             self.tray.hide()
+        # The Qt server owns the advisory lock, not the window lifetime.
+        instance = getattr(self, "_instance_server", None)
+        if instance is not None:
+            instance.close()
+        self._quit_complete = True
         QApplication.quit()
-
