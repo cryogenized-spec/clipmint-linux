@@ -1,51 +1,28 @@
-"""ClipMint: self-contained, mouse-first clipboard bins and screen capture for Cinnamon X11."""
+"""ClipMint Linux application coordinator; feature logic lives in focused modules."""
 from __future__ import annotations
 
-from pathlib import Path
-import json
 import os
-import shlex
-import sqlite3
-import subprocess
 import sys
 
-from PySide6.QtCore import Qt, QByteArray, QBuffer, QIODevice, QTimer, QSettings, QSize
-from PySide6.QtGui import QImage, QFont, QPixmap, QKeySequence, QShortcut
-from PySide6.QtWidgets import (
-    QApplication, QComboBox, QDialog, QFrame, QHBoxLayout, QInputDialog,
-    QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow,
-    QMenu, QMessageBox, QPushButton, QStyle, QSystemTrayIcon,
-    QTabBar, QToolButton, QVBoxLayout, QWidget, QStackedWidget, QSizePolicy,
-    QKeySequenceEdit, QGroupBox, QCheckBox, QDialogButtonBox, QTabWidget,
-    QFormLayout, QAbstractItemView, QFileDialog, QScrollArea, QListView,
-)
+from PySide6.QtCore import QTimer, QSettings
+from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox
 
 from .branding import ChromaticWordmark, register_display_font
-from .manga import CrimsonMaidPortrait
-from .crimson_ui import build_crimson_ui, relative_time, label_type
-from .capture import AreaSelector, RegionRecorder, recordings_dir, screenshots_dir, stamped_filename
+from .crimson_ui import build_crimson_ui
+from .capture import AreaSelector, RegionRecorder
 from .recording_ui import RecorderWindow
-from .recording_controller import RecordingControllerMixin
-from .store import ClipStore, classify, looks_sensitive
-from .autosort import RULE_TYPES, NEVER_CAPTURE, validate_rule, route_clip
-from .smart_types import (SMART_TYPES, TYPE_BY_KEY, DEFAULT_BINS as SMART_BINS,
-                          classify_smart, default_smart_rules)
+from .store import ClipStore
+from .smart_types import DEFAULT_BINS as SMART_BINS
 from .vault import Vault
+from .screenshot_notice import ScreenshotNotice
+from .clipboard_guard import OwnClipboardGuard, HiddenTextClipboardProbe
+from .quick_popup import QuickPopup
+from .productivity import PasteQueue
+from .updater import PreviewUpdate
+from .update_controller import UpdateControllerMixin, UpdateSignals
+from .recording_controller import RecordingControllerMixin
 from .vault_controller import VaultControllerMixin
 from .autosort_controller import AutosortControllerMixin
-from .screenshot_editor import installed_editors, resolve_editor, open_image_editor
-from .screenshot_notice import ScreenshotNotice, play_capture_sound
-from .screenshot_gallery import read_screenshot, screenshot_thumbnail_icon, PREVIEW_SIZE
-from .clipboard_formats import from_mime, is_concealed, sensitive_text, mime_from_entry
-from .clipboard_guard import OwnClipboardGuard, HiddenTextClipboardProbe
-from .foreground_privacy import blocked_foreground, DEFAULT_BLOCKED
-from .ocr import OcrWorker, validate_language
-from .quick_popup import QuickPopup, paste_to_window
-from .productivity import PasteQueue
-from .organizer_ui import TemplatesDialog, TransformDialog
-from .history_filters import populate_filter_tabs, selected_category
-from .updater import installed_version, PreviewUpdate
-from .update_controller import UpdateControllerMixin, UpdateSignals
 from .history_controller import HistoryControllerMixin
 from .library_controller import LibraryControllerMixin, ImagePreviewLabel
 from .hotkey_popup_controller import HotkeyPopupControllerMixin
@@ -57,63 +34,11 @@ from .app_lifecycle_controller import AppLifecycleMixin
 from .ocr_controller import OcrControllerMixin
 from .settings_controller import SettingsControllerMixin, SHORTCUT_SPECS, WheelSafeHistoryLimitComboBox
 from .single_instance import InstanceServer, send_command
-from .cinnamon_hotkey import (install_shortcut, restore_screenshot_takeover,
-                              shortcut_conflicts, ShortcutSetupError)
-from .secure_history import (EncryptedClipStore, HistorySecurityError,
-                             key_from_secret_service, secure_path)
-from .archive_backup import backup_archive, ArchiveBackupError
-from .legacy_cleanup import verify_legacy_history, remove_verified_legacy_history
-from .autostart import AutostartError, is_enabled as login_startup_enabled, set_enabled as set_login_startup
-
-
-THEME = """
-/* Native Qt style: tonal elevation, clear hierarchy, restrained accent strokes. */
-QMainWindow, QWidget#appRoot {background:#080B10;color:#F1F5F9;
-    font-family:"DejaVu Sans";font-size:14px;}
-QLabel {color:#F1F5F9;font-family:"DejaVu Sans";font-size:14px;}
-QLabel#edition {color:#FF5AB3;font-family:"DotGothic16";font-size:14px;}
-QLabel#kanaTag {color:#B9FF45;font-family:"DotGothic16";font-size:16px;}
-QLabel#maidTag {color:#FF5AB3;font-family:"DotGothic16";font-size:14px;}
-QLabel#maidMeta {color:#94A3B8;font-family:"DejaVu Sans Mono";font-size:9px;}
-QLabel#muted {color:#94A3B8;font-size:12px;}
-QLabel#sectionTitle {color:#F1F5F9;font-family:"DotGothic16";font-size:19px;}
-QLabel#previewHeading {color:#FF5AB3;font-family:"DotGothic16";font-size:15px;}
-QLabel#previewDimensions {color:#94A3B8;font-size:12px;}
-QLineEdit,QComboBox {font-family:"DejaVu Sans";font-size:14px;
-    background:#131C2D;color:#F1F5F9;border:1px solid #253346;
-    padding:10px;border-radius:8px;selection-background-color:#226E59;}
-QLineEdit:focus,QComboBox:focus {border:1px solid #00FF9D;}
-QListWidget {font-family:"DejaVu Sans";font-size:14px;
-    background:#131C2D;color:#F1F5F9;border:0px;
-    border-radius:10px;padding:8px;outline:none;}
-QListWidget::item {padding:11px 9px;border:0px;}
-QListWidget::item:hover {background:#1A263C;border-radius:7px;}
-QListWidget::item:selected {background:#164435;border-radius:7px;}
-QPushButton,QToolButton {font-family:"DejaVu Sans";font-size:13px;
-    background:#131C2D;color:#F1F5F9;border:0px;
-    border-radius:8px;padding:11px 12px;font-weight:600;}
-QPushButton:hover,QToolButton:hover {background:#1A263C;}
-QPushButton:focus,QToolButton:focus {border:1px solid #00FF9D;}
-QPushButton:checked {background:#164435;}
-QPushButton#nav {font-family:"DotGothic16";font-size:14px;text-align:left;background:transparent;border:0px;
-    border-left:3px solid transparent;border-radius:0px;padding:12px 13px;}
-QPushButton#nav:hover {background:#1A263C;}
-QPushButton#nav:checked {background:#112B24;border-left:3px solid #00FF9D;color:#F1F5F9;}
-QPushButton#record {background:#105341;color:#F1F5F9;font-size:14px;}
-QPushButton#record:hover {background:#156B53;}
-QPushButton#screenshot {background:#35214C;color:#F1F5F9;font-size:14px;}
-QPushButton#screenshot:hover {background:#492D66;}
-QTabBar::tab {font-family:"DotGothic16";font-size:15px;
-    background:transparent;color:#94A3B8;border:0px;
-    border-bottom:2px solid transparent;
-    padding:12px 17px;border-radius:0px;margin-right:6px;}
-QTabBar::tab:hover {color:#F1F5F9;}
-QTabBar::tab:selected {color:#F1F5F9;border-bottom:2px solid #00FF9D;}
-QFrame#sidebar {background:#0D131F;border:0px;border-radius:10px;}
-QFrame#preview {background:#0D131F;border:0px;border-radius:10px;}
-QStatusBar {font-family:"DejaVu Sans";font-size:12px;
-    background:#0D131F;color:#94A3B8;border:0px;}
-"""
+from .clipboard_page import build_clipboard_page as compose_clipboard_page, build_info_page as compose_info_page
+from .vault_page import build_vault_page as compose_vault_page
+from .window_layout import update_manga_visibility as apply_manga_layout
+from .window_theme import THEME
+from . import window_actions
 
 
 class ClipMintWindow(OcrControllerMixin, AppLifecycleMixin, ScreenshotCaptureControllerMixin, HistorySecurityControllerMixin, HistoryMaintenanceMixin, ClipboardMonitorMixin, HotkeyPopupControllerMixin, LibraryControllerMixin, SettingsControllerMixin, HistoryControllerMixin, UpdateControllerMixin, AutosortControllerMixin, VaultControllerMixin, RecordingControllerMixin, QMainWindow):
@@ -249,260 +174,37 @@ class ClipMintWindow(OcrControllerMixin, AppLifecycleMixin, ScreenshotCaptureCon
             self._update_manga_visibility()
 
     def _update_manga_visibility(self):
-        """Keep dock labels readable; never regress to an icons-only rail.
-
-        The character card hides on compact displays so real editing and the
-        selected-item preview retain useful width.
-        """
-        show = self.width() >= 1120 and self.height() >= 700
-        self.manga_dock.setVisible(show)
-        if show:
-            self.manga_dock.setFixedWidth(
-                min(390, max(310, int(self.width() * .265)))
-            )
-        wide = self.width() >= 1180
-        self.dock_panel.setFixedWidth(142 if wide else 134)
-        if hasattr(self, "archive_heading"):
-            self.archive_heading.setText(
-                "Clipboard  ·  クリップボード"
-                if self.width() >= 1150 else "Clipboard"
-            )
-        if hasattr(self, "preview_heading"):
-            self.preview_heading.setText(
-                "プレビュー  Preview"
-                if self.width() >= 1190 else "プレビュー"
-            )
-        for label, button in self.nav_buttons.items():
-            display = button.property("dockDisplay") or label
-            subtitle = button.property("dockSubtitle") or ""
-            icon = button.property("dockIcon") or "◇"
-            # Even in the compact layout titles remain visible.
-            button.setText(
-                f"{icon}  {display}\n   {subtitle}"
-                if wide else f"{icon}  {display}"
-            )
-            button.setMinimumHeight(67 if wide else 49)
-            button.setToolTip(f"{display}: {label}")
+        return apply_manga_layout(self)
 
     def build_clipboard_page(self):
-        page = QWidget()
-        layout = QVBoxLayout(page)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(12)
-        bins = QHBoxLayout()
-        self.tabs = QTabBar()
-        self.tabs.setExpanding(True)
-        self.tabs.setDrawBase(False)
-        # Tabs filter a unified history; none represents a storage folder.
-        populate_filter_tabs(self.tabs)
-        self.tabs.currentChanged.connect(self.refresh)
-        bins.addWidget(self.tabs, 1)
-        layout.addLayout(bins)
-        self.search = QLineEdit()
-        self.search.setPlaceholderText("Search all copied content…")
-        self.search.textChanged.connect(self._schedule_history_search)
-        layout.addWidget(self.search)
-        sorts = QHBoxLayout()
-        sorts.addWidget(QLabel("Collection:"))
-        self.bin_filter = QComboBox()
-        self.bin_filter.setObjectName("collectionFilter")
-        self.bin_filter.addItem("All collections", None)
-        for name in self.store.bins():
-            self.bin_filter.addItem(name, name)
-        self.bin_filter.currentIndexChanged.connect(self.refresh)
-        sorts.addWidget(self.bin_filter)
-        add_bin = QPushButton("+")
-        add_bin.setToolTip("Create an Autosort collection")
-        add_bin.clicked.connect(self.new_bin)
-        sorts.addWidget(add_bin)
-        sorts.addWidget(QLabel("Sort:"))
-        self.sort_combo = QComboBox()
-        self.sort_combo.addItems(["Latest first", "Oldest first", "A–Z", "Z–A", "Best match", "Numbered list"])
-        self.sort_combo.currentIndexChanged.connect(self.refresh)
-        sorts.addWidget(self.sort_combo)
-        sorts.addStretch()
-        layout.addLayout(sorts)
-        self.count_label = QLabel("Clipboard")
-        self.count_label.setObjectName("sectionTitle")
-        layout.addWidget(self.count_label)
-        middle = QHBoxLayout()
-        middle.setSpacing(12)
-        self.history = QListWidget()
-        self.history.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.history.customContextMenuRequested.connect(self.context_menu)
-        self.history.itemDoubleClicked.connect(self.copy_clip)
-        self.history.currentItemChanged.connect(self.preview_clip)
-        middle.addWidget(self.history, 4)
-        preview_frame = QFrame()
-        preview_frame.setObjectName("preview")
-        preview_frame.setMinimumWidth(185)
-        preview_frame.setMaximumWidth(290)
-        right = QVBoxLayout(preview_frame)
-        self.preview_heading = QLabel("PREVIEW  /  プレビュー")
-        self.preview_heading.setObjectName("previewHeading")
-        right.addWidget(self.preview_heading)
-        self.preview_stack = QStackedWidget()
-        self.preview_label = QLabel("Select an item to preview")
-        self.preview_label.setWordWrap(True)
-        self.preview_label.setAlignment(Qt.AlignmentFlag.AlignTop)
-        self.preview_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        self.preview_stack.addWidget(self.preview_label)
-        self.preview_image_page = QWidget()
-        image_layout = QVBoxLayout(self.preview_image_page)
-        image_layout.setContentsMargins(0, 0, 0, 0)
-        self.preview_image = ImagePreviewLabel()
-        image_layout.addWidget(self.preview_image, 1)
-        self.preview_dimensions = QLabel("")
-        self.preview_dimensions.setObjectName("previewDimensions")
-        self.preview_dimensions.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        image_layout.addWidget(self.preview_dimensions)
-        self.preview_stack.addWidget(self.preview_image_page)
-        right.addWidget(self.preview_stack, 1)
-        copy = QPushButton("Copy selected")
-        copy.clicked.connect(self.copy_selected)
-        right.addWidget(copy)
-        middle.addWidget(preview_frame, 2)
-        layout.addLayout(middle, 1)
-        self.pages.addWidget(page)
+        return compose_clipboard_page(self)
 
     def build_info_page(self, title: str, description: str):
-        page = QWidget()
-        layout = QVBoxLayout(page)
-        heading = QLabel(title)
-        heading.setObjectName("sectionTitle")
-        layout.addWidget(heading)
-        label = QLabel(description)
-        label.setWordWrap(True)
-        label.setAlignment(Qt.AlignmentFlag.AlignTop)
-        label.setStyleSheet("font-size:14px;")
-        layout.addWidget(label)
-        layout.addStretch()
-        self.pages.addWidget(page)
+        return compose_info_page(self, title, description)
 
     def build_vault_page(self):
-        page = QWidget()
-        layout = QVBoxLayout(page)
-        heading = QLabel("Secrets & Variables · encrypted local vault")
-        heading.setObjectName("sectionTitle")
-        layout.addWidget(heading)
-        warning = QLabel(
-            "Vault entries, including names, are encrypted on disk with "
-            "libsodium SecretBox and an Argon2id-derived key. Ordinary "
-            "clipboard history is NOT encrypted. X11 makes copied values "
-            "visible to other local applications until the clipboard clears."
-        )
-        warning.setWordWrap(True)
-        layout.addWidget(warning)
-        self.vault_status = QLabel("")
-        layout.addWidget(self.vault_status)
-        self.vault_items = QListWidget()
-        self.vault_items.itemDoubleClicked.connect(
-            lambda _item: self.reveal_vault_value()
-        )
-        layout.addWidget(self.vault_items, 1)
-        auth = QHBoxLayout()
-        self.vault_actions = {}
-        for name, label, callback in (
-            ("create", "Create vault", self.create_vault),
-            ("unlock", "Unlock", self.unlock_vault),
-            ("lock", "Lock", self.lock_vault),
-            ("backup", "Encrypted backup", self.backup_vault),
-            ("restore", "Restore backup", self.restore_vault),
-        ):
-            btn = QPushButton(label)
-            btn.clicked.connect(callback)
-            auth.addWidget(btn)
-            self.vault_actions[name] = btn
-        layout.addLayout(auth)
-        commands = QHBoxLayout()
-        for name, label, callback in (
-            ("add", "New entry", self.add_vault_entry),
-            ("reveal", "Reveal", self.reveal_vault_value),
-            ("copy", "Copy", self.copy_vault_value),
-            ("remove", "Delete entry", self.remove_vault_entry),
-        ):
-            btn = QPushButton(label)
-            btn.clicked.connect(callback)
-            commands.addWidget(btn)
-            self.vault_actions[name] = btn
-        layout.addLayout(commands)
-        maintenance = QHBoxLayout()
-        for name, label, callback in (
-            ("rotate", "Change passphrase", self.change_vault_passphrase),
-            ("wipe", "Delete vault", self.wipe_vault),
-        ):
-            btn = QPushButton(label)
-            btn.clicked.connect(callback)
-            maintenance.addWidget(btn)
-            self.vault_actions[name] = btn
-        layout.addLayout(maintenance)
-        note = QLabel(
-            "There is no password reset: retain your passphrase and an "
-            "encrypted backup. The vault locks automatically after five "
-            "minutes without a vault action. It also locks when ClipMint closes."
-        )
-        note.setWordWrap(True)
-        layout.addWidget(note)
-        self.pages.addWidget(page)
-        self.refresh_vault()
+        return compose_vault_page(self)
 
     def view_bin(self) -> str | None:
-        """An optional secondary source selector, not a top history tab."""
-        name = self.bin_filter.currentData()
-        return name if isinstance(name, str) and name in self.store.bins() else None
+        return window_actions.view_bin(self)
 
     def active_bin(self) -> str:
-        """Writable target for unmatched clips; filter tabs never choose it."""
-        return self.view_bin() or "Work"
+        return window_actions.active_bin(self)
 
     def new_bin(self):
-        name, ok = QInputDialog.getText(self, "New collection", "Collection name:")
-        if not ok or not name.strip():
-            return
-        try:
-            self.store.add_bin(name.strip())
-        except (ValueError, OSError, Exception) as exc:
-            self.error("Collection", str(exc))
-            return
-        self.bin_filter.addItem(name.strip(), name.strip())
-        self.bin_filter.setCurrentIndex(self.bin_filter.count() - 1)
+        return window_actions.new_bin(self)
 
     def open_section(self, index: int):
-        self.pages.setCurrentIndex(index)
-        self.preview_panel.setVisible(index == 0)
-        for i, button in enumerate(self.nav_buttons.values()):
-            button.setChecked(index == i)
-        if index == 1:
-            self.refresh_library("Screenshots")
-        elif index == 2:
-            self.refresh_library("Recordings")
-        elif index == 0:
-            self.refresh()
+        return window_actions.open_section(self, index)
 
     def _schedule_history_search(self, *_args):
-        self._history_search_timer.start()
+        return window_actions._schedule_history_search(self, *_args)
 
     def copy_selected(self):
-        item = self.history.currentItem()
-        if item is not None:
-            self.copy_clip(item)
+        return window_actions.copy_selected(self)
 
     def copy_clip(self, item):
-        value = self.store.get(item.data(Qt.ItemDataRole.UserRole))
-        if value is None:
-            return
-        kind, contents = value
-        self._own_clipboard_guard.note_entry(kind, contents)
-        QApplication.clipboard().setMimeData(
-            mime_from_entry(kind, contents,
-                            self.store.get_formats(item.data(Qt.ItemDataRole.UserRole)))
-        )
-        self.store.refresh_temporary_copy_time(
-            item.data(Qt.ItemDataRole.UserRole)
-        )
-        self.inform("Copied", "Saved snippet copied to the system clipboard")
-
-
+        return window_actions.copy_clip(self, item)
 
 def main():
     if sys.platform != "linux":
