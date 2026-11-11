@@ -67,12 +67,22 @@ class GothicDivider(QWidget):
         p.end()
 
 
+def _footer_title_font_family() -> str:
+    """Select the existing app font or its original Georgia fallback."""
+    return (
+        "Cormorant Garamond"
+        if "Cormorant Garamond" in QFontDatabase.families()
+        else "Georgia"
+    )
+
+
 class CrimsonFooterButton(QPushButton):
     """Real clickable footer action painted as a lacquered, bevelled plaque."""
 
     def __init__(self, text: str, primary: bool, parent=None):
         super().__init__(text, parent)
         self.primary = primary
+        self._title_font_family: str | None = None
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
     def paintEvent(self, event):
@@ -114,7 +124,12 @@ class CrimsonFooterButton(QPushButton):
         p.setPen(fg)
         lines=self.text().split("\n",1)
         display_title = lines[0].replace("●", "").replace("▣", "").strip()
-        title_font = QFont("Cormorant Garamond" if "Cormorant Garamond" in QFontDatabase.families() else "Georgia")
+        # Avoid enumerating the system font database on every repaint.
+        # Fonts are registered before normal window construction; resolve
+        # lazily at the first actual paint, then reuse for hover/focus redraws.
+        if self._title_font_family is None:
+            self._title_font_family = _footer_title_font_family()
+        title_font = QFont(self._title_font_family)
         title_font.setPixelSize(23)
         p.setFont(title_font)
         p.drawText(QRect(56,7,max(5,w-64),26),Qt.AlignmentFlag.AlignVCenter,display_title)
