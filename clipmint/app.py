@@ -18,6 +18,7 @@ from .screenshot_notice import ScreenshotNotice
 from .clipboard_guard import OwnClipboardGuard, HiddenTextClipboardProbe
 from .quick_popup import QuickPopup
 from .productivity import PasteQueue
+from .runtime_timers import RuntimeTimers
 from .updater import PreviewUpdate
 from .update_controller import UpdateControllerMixin, UpdateSignals
 from .recording_controller import RecordingControllerMixin
@@ -114,6 +115,8 @@ class ClipMintWindow(OcrControllerMixin, AppLifecycleMixin, ScreenshotCaptureCon
         self._capture_restore_main = False
         self._screenshot_thumbnail_generation = 0
         self._ocr_workers = set()
+        self._quit_pending = False
+        self._quit_complete = False
         self._last_tray_notification = None
         self._screenshot_notice_token = 0
         self.screenshot_notice = None
@@ -158,6 +161,14 @@ class ClipMintWindow(OcrControllerMixin, AppLifecycleMixin, ScreenshotCaptureCon
         self.poller = QTimer(self)
         self.poller.timeout.connect(self.poll_recording)
         self.poller.start(300)
+        self._runtime_timers = RuntimeTimers(
+            auto_update=self._auto_update_timer,
+            hidden_clipboard=self._hidden_clipboard_timer,
+            temporary_expiry=self._temporary_expiry_timer,
+            history_search=self._history_search_timer,
+            recorder_poll=self.poller,
+            vault_lock=self._vault_lock_timer,
+        )
         self.open_section(0)
         self._update_manga_visibility()
         self.update_temporary_expiry_schedule()
