@@ -82,7 +82,7 @@ printf 'preserve this test user data after uninstall\n' > "$tmp/appdata/clipmint
 test -s "$tmp/appdata/clipmint/release-test-sentinel"
 
 sudo dpkg --remove clipmint
-if dpkg-query -W -f='\${Status}' clipmint 2>/dev/null | grep -Fq 'install ok installed'; then
+if dpkg-query -W -f='${Status}' clipmint 2>/dev/null | grep -Fq 'install ok installed'; then
   echo "ClipMint remained installed after dpkg --remove" >&2
   exit 1
 fi
