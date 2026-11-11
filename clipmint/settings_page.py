@@ -48,8 +48,27 @@ class WheelSafeHistoryLimitComboBox(QComboBox):
 
 
 def build_settings_page(self):
+    """Assemble independently scoped Settings groups in their display order."""
     page = QWidget()
     layout = QVBoxLayout(page)
+    _add_startup_updates(self, layout)
+    _add_history_retention(self, layout)
+    _add_ocr_popup(self, layout)
+    local_layout = _add_global_shortcuts(self, layout)
+    _add_privacy(self, layout)
+    _add_capture_preferences(self, layout)
+    _add_local_shortcuts(self, layout, local_layout)
+    scroll = QScrollArea()
+    scroll.setWidgetResizable(True)
+    scroll.setWidget(page)
+    scroll.setFrameShape(QFrame.Shape.NoFrame)
+    self.pages.addWidget(scroll)
+
+
+
+
+def _add_startup_updates(self, layout):
+    """Compose the startup updates Settings controls."""
     layout.addWidget(QLabel("Settings · local-only"))
     # The monitoring state must be visible, especially if encrypted
     # history could not be unlocked on restart. Never present a disabled
@@ -128,6 +147,10 @@ def build_settings_page(self):
     update_layout.addWidget(self.install_update_button)
     layout.addWidget(update_group)
 
+
+
+def _add_history_retention(self, layout):
+    """Compose the history retention Settings controls."""
     temp_group = QGroupBox("Temporary collection · retention")
     temp_layout = QVBoxLayout(temp_group)
     explanation = QLabel(
@@ -214,6 +237,10 @@ def build_settings_page(self):
     labels_layout.addWidget(self.clip_labels_toggle)
     layout.addWidget(labels_group)
 
+
+
+def _add_ocr_popup(self, layout):
+    """Compose the ocr popup Settings controls."""
     ocr_group = QGroupBox("Offline OCR language")
     ocr_layout = QVBoxLayout(ocr_group)
     ocr_help = QLabel(
@@ -256,6 +283,10 @@ def build_settings_page(self):
     popup_controls.addWidget(self.popup_paste_choice)
     layout.addWidget(popup_group)
 
+
+
+def _add_global_shortcuts(self, layout):
+    """Compose the global shortcuts Settings controls."""
     # One home for every hotkey: Cinnamon global + ClipMint-focused local.
     # Keep each Cinnamon registration opt-in and collision-checked.
     shortcuts_section = QGroupBox("Keyboard shortcuts")
@@ -338,7 +369,12 @@ def build_settings_page(self):
     audit_button.clicked.connect(self.audit_global_hotkeys)
     global_layout.addWidget(audit_button)
     layout.addWidget(shortcuts_section)
+    return local_layout
 
+
+
+def _add_privacy(self, layout):
+    """Compose the privacy Settings controls."""
     privacy_group = QGroupBox("Clipboard privacy")
     privacy_layout = QVBoxLayout(privacy_group)
     privacy_message = QLabel(
@@ -394,6 +430,10 @@ def build_settings_page(self):
     privacy_layout.addWidget(archive_backup_button)
     layout.addWidget(privacy_group)
 
+
+
+def _add_capture_preferences(self, layout):
+    """Compose the capture preferences Settings controls."""
     screenshot_group = QGroupBox("Screenshot editor")
     screenshot_layout = QVBoxLayout(screenshot_group)
     screenshot_help = QLabel(
@@ -432,6 +472,10 @@ def build_settings_page(self):
     screenshot_layout.addWidget(self.screenshot_sound_toggle)
     layout.addWidget(screenshot_group)
 
+
+
+def _add_local_shortcuts(self, layout, local_layout):
+    """Compose the local shortcuts Settings controls."""
     # QSettings holds nonsensitive preferences ONLY; never vault credentials.
     self.shortcut_editors = {}
     self.shortcut_values = {}
@@ -481,9 +525,4 @@ def build_settings_page(self):
         "the optional secure-history migration above."
     ))
     layout.addStretch()
-    scroll = QScrollArea()
-    scroll.setWidgetResizable(True)
-    scroll.setWidget(page)
-    scroll.setFrameShape(QFrame.Shape.NoFrame)
-    self.pages.addWidget(scroll)
 
