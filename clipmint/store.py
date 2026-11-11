@@ -230,6 +230,25 @@ class ClipStore:
             "SELECT tag FROM clip_tags WHERE clip_id=? ORDER BY tag COLLATE NOCASE", (clip_id,)
         )]
 
+    def tags_for_ids(self, clip_ids: list[int]) -> dict[int, list[str]]:
+        """Load tooltip tags in bounded batches instead of one query per clip.
+
+        A batch of 400 parameters stays below older SQLite host-variable
+        limits and never fetches clip payloads or encrypted history text.
+        """
+        ids = list(dict.fromkeys(clip_ids))
+        result: dict[int, list[str]] = {}
+        for offset in range(0, len(ids), 400):
+            group = ids[offset:offset + 400]
+            parameters = ",".join("?" for _ in group)
+            for ident, tag in self.conn.execute(
+                "SELECT clip_id, tag FROM clip_tags "
+                f"WHERE clip_id IN ({parameters}) "
+                "ORDER BY clip_id, tag COLLATE NOCASE", group
+            ):
+                result.setdefault(int(ident), []).append(tag)
+        return result
+
     def all_tags(self) -> list[str]:
         return [r[0] for r in self.conn.execute(
             "SELECT DISTINCT tag FROM clip_tags ORDER BY tag COLLATE NOCASE"
