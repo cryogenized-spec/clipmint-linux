@@ -130,7 +130,12 @@ class HistoryDragMimeTests(unittest.TestCase):
             fake_store("files", uri, {"text/uri-list": uri}), 3
         )
         self.assertIsNone(temporary)
-        self.assertEqual(bytes(mime.data("text/uri-list")), uri)
+        # Qt serializes URI-list lines with CRLF as required by the MIME
+        # format; compare their URI records rather than original newlines.
+        self.assertEqual(
+            bytes(mime.data("text/uri-list")).splitlines(), uri.splitlines()
+        )
+        self.assertTrue(mime.hasUrls())
 
     def test_png_has_image_mime_and_usable_owner_only_upload_file(self):
         raw = png_fixture()
