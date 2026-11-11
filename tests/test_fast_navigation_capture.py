@@ -66,6 +66,17 @@ class FastNavigationTests(unittest.TestCase):
         state.refresh_library_if_changed.assert_not_called()
         state.refresh.assert_not_called()
 
+    def test_active_gallery_checks_for_changes_without_rebuilding_page(self):
+        state = SimpleNamespace(
+            _active_section=1,
+            pages=Mock(), preview_panel=Mock(), nav_buttons={},
+            refresh_library_if_changed=Mock(), refresh=Mock(),
+        )
+        open_section(state, 1)
+        state.pages.setCurrentIndex.assert_not_called()
+        state.refresh_library_if_changed.assert_called_once_with("Screenshots")
+        state.refresh.assert_not_called()
+
     def test_clipboard_can_still_explicitly_refresh(self):
         state = SimpleNamespace(
             _active_section=0,
@@ -118,9 +129,14 @@ class FastNavigationTests(unittest.TestCase):
                         window.open_section(5)
                         window.open_section(1)
                         self.assertEqual(reload.call_count, 2)
+                        # While the gallery is already active, a click still
+                        # detects new files without recreating the page.
+                        (screenshots / "same-page-new.png").write_bytes(b"fixture")
+                        window.open_section(1)
+                        self.assertEqual(reload.call_count, 3)
                         # User-controlled Refresh must bypass the stamp cache.
                         window.refresh_library("Screenshots")
-                        self.assertEqual(reload.call_count, 3)
+                        self.assertEqual(reload.call_count, 4)
                 finally:
                     window._closing = True
                     window._hidden_clipboard_timer.stop()
