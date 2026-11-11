@@ -13,7 +13,8 @@ from PySide6.QtWidgets import (
 )
 
 from .store import classify, looks_sensitive
-from .clipboard_formats import mime_from_entry, sensitive_text
+from .clipboard_formats import sensitive_text
+from .history_clipboard_copy import copy_saved_clip, CopyOutcome
 from .crimson_ui import relative_time, label_type
 from .history_filters import selected_category
 from .organizer_ui import TemplatesDialog, TransformDialog
@@ -203,16 +204,10 @@ class HistoryControllerMixin:
         self.statusBar().showMessage("Copied to clipboard · Paste manually", 5000)
 
     def _copy_entry_by_id(self, clip_id: int) -> bool:
-        entry = self.store.get(clip_id)
-        if entry is None:
-            return False
-        kind, contents = entry
-        self._own_clipboard_guard.note_entry(kind, contents)
-        QApplication.clipboard().setMimeData(
-            mime_from_entry(kind, contents, self.store.get_formats(clip_id))
-        )
-        self.store.refresh_temporary_copy_time(clip_id)
-        return True
+        return copy_saved_clip(
+            self.store, lambda: self._own_clipboard_guard,
+            QApplication.clipboard, clip_id,
+        ) == CopyOutcome.COPIED
 
     def show_templates(self):
         dialog = TemplatesDialog(self.store, self._copy_plain_text, self)

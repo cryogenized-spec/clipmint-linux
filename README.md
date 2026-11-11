@@ -40,6 +40,8 @@ You can opt into encrypted history through the desktop keyring. The old plaintex
 
 The experimental vault encrypts entries locally using libsodium SecretBox and Argon2id. On X11, copying a secret to the clipboard may expose it temporarily to other local processes. Avoid storing high-value credentials until the vault has received independent review.
 
+Architecture and maintenance: [refactoring audit and remaining risks](docs/ARCHITECTURE_AUDIT_2026-11-11.md). This audit documents CI-backed boundaries and limitations; it is not a security certification or local-hardware performance benchmark.
+
 ## Source development and tests
 
 The packaged app does not run `pip`, `apt` or download dependencies on first launch. To work from a source checkout instead:
