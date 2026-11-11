@@ -24,9 +24,9 @@ For a first install, there is no smaller package. For an existing installation, 
 
 ## Verified preview updates and mobile-data safeguards
 
-Open **Settings → Updates · verified preview channel**. Automatic checks and small-patch staging are **OFF by default**. After opting in, ClipMint may check the official public preview channel at most once every 24 hours. It automatically downloads **only** matching patches up to **20 MiB**. If no verified compatible patch is published, it reports the preview but **does not silently download a full installer**.
+Open **Settings → Updates · verified preview channel**. Automatic **availability checks** are OFF by default. You may opt in to a check at most once every 24 hours, but **background checks never stage or download patches or installers** for this manual-update beta. This also applies to an opt-in preference saved by older previews. Independent publisher signing remains incomplete; GitHub-hosted SHA-256 sums prove integrity only, not who published the files. The existing **20 MiB** budget for any future automatic small-patch transfer does **not** permit background downloads in this beta.
 
-A differential patch requires the **exact installed base version** and its original matching `.deb` in ClipMint's private update cache or `~/Downloads`. The updater checks its SHA-256 and package identity, applies the patch, then verifies the reconstructed full installer. New releases may contain multiple patches for different base versions. Patches do **not** self-install or request `sudo`; package installation always requires separate approval.
+To download, use **Download available preview…**, inspect the consent dialog and estimated full-package size, and explicitly approve the transfer. ClipMint tries a matching small patch first if one is available, but a manual download may fall back to the full installer. Do not approve a large transfer on metered data. A differential patch requires the **exact installed base version** and its original matching `.deb` in the private update cache or `~/Downloads`. The updater checks package hashes and Debian identity and verifies the reconstructed installer. No patch self-installs or requests `sudo`; installation requires separate Linux Mint package-manager approval.
 
 Manual **Check for verified preview updates** only checks availability. **Download available preview…** may fall back to a large full `.deb`, and therefore shows an explicit confirmation with its size. Do not approve that download on a metered connection unless you intend to use the data.
 
@@ -63,4 +63,4 @@ Real X11 selection, FFmpeg recording, and clipboard ownership need additional de
 
 Original current ClipMint source is licensed under **AGPL-3.0-only** ([full licence](LICENSE)). Earlier MIT-licensed code retains its existing permissions ([historical MIT licence](LICENSES/MIT-legacy.txt)). FFmpeg, Qt, fonts, and other libraries have independent licences and obligations. The character illustrations are **not automatically licensed under AGPL**; their redistribution rights remain to be established. See [Third-party notices](THIRD-PARTY-NOTICES.md).
 
-Development history, obsolete preview notes and past draft PR discussions remain available in Git history rather than mixed into the current installation guide.
+For release-candidate acceptance and stop-ship conditions, see [v0.6.0 release gates](docs/RELEASE-CANDIDATE-v0.6.0.md). Development history and obsolete preview notes remain in Git history.

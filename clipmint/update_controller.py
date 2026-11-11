@@ -2,7 +2,7 @@
 
 The network and package-integrity implementation remains in updater.py.
 This controller retains explicit full-installer consent, opt-in automatic
-small patches, the download budget, and UI-thread completion signals.
+explicit download consent, disabled background staging, and UI-thread signals.
 """
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from PySide6.QtWidgets import QMessageBox, QSystemTrayIcon
 
 from .updater import (
     check_for_preview_update, download_verified_preview,
-    PreviewUpdate, SmallerUpdateUnavailable, MAX_AUTO_DELTA_BYTES,
+    PreviewUpdate,
 )
 
 
@@ -38,7 +38,7 @@ class UpdateControllerMixin:
         self.check_for_updates(manual=False)
 
     def check_for_updates(self, manual: bool = False):
-        """Find an official preview, but automatically stage small deltas only."""
+        """Check preview availability; never download anything in background."""
         if self._update_busy or self._closing:
             return
         self._update_busy = True
@@ -46,11 +46,11 @@ class UpdateControllerMixin:
         self.download_update_button.setEnabled(False)
         self.check_update_button.setEnabled(False)
         self.update_status.setText("Checking official ClipMint previews…")
-        # The manual Check button NEVER starts a download. Opted-in checks may
-        # stage a verified delta up to the strict 20 MB transfer ceiling.
-        auto_download = bool(
-            not manual and self.settings.value("updates/automatic", False, type=bool)
-        )
+        # RELEASE SECURITY GATE (#63): checks only. The old saved opt-in
+        # preference now authorizes notification checks, never downloads.
+        # SHA-256 files co-hosted with assets do not authenticate a publisher.
+        # Restore staging only after independently signed release manifests
+        # and fail-closed signature/rollback tests are deployed.
         signals = self._update_signals
 
         def check_worker():
@@ -59,14 +59,8 @@ class UpdateControllerMixin:
             error = ""
             try:
                 candidate = check_for_preview_update()
-                if candidate is not None and auto_download:
-                    try:
-                        downloaded = str(download_verified_preview(
-                            candidate, smaller_only=True
-                        ))
-                    except SmallerUpdateUnavailable:
-                        # An unavailable patch is normal, not a failed check.
-                        pass
+                # Even for a previously enabled updates/automatic preference,
+                # do not stage unsigned preview packages without consent.
             except Exception as exc:
                 error = str(exc) or type(exc).__name__
             try:
@@ -89,8 +83,9 @@ class UpdateControllerMixin:
             f"ClipMint {candidate.version} may require downloading a full "
             f"{size_mb:.1f} MiB installer. A smaller verified patch will be "
             "tried first if available, but may fall back to the full package.\n\n"
-            "This is a manual network-data download, NOT an automatic update. "
-            "Proceed?",
+            "Checksums detect corruption, but do not independently prove "
+            "publisher identity. This is an explicitly approved network-data "
+            "download, NOT an automatic update. Proceed?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
@@ -157,10 +152,11 @@ class UpdateControllerMixin:
         elif self._available_update is not None:
             size_mb = self._available_update.package_size / (1024 * 1024)
             self.update_status.setText(
-                f"New verified preview {version} available. No suitable "
-                f"automatic patch within {MAX_AUTO_DELTA_BYTES // (1024 * 1024)} "
-                f"MB; full installer is {size_mb:.1f} MiB. "
-                "Nothing large was downloaded. Choose Download to approve it."
+                f"New preview {version} available. Background checks never "
+                f"download packages. Full installer: {size_mb:.1f} MiB. "
+                "Nothing was downloaded. Choose Download to approve a "
+                "patch or installer; checksum verification is not a "
+                "publisher signature."
             )
         else:
             self.update_status.setText(
