@@ -114,6 +114,7 @@ class HistoryDragList(QListWidget):
         mime, temporary = payload
         drag = QDrag(self)
         drag.setMimeData(mime)
+        result = Qt.DropAction.IgnoreAction
         try:
             result = drag.exec(Qt.DropAction.CopyAction)
         finally:
