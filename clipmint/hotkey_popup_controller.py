@@ -19,7 +19,7 @@ from .cinnamon_hotkey import (
     ShortcutSetupError, install_shortcut, restore_screenshot_takeover,
     shortcut_conflicts,
 )
-from .clipboard_formats import mime_from_entry
+from .history_clipboard_copy import copy_saved_clip, CopyOutcome
 from .quick_popup import paste_to_window
 
 
@@ -175,23 +175,15 @@ class HotkeyPopupControllerMixin:
         self.quick_popup.toggle()
 
     def quick_pick(self, clip_id: int, plain: bool, wid: str | None, klass: str):
-        value = self.store.get(clip_id)
-        if value is None:
-            return
-        kind, content = value
-        if plain and kind != "text":
+        outcome = copy_saved_clip(
+            self.store, lambda: self._own_clipboard_guard,
+            QApplication.clipboard, clip_id, plain=plain,
+        )
+        if outcome == CopyOutcome.TEXT_ONLY:
             self.inform("Quick paste", "Plain paste works with text clips only")
             return
-        if plain:
-            value = content.decode("utf-8", "replace")
-            self._own_clipboard_guard.note_text(value)
-            QApplication.clipboard().setText(value)
-        else:
-            self._own_clipboard_guard.note_entry(kind, content)
-            QApplication.clipboard().setMimeData(
-                mime_from_entry(kind, content, self.store.get_formats(clip_id))
-            )
-        self.store.refresh_temporary_copy_time(clip_id)
+        if outcome != CopyOutcome.COPIED:
+            return
         if wid and self.settings.value("popup/auto_paste", True, type=bool):
             QTimer.singleShot(150, lambda: self._paste_to_target(wid, klass))
 
