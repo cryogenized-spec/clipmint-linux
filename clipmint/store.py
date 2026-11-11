@@ -12,14 +12,14 @@ from .clipboard_formats import bundle_to_bytes, bundle_from_bytes, sensitive_pay
 from .secret_detector import detect_secret
 from .search_index import ClipSearchIndex
 from .clip_model import DEFAULT_BINS, SORTS, Clip, classify
-from .history_search import HistorySearchMixin
+from .history_search import HistorySearchService
 
 def looks_sensitive(text: str) -> bool:
     """Compatibility entry point for the shared secret detector."""
     return detect_secret(text).is_secret
 
 
-class ClipStore(HistorySearchMixin):
+class ClipStore:
     def __init__(self, path: Path | None = None, max_unpinned: int = 250,
                  index_plaintext: bool = True, max_total_bytes: int | None = None):
         managed_path = path is None
@@ -165,6 +165,7 @@ class ClipStore(HistorySearchMixin):
         )
         self.conn.commit()
         self.search_index = ClipSearchIndex(self.conn, enabled=index_plaintext)
+        self._history_search = HistorySearchService(self.conn, self.search_index)
 
     def bins(self) -> list[str]:
         return [r[0] for r in self.conn.execute("SELECT name FROM bins ORDER BY position,name")]
@@ -336,6 +337,28 @@ class ClipStore(HistorySearchMixin):
             self.search_index.trim_deleted()
             self.conn.commit()
         return removed
+
+    def _best_match_records(
+        self, query: str, bin_name: str | None, category: str,
+        tag: str, favorites_only: bool,
+    ) -> list[Clip]:
+        """Compatibility facade for ranked metadata-only history search."""
+        return self._history_search._best_match_records(
+            query, bin_name, category, tag, favorites_only
+        )
+
+    def search(
+        self, query: str = "", bin_name: str | None = "Work",
+        sort: str = "Latest first", category: str = "All",
+        tag: str = "", favorites_only: bool = False,
+    ) -> list[Clip]:
+        """Delegate to search service without opening another connection."""
+        return self._history_search.search(
+            query, bin_name, sort, category, tag, favorites_only
+        )
+
+    def index_status(self) -> str:
+        return self._history_search.index_status()
 
     def favorite(self, clip_id: int, enabled: bool) -> None:
         self.conn.execute("UPDATE clips SET favorite=? WHERE id=?", (int(enabled), clip_id))
