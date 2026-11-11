@@ -74,4 +74,21 @@ xvfb-run -a -s '-screen 0 1280x800x24' bash -c '
     -i "${DISPLAY}+0,0" -t 1 -vf fps=3 -f gif "$output/demo.gif"
   test -s "$output/demo.gif"
 ' _ /opt/clipmint/_internal/tools/ffmpeg "$tmp"
-echo "PASS: Installed package launches; bundled FFmpeg creates MP4 and GIF under X11."
+# Test the package removal path on this disposable CI runner. Never exercise
+# package removal on the developer's laptop or a real user profile.
+# Keep a sentinel within the same isolated XDG data tree used at launch.
+mkdir -p "$tmp/appdata/clipmint"
+printf 'preserve this test user data after uninstall\n' > "$tmp/appdata/clipmint/release-test-sentinel"
+test -s "$tmp/appdata/clipmint/release-test-sentinel"
+
+sudo dpkg --remove clipmint
+if dpkg-query -W -f='${Status}' clipmint 2>/dev/null | grep -Fq 'install ok installed'; then
+  echo "ClipMint remained installed after dpkg --remove" >&2
+  exit 1
+fi
+test ! -e /opt/clipmint/ClipMint
+test ! -e /opt/clipmint/ClipMintApp
+test ! -e /usr/share/applications/clipmint.desktop
+test ! -e /usr/share/icons/hicolor/scalable/apps/clipmint.svg
+test "$(cat "$tmp/appdata/clipmint/release-test-sentinel")" = 'preserve this test user data after uninstall'
+echo "PASS: Verified package installed, launched, recorded MP4/GIF, cleanly uninstalled and preserved isolated user data."
