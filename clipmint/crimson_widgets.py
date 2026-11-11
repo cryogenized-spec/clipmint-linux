@@ -200,6 +200,14 @@ def label_type(kind: str, preview: str) -> tuple[str, str, str]:
     return "TXT", "≡", "#D8D0CE"
 
 
+def badge_title(kind_tag: str) -> str:
+    """Readable rectangular type labels in every history row."""
+    return {
+        "IMG": "IMAGE", "TXT": "TEXT", "URL": "LINK",
+        "FILE": "FILES", "HEX": "HEX", "CODE": "CODE",
+    }.get(kind_tag, kind_tag)
+
+
 class CrimsonClipDelegate(QStyledItemDelegate):
     """Clean clipboard rows: small content icon, primary text, time, pin."""
 
@@ -227,30 +235,30 @@ class CrimsonClipDelegate(QStyledItemDelegate):
         kind_tag, icon, colour = label_type(
             meta.get("kind", "text"), meta.get("raw_preview", name)
         )
+        # Type tags are always visible. The optional setting only controls
+        # the extra ornamental content icon and collection prefixes.
         if meta.get("show_badges", False):
-            # Opt-in: include the old type chips and collection label.
-            # Never change the actual saved clipboard contents.
             x = r.left() + 12
-            y = r.top() + (r.height() - 34)//2
+            y = r.top() + (r.height() - 34) // 2
             painter.setPen(QPen(QColor("#9A5A67"), 1))
             painter.drawRect(x, y, 34, 34)
             painter.setPen(QColor(PORCELAIN))
             painter.setFont(QFont("DejaVu Sans Mono", 12, QFont.Weight.Bold))
             painter.drawText(QRect(x, y, 34, 34), Qt.AlignmentFlag.AlignCenter, icon)
             tagx = x + 45
-            tagw = 39 if kind_tag == "CODE" else 29
-            painter.fillRect(QRect(tagx, r.top()+17, tagw, 19), QColor(colour))
-            painter.setPen(QColor("#25101A"))
-            painter.setFont(QFont("DejaVu Sans Mono", 9, QFont.Weight.Bold))
-            painter.drawText(
-                QRect(tagx, r.top()+17, tagw, 19),
-                Qt.AlignmentFlag.AlignCenter, kind_tag,
-            )
-            textx = tagx + tagw + 8
         else:
-            # Default: clean text aligned with the row, no leading chips
-            # or decorative icon labels. The category tabs remain available.
-            textx = r.left() + 16
+            tagx = r.left() + 16
+        badge = badge_title(kind_tag)
+        badge_font = QFont("DejaVu Sans Mono", 9, QFont.Weight.Bold)
+        tagw = max(39, QFontMetrics(badge_font).horizontalAdvance(badge) + 14)
+        painter.fillRect(QRect(tagx, r.top() + 17, tagw, 19), QColor(colour))
+        painter.setPen(QColor("#25101A"))
+        painter.setFont(badge_font)
+        painter.drawText(
+            QRect(tagx, r.top() + 17, tagw, 19),
+            Qt.AlignmentFlag.AlignCenter, badge,
+        )
+        textx = tagx + tagw + 10
         available=max(30, r.right()-textx-40)
         painter.setPen(QColor("#F4EEEB"))
         painter.setFont(QFont("Cormorant Garamond", 17))
