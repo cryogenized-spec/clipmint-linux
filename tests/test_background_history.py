@@ -313,10 +313,10 @@ class BackgroundHistoryTests(unittest.TestCase):
             / "clipmint/app_lifecycle_controller.py"
         ).read_text(encoding="utf-8")
         self.assertIn("self.hide()\n        event.ignore()", lifecycle_source)
-        # Settings construction was extracted from app.py; the explicit
+        # Settings construction is now in settings_page.py; the explicit
         # quit action must remain wired to stop background monitoring.
         settings_source = (
-            Path(__file__).resolve().parents[1] / "clipmint/settings_controller.py"
+            Path(__file__).resolve().parents[1] / "clipmint/settings_page.py"
         ).read_text(encoding="utf-8")
         self.assertIn("quit_background_button.clicked.connect(self.quit_app)",
                       settings_source)
