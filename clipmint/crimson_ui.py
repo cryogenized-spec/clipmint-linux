@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 from .manga import CrimsonMaidPortrait
 from .kohaku_card import KohakuCardFrame
 from .kohaku_theme import KOHaku_QSS
+from .history_drag import HistoryDragList
 from .crimson_widgets import (
     ROSE, LIME, PORCELAIN, MUTED, GothicSearchCapsule, GothicDivider,
     CrimsonFooterButton, CrimsonFooterArrow, CrimsonClipDelegate, label_type,
@@ -494,7 +495,7 @@ def build_archive_page(w):
     w.queue_next_button.setEnabled(False)
     organisers.addWidget(w.queue_next_button, 1)
     layout.addLayout(organisers)
-    w.history=QListWidget()
+    w.history=HistoryDragList(w)
     w.history.setObjectName("clipHistory")
     w.history.setUniformItemSizes(True)
     w.history.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
