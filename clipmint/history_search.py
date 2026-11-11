@@ -7,11 +7,16 @@ EncryptedClipStore continues to override search with in-memory matching.
 from __future__ import annotations
 
 from .clip_model import Clip, SORTS
-from .search_index import safe_fts_query
+from .search_index import ClipSearchIndex, safe_fts_query
+import sqlite3
 
 
-class HistorySearchMixin:
-    """Search implementation kept separate from persistence and migrations."""
+class HistorySearchService:
+    """Explicit search dependency; never owns or opens database connections."""
+
+    def __init__(self, conn: sqlite3.Connection, index: ClipSearchIndex):
+        self.conn = conn
+        self.search_index = index
 
     def _best_match_records(
         self, query: str, bin_name: str | None, category: str,
