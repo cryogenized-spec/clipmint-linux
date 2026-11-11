@@ -164,6 +164,23 @@ class LibraryControllerMixin:
         self.libraries[kind] = listing
         self.pages.addWidget(page)
 
+    def refresh_library_if_changed(self, kind: str):
+        """Avoid repeatedly rescanning/decoding the same capture directory.
+
+        Directory metadata changes when files are added, deleted or renamed.
+        The explicit Refresh archive button remains unconditional for external
+        in-place image edits, which don't necessarily alter directory mtime.
+        """
+        folder = screenshots_dir() if kind == "Screenshots" else recordings_dir()
+        try:
+            stamp = (str(folder), folder.stat().st_mtime_ns)
+        except OSError:
+            self.refresh_library(kind)
+            return
+        if getattr(self, "_library_scan_stamps", {}).get(kind) == stamp:
+            return
+        self.refresh_library(kind)
+
     def refresh_library(self, kind: str, select_path: Path | None = None):
         listing = self.libraries[kind]
         current = listing.currentItem()
@@ -213,6 +230,19 @@ class LibraryControllerMixin:
             else:
                 self.preview_saved_screenshot(None)
             self._paint_screenshot_thumbnails(thumbnail_rows, generation)
+        # Store the stamp after the scan, including explicit refreshes and
+        # newly captured screenshots. Invalidates automatically on directory
+        # changes without touching any thumbnail cache on disk.
+        try:
+            stamp = (str(folder), folder.stat().st_mtime_ns)
+        except OSError:
+            stamp = None
+        if not hasattr(self, "_library_scan_stamps"):
+            self._library_scan_stamps = {}
+        if stamp is None:
+            self._library_scan_stamps.pop(kind, None)
+        else:
+            self._library_scan_stamps[kind] = stamp
 
     def _paint_screenshot_thumbnails(self, rows, generation: int):
         """Decode in small event-loop batches so large archives stay responsive."""
