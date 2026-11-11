@@ -33,7 +33,7 @@ class RuntimeShutdownTests(unittest.TestCase):
         worker = SimpleNamespace(isRunning=lambda: True)
         state = SimpleNamespace(
             _closing=False, _quit_pending=False, _quit_complete=False,
-            _ocr_workers={worker} if False else [worker],
+            _ocr_workers=[worker],
             recorder=SimpleNamespace(process=None),
             statusBar=lambda: SimpleNamespace(showMessage=Mock()),
             store=SimpleNamespace(close=Mock()),
