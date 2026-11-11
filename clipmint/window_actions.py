@@ -5,7 +5,7 @@ Use the existing window; do not create another store or clipboard monitor.
 from __future__ import annotations
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QInputDialog
-from .clipboard_formats import mime_from_entry
+from .history_clipboard_copy import copy_saved_clip, CopyOutcome
 
 def view_bin(w) -> str | None:
     """An optional secondary source selector, not a top history tab."""
@@ -49,16 +49,9 @@ def copy_selected(w):
         w.copy_clip(item)
 
 def copy_clip(w, item):
-    value = w.store.get(item.data(Qt.ItemDataRole.UserRole))
-    if value is None:
-        return
-    kind, contents = value
-    w._own_clipboard_guard.note_entry(kind, contents)
-    QApplication.clipboard().setMimeData(
-        mime_from_entry(kind, contents,
-                        w.store.get_formats(item.data(Qt.ItemDataRole.UserRole)))
-    )
-    w.store.refresh_temporary_copy_time(
-        item.data(Qt.ItemDataRole.UserRole)
-    )
-    w.inform("Copied", "Saved snippet copied to the system clipboard")
+    clip_id = item.data(Qt.ItemDataRole.UserRole)
+    if copy_saved_clip(
+        w.store, lambda: w._own_clipboard_guard,
+        QApplication.clipboard, clip_id,
+    ) == CopyOutcome.COPIED:
+        w.inform("Copied", "Saved snippet copied to the system clipboard")
