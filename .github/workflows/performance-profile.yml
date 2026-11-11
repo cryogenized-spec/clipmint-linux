@@ -36,6 +36,8 @@ jobs:
         run: python tools/profile_clipmint.py --case store --rows 400 --samples 25 --output perf/store.json
       - name: Profile fresh UI construction and peak resident memory
         run: python tools/profile_clipmint.py --case ui --rows 100 --output perf/ui.json
+      - name: Profile larger 500-entry clipboard and fast sidebar navigation
+        run: python tools/profile_clipmint.py --case ui --rows 500 --output perf/ui-large.json
       - name: Preserve machine-readable measurements
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
