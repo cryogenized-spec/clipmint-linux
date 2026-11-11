@@ -27,6 +27,7 @@ from .history_controller import HistoryControllerMixin
 from .library_controller import LibraryControllerMixin, ImagePreviewLabel
 from .hotkey_popup_controller import HotkeyPopupControllerMixin
 from .clipboard_monitor import ClipboardMonitorMixin
+from .clip_ingestion import ClipboardIngestionService
 from .history_maintenance_controller import HistoryMaintenanceMixin
 from .history_security_controller import HistorySecurityControllerMixin
 from .screenshot_capture_controller import ScreenshotCaptureControllerMixin
@@ -63,6 +64,12 @@ class ClipMintWindow(OcrControllerMixin, AppLifecycleMixin, ScreenshotCaptureCon
         self._temporary_expiry_timer.setInterval(5 * 60 * 1000)
         self._temporary_expiry_timer.timeout.connect(self.expire_temporary_if_enabled)
         self._initialize_encrypted_history()
+        # The service resolves the active store on every capture: encryption
+        # migration can swap self.store later in this running window.
+        self._clip_ingestion = ClipboardIngestionService(
+            lambda: self.store,
+            lambda *args, **kwargs: self.autosort_destination(*args, **kwargs),
+        )
         history_mb = self.settings.value("history/max_total_mb", 0, type=int)
         self.store.max_total_bytes = (
             history_mb * 1024 * 1024

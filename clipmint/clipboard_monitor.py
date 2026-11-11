@@ -11,7 +11,6 @@ from PySide6.QtWidgets import QApplication
 
 from .clipboard_formats import from_mime, is_concealed, sensitive_text
 from .foreground_privacy import blocked_foreground, DEFAULT_BLOCKED
-from .smart_types import classify_smart
 
 
 class ClipboardMonitorMixin:
@@ -90,33 +89,22 @@ class ClipboardMonitorMixin:
                     "Sensitive clipboard content detected · not saved to history", 6000
                 )
             return
-        current_bin = self.active_bin()
-        full_text = (entry.content.decode("utf-8", "replace")
-                     if entry.kind == "text" else entry.preview)
-        target = self.autosort_destination(
-            entry.kind, full_text, current_bin, formats=entry.formats
-        )
-        if target is None:
-            self.statusBar().showMessage("Clip excluded by Autosort rule", 4000)
-            return
         title = entry.preview
         if entry.kind == "image" and png:
             image = QImage.fromData(png, "PNG")
             title = f"Image {image.width()} × {image.height()}"
-        saved_id = self.store.add(
-            entry.kind, entry.content, title, target, formats=entry.formats
+        result = self._clip_ingestion.ingest(
+            entry, self.active_bin(),
+            autosort_enabled=self.autosort_enabled, preview=title,
         )
-        if saved_id is not None and self.autosort_enabled:
-            category = classify_smart(entry.kind, full_text, entry.formats)
-            if category:
-                tag = "type_" + category.replace("-", "_")
-                existing = self.store.tags(saved_id)
-                if tag not in existing and len(existing) < 15:
-                    self.store.set_tags(saved_id, [*existing, tag])
+        if result.excluded_by_rule:
+            self.statusBar().showMessage("Clip excluded by Autosort rule", 4000)
+            return
         self.refresh()
-        if saved_id is not None and self.view_bin() is not None and target != self.view_bin():
+        if (result.saved_id is not None and self.view_bin() is not None
+                and result.destination != self.view_bin()):
             self.statusBar().showMessage(
-                f"Clip saved in {target}. Choose All collections to see it.",
+                f"Clip saved in {result.destination}. Choose All collections to see it.",
                 6500,
             )
 
