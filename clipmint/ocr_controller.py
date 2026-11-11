@@ -38,6 +38,8 @@ class OcrControllerMixin:
             self.error("OCR", str(exc))
 
     def start_ocr(self, png: bytes):
+        if getattr(self, "_closing", False):
+            return
         if not png or len(png) > 16 * 1024 * 1024:
             self.error("OCR", "Choose a PNG image smaller than 16 MB")
             return
@@ -51,12 +53,31 @@ class OcrControllerMixin:
             return
         self._ocr_workers.add(worker)
         worker.recognized.connect(self.ocr_recognized)
-        worker.failed.connect(lambda message: self.error("OCR", message))
-        worker.finished.connect(lambda: self._ocr_workers.discard(worker))
+        worker.failed.connect(
+            lambda message: self.error("OCR", message)
+            if not getattr(self, "_closing", False) else None
+        )
+        worker.finished.connect(lambda: self._ocr_worker_finished(worker))
         self.statusBar().showMessage("OCR: extracting text locally…", 6000)
-        worker.start()
+        try:
+            worker.start()
+        except RuntimeError as exc:
+            self._ocr_workers.discard(worker)
+            worker.deleteLater()
+            self.error("OCR", str(exc))
+
+    def _ocr_worker_finished(self, worker):
+        self._ocr_workers.discard(worker)
+        worker.deleteLater()
+        if (getattr(self, "_quit_pending", False)
+                and not any(w.isRunning() for w in self._ocr_workers)):
+            self._finish_quit()
 
     def ocr_recognized(self, text: str):
+        # Results emitted during a pending quit must never repopulate history
+        # or clipboard after the user requested shutdown.
+        if getattr(self, "_closing", False):
+            return
         if not text.strip():
             self.inform("OCR", "No readable text detected")
             return

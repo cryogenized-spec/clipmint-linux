@@ -18,6 +18,7 @@ from .screenshot_notice import ScreenshotNotice
 from .clipboard_guard import OwnClipboardGuard, HiddenTextClipboardProbe
 from .quick_popup import QuickPopup
 from .productivity import PasteQueue
+from .runtime_timers import RuntimeTimers
 from .updater import PreviewUpdate
 from .update_controller import UpdateControllerMixin, UpdateSignals
 from .recording_controller import RecordingControllerMixin
@@ -114,6 +115,8 @@ class ClipMintWindow(OcrControllerMixin, AppLifecycleMixin, ScreenshotCaptureCon
         self._capture_restore_main = False
         self._screenshot_thumbnail_generation = 0
         self._ocr_workers = set()
+        self._quit_pending = False
+        self._quit_complete = False
         self._last_tray_notification = None
         self._screenshot_notice_token = 0
         self.screenshot_notice = None
@@ -158,6 +161,14 @@ class ClipMintWindow(OcrControllerMixin, AppLifecycleMixin, ScreenshotCaptureCon
         self.poller = QTimer(self)
         self.poller.timeout.connect(self.poll_recording)
         self.poller.start(300)
+        self._runtime_timers = RuntimeTimers(
+            auto_update=self._auto_update_timer,
+            hidden_clipboard=self._hidden_clipboard_timer,
+            temporary_expiry=self._temporary_expiry_timer,
+            history_search=self._history_search_timer,
+            recorder_poll=self.poller,
+            vault_lock=self._vault_lock_timer,
+        )
         self.open_section(0)
         self._update_manga_visibility()
         self.update_temporary_expiry_schedule()
@@ -241,8 +252,14 @@ def main():
         QMessageBox.warning(None, "X11 required",
                             "ClipMint currently requires an X11 session (e.g. Cinnamon X11).")
         raise SystemExit(1)
-    window = ClipMintWindow()
+    # Acquire the user-only instance lock BEFORE constructing ClipMintWindow.
+    # Otherwise a stalled primary instance could briefly allow a second
+    # process to open the same history archive and start a competing watcher.
+    window = None
+
     def on_command(action):
+        if window is None:
+            return
         if action == "toggle":
             window.toggle_quick_popup()
         elif action == "show":
@@ -253,13 +270,22 @@ def main():
             QTimer.singleShot(0, lambda: window.choose_recording("MP4"))
         elif action == "quit":
             window.quit_app()
+
     try:
-        window._instance_server = InstanceServer(
-            on_command, window, occupied_command="ping" if hidden else "show"
+        instance = InstanceServer(
+            on_command, occupied_command="ping" if hidden else "show"
         )
     except RuntimeError as exc:
         QMessageBox.warning(None, "ClipMint", str(exc))
         return
+    try:
+        window = ClipMintWindow()
+        instance.setParent(window)
+        window._instance_server = instance
+    except BaseException:
+        # A failed startup must never strand the socket or instance lock.
+        instance.close()
+        raise
     if command == "toggle":
         QTimer.singleShot(150, window.toggle_quick_popup)
     elif command == "screenshot-area":

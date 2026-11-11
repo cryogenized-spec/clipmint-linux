@@ -93,6 +93,24 @@ class AppLifecycleMixin:
         event.ignore()
 
     def quit_app(self):
+        if getattr(self, "_quit_pending", False) or getattr(self, "_quit_complete", False):
+            return
+        if self.recorder.process is not None:
+            self.error("Recording active", "Finish recording before quitting")
+            return
+        # QThread must not be destroyed with its parent QWidget while running.
+        # Allow offline OCR to finish (bounded by Tesseract's timeout), but
+        # suppress any late OCR result once shutdown has been requested.
+        if any(worker.isRunning() for worker in getattr(self, "_ocr_workers", ())):
+            self._closing = True
+            self._quit_pending = True
+            self.statusBar().showMessage("Finishing OCR before quitting ClipMint…")
+            return
+        AppLifecycleMixin._finish_quit(self)
+
+    def _finish_quit(self):
+        if getattr(self, "_quit_complete", False):
+            return
         if self.recorder.process is not None:
             self.error("Recording active", "Finish recording before quitting")
             return
@@ -101,12 +119,40 @@ class AppLifecycleMixin:
             self.recorder_window.deleteLater()
             self.recorder_window = None
         self._closing = True
-        self._auto_update_timer.stop()
-        self._hidden_clipboard_timer.stop()
-        self.lock_vault()
-        self.clear_temporary_on_normal_exit()
-        self.store.close()
-        if self.tray is not None:
-            self.tray.hide()
-        QApplication.quit()
+        self._quit_pending = False
+        # Finish all independent cleanup steps even if one raises. In
+        # particular, losing a timer or SQLite operation must not strand the
+        # private IPC lock or leave background watchers running.
+        errors = []
 
+        def cleanup(name, callback):
+            try:
+                callback()
+            except Exception as exc:
+                errors.append((name, type(exc).__name__))
+
+        runtime = getattr(self, "_runtime_timers", None)
+        if runtime is None:
+            # Standalone tests and pre-registration startup paths.
+            cleanup("Update timer", self._auto_update_timer.stop)
+            cleanup("Clipboard timer", self._hidden_clipboard_timer.stop)
+        else:
+            cleanup("Background timers", runtime.stop_all)
+        cleanup("Vault", self.lock_vault)
+        cleanup("Temporary history", self.clear_temporary_on_normal_exit)
+        cleanup("History connection", self.store.close)
+        if self.tray is not None:
+            cleanup("Tray", self.tray.hide)
+        # Releasing the lock is independent of all storage and UI failures.
+        instance = getattr(self, "_instance_server", None)
+        if instance is not None:
+            cleanup("Single instance", instance.close)
+        self._quit_complete = True
+        if errors:
+            QMessageBox.warning(
+                self, "ClipMint shutdown incomplete",
+                "Some background resources could not be cleaned up: "
+                + ", ".join(f"{name} ({kind})" for name, kind in errors)
+                + ". Check the local database and restart before continuing.",
+            )
+        QApplication.quit()
