@@ -1,7 +1,7 @@
 """Local SQLite clipboard history, organised into independent accumulation bins."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from pathlib import Path
 import hashlib
 import os
@@ -13,6 +13,8 @@ from .secret_detector import detect_secret
 from .search_index import ClipSearchIndex
 from .clip_model import DEFAULT_BINS, SORTS, Clip, classify
 from .history_search import HistorySearchService
+from .history_schema import initialize_history_schema
+from .history_retention import HistoryRetentionService
 
 def looks_sensitive(text: str) -> bool:
     """Compatibility entry point for the shared secret detector."""
@@ -45,127 +47,10 @@ class ClipStore:
         self.max_total_bytes = max_total_bytes  # None means OFF, never prune on upgrade
         self.closed = False
         self.conn = sqlite3.connect(self.path)
-        # Match the public classify() rules inside SQL, so category selection
-        # happens before the result limit rather than dropping old matches.
-        self.conn.create_function(
-            "clipmint_category", 2,
-            lambda kind, preview: classify(Clip(0, kind, preview, False, "")),
-            deterministic=True,
-        )
-        self.conn.execute("PRAGMA secure_delete=ON")
-        self.conn.execute("PRAGMA journal_mode=WAL")
-        self.conn.execute("""CREATE TABLE IF NOT EXISTS clips (
-            id INTEGER PRIMARY KEY,
-            kind TEXT NOT NULL CHECK(kind IN ('text', 'image', 'files')),
-            content BLOB NOT NULL,
-            formats BLOB,
-            preview TEXT NOT NULL,
-            pinned INTEGER NOT NULL DEFAULT 0,
-            created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-            bin TEXT NOT NULL DEFAULT 'Work'
-        )""")
-        # Preserve old ClipMint histories. Existing records are assigned to Work.
-        columns = {row[1] for row in self.conn.execute("PRAGMA table_info(clips)")}
-        if "formats" not in columns:
-            self.conn.execute("ALTER TABLE clips ADD COLUMN formats BLOB")
-        if "bin" not in columns:
-            self.conn.execute("ALTER TABLE clips ADD COLUMN bin TEXT NOT NULL DEFAULT 'Work'")
-        self.conn.execute("""CREATE TABLE IF NOT EXISTS bins (
-            name TEXT PRIMARY KEY,
-            position INTEGER NOT NULL
-        )""")
-        for index, name in enumerate(DEFAULT_BINS):
-            self.conn.execute("INSERT OR IGNORE INTO bins(name,position) VALUES(?,?)", (name, index))
-        original_schema = self.conn.execute(
-            "SELECT sql FROM sqlite_master WHERE type='table' AND name='clips'"
-        ).fetchone()[0]
-        if "'files'" not in original_schema:
-            # Original v0.3 database CHECK only permitted text/images. Rebuild
-            # transactionally, retaining row IDs, timestamps, pins and bins.
-            # Any failure rolls the whole migration back rather than dropping
-            # or silently rewriting user history.
-            self.conn.execute("SAVEPOINT clipmint_mime_upgrade")
-            try:
-                self.conn.execute("""CREATE TABLE clips_mime_upgrade (
-                    id INTEGER PRIMARY KEY,
-                    kind TEXT NOT NULL CHECK(kind IN ('text','image','files')),
-                    content BLOB NOT NULL, formats BLOB, preview TEXT NOT NULL,
-                    pinned INTEGER NOT NULL DEFAULT 0,
-                    created_at TEXT NOT NULL DEFAULT
-                      (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-                    bin TEXT NOT NULL DEFAULT 'Work'
-                )""")
-                self.conn.execute("""INSERT INTO clips_mime_upgrade
-                    (id,kind,content,formats,preview,pinned,created_at,bin)
-                    SELECT id,kind,content,formats,preview,pinned,created_at,bin
-                    FROM clips""")
-                self.conn.execute("DROP TABLE clips")
-                self.conn.execute("ALTER TABLE clips_mime_upgrade RENAME TO clips")
-                self.conn.execute("RELEASE SAVEPOINT clipmint_mime_upgrade")
-            except Exception:
-                self.conn.execute("ROLLBACK TO SAVEPOINT clipmint_mime_upgrade")
-                self.conn.execute("RELEASE SAVEPOINT clipmint_mime_upgrade")
-                raise
-        # Non-destructive metadata migration. Favourites and labels are
-        # intentionally separate from pinning/retention protection.
-        columns = {row[1] for row in self.conn.execute("PRAGMA table_info(clips)")}
-        if "favorite" not in columns:
-            self.conn.execute("ALTER TABLE clips ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0")
-        self.conn.execute("""CREATE TABLE IF NOT EXISTS clip_tags (
-            clip_id INTEGER NOT NULL, tag TEXT NOT NULL COLLATE NOCASE,
-            PRIMARY KEY(clip_id,tag)
-        )""")
-        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_tags_label ON clip_tags(tag,clip_id)")
-        self.conn.execute("""CREATE TABLE IF NOT EXISTS templates (
-            id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE COLLATE NOCASE,
-            body BLOB NOT NULL,
-            created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
-        )""")
-        self.conn.execute("""CREATE TRIGGER IF NOT EXISTS clean_clip_tags
-            AFTER DELETE ON clips BEGIN
-                DELETE FROM clip_tags WHERE clip_id=OLD.id;
-            END""")
-        columns = {row[1] for row in self.conn.execute("PRAGMA table_info(clips)")}
-        if "touch_seq" not in columns:
-            self.conn.execute(
-                "ALTER TABLE clips ADD COLUMN touch_seq INTEGER NOT NULL DEFAULT 0"
-            )
-        if "fingerprint" not in columns:
-            self.conn.execute("ALTER TABLE clips ADD COLUMN fingerprint BLOB")
-        self.conn.execute("UPDATE clips SET touch_seq=id WHERE touch_seq=0")
-        self.conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_clips_bin_recent ON clips(bin,touch_seq)"
-        )
-        # All clips reads encrypted screenshot ciphertext in recency order.
-        # Without this covering *order* index SQLite can materialize every
-        # large ciphertext blob in a temporary B-tree before yielding a row.
-        # The index stores metadata only; it never stores clip payloads.
-        self.conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_clips_global_recent "
-            "ON clips(touch_seq DESC,id DESC)"
-        )
-        self.conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_clips_bin_fingerprint ON clips(bin,fingerprint)"
-        )
-        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_clips_bin_id ON clips(bin,id)")
-        # SQLite INTEGER PRIMARY KEY can reuse a deleted highest row ID.
-        # Persist a monotonic allocation counter so stale dialogs/queue IDs
-        # can never point to a different future clip.
-        self.conn.execute("""CREATE TABLE IF NOT EXISTS clipmint_sequences (
-            name TEXT PRIMARY KEY,
-            next_id INTEGER NOT NULL CHECK(next_id > 0)
-        )""")
-        self.conn.execute(
-            "INSERT OR IGNORE INTO clipmint_sequences(name,next_id) "
-            "SELECT 'clips',COALESCE(MAX(id),0)+1 FROM clips"
-        )
-        self.conn.execute(
-            "UPDATE clipmint_sequences SET next_id=MAX(next_id,"
-            "(SELECT COALESCE(MAX(id),0)+1 FROM clips)) WHERE name='clips'"
-        )
-        self.conn.commit()
+        initialize_history_schema(self.conn)
         self.search_index = ClipSearchIndex(self.conn, enabled=index_plaintext)
         self._history_search = HistorySearchService(self.conn, self.search_index)
+        self._retention = HistoryRetentionService(self.conn, self.search_index)
 
     def bins(self) -> list[str]:
         return [r[0] for r in self.conn.execute("SELECT name FROM bins ORDER BY position,name")]
@@ -305,38 +190,10 @@ class ClipStore:
         ).fetchone() else None
 
     def payload_bytes(self) -> int:
-        """Approximate stored payload sizes, including MIME and previews."""
-        return int(self.conn.execute(
-            "SELECT COALESCE(SUM(length(content)+COALESCE(length(formats),0)"
-            "+length(CAST(preview AS BLOB))),0) FROM clips"
-        ).fetchone()[0])
+        return self._retention.payload_bytes()
 
     def prune_storage_bytes(self) -> int:
-        """Opt-in LRU pruning; pinned entries are never removed.
-
-        Does not VACUUM or imply that historical pages were physically erased.
-        """
-        limit = self.max_total_bytes
-        if limit is None:
-            return 0
-        if not isinstance(limit, int) or limit <= 0:
-            raise ValueError("Retention byte cap must be a positive integer")
-        removed = 0
-        while self.payload_bytes() > limit:
-            row = self.conn.execute(
-                "SELECT id FROM clips WHERE pinned=0 "
-                "ORDER BY touch_seq ASC,id ASC LIMIT 1"
-            ).fetchone()
-            if row is None:
-                break  # Pinned payloads alone can exceed the selected cap.
-            ident = int(row[0])
-            self.search_index.delete(ident)
-            self.conn.execute("DELETE FROM clips WHERE id=?", (ident,))
-            removed += 1
-        if removed:
-            self.search_index.trim_deleted()
-            self.conn.commit()
-        return removed
+        return self._retention.prune_storage_bytes(self.max_total_bytes)
 
     def _best_match_records(
         self, query: str, bin_name: str | None, category: str,
@@ -442,83 +299,30 @@ class ClipStore:
         ).fetchone()[0])
 
     def refresh_temporary_copy_time(self, clip_id: int) -> None:
-        """Refresh TTL after a user copies an entry from ClipMint's history.
-
-        Clipboard reinsertion is intentionally suppressed on these paths, so
-        history-copy actions must refresh the original item's retention clock.
-        Pinned clips are also touched, preserving freshness if later unpinned.
-        Other bins remain unaffected.
-        """
-        with self.conn:
-            self.conn.execute(
-                "UPDATE clips SET created_at="
-                "strftime('%Y-%m-%dT%H:%M:%fZ','now') "
-                "WHERE id=? AND bin='Temporary'",
-                (clip_id,),
-            )
+        return self._retention.refresh_temporary_copy_time(clip_id)
 
     def _remove_temporary_unpinned(
         self, cutoff_iso: str | None = None,
         deleted_ids: list[int] | None = None,
     ) -> int:
-        """Delete only unpinned clips in the built-in Temporary collection.
-
-        A cutoff of None is reserved for an explicitly enabled normal-exit
-        cleanup. A timestamp is used for opt-in age-based expiration.
-        Pinned items, reusable templates, and other bins are not touched.
-        """
-        condition = "bin='Temporary' AND pinned=0"
-        parameters: tuple[str, ...] = ()
-        if cutoff_iso is not None:
-            # julianday ignores malformed/unknown timestamps (NULL), so
-            # legacy rows without a valid UTC date are not purged blindly.
-            condition += " AND julianday(created_at) <= julianday(?)"
-            parameters = (cutoff_iso,)
-        identifiers = [int(row[0]) for row in self.conn.execute(
-            "SELECT id FROM clips WHERE " + condition, parameters
-        )]
-        if not identifiers:
-            return 0
-        with self.conn:
-            for ident in identifiers:
-                self.search_index.delete(ident)
-            self.conn.executemany(
-                "DELETE FROM clips WHERE id=? AND bin='Temporary' AND pinned=0",
-                [(ident,) for ident in identifiers],
-            )
-            self.search_index.trim_deleted()
-        # Report committed removals before any optional compaction. Even if
-        # SQLite VACUUM fails, consumers must invalidate stale clip IDs.
-        if deleted_ids is not None:
-            deleted_ids.extend(identifiers)
-        # FTS5 can retain deleted terms in shadow posting segments even after
-        # the MATCH index no longer reports them. Rebuild surviving postings,
-        # then reconstruct SQLite pages instead of retaining old free space.
-        if self.search_index.enabled:
-            self.search_index.rebuild_after_purge()
-            self.conn.execute("VACUUM")
-        self.conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-        return len(identifiers)
+        return self._retention._remove_temporary_unpinned(
+            cutoff_iso, deleted_ids,
+        )
 
     def expire_temporary_unpinned(
         self, *, now: datetime | None = None,
         deleted_ids: list[int] | None = None,
     ) -> int:
-        """Opt-in 24-hour TTL; the caller decides whether it is enabled."""
-        current = datetime.now(timezone.utc) if now is None else now
-        if current.tzinfo is None or current.utcoffset() is None:
-            raise ValueError("Temporary retention requires an aware UTC timestamp")
-        cutoff = current.astimezone(timezone.utc) - timedelta(hours=24)
-        return self._remove_temporary_unpinned(
-            cutoff.isoformat(timespec="milliseconds").replace("+00:00", "Z"),
-            deleted_ids=deleted_ids,
+        return self._retention.expire_temporary_unpinned(
+            now=now, deleted_ids=deleted_ids,
         )
 
     def clear_temporary_unpinned(
         self, *, deleted_ids: list[int] | None = None,
     ) -> int:
-        """Run only on deliberate application exit with explicit user opt-in."""
-        return self._remove_temporary_unpinned(deleted_ids=deleted_ids)
+        return self._retention.clear_temporary_unpinned(
+            deleted_ids=deleted_ids,
+        )
 
     def move(self, clip_id: int, bin_name: str) -> None:
         if bin_name not in self.bins():
@@ -549,11 +353,7 @@ class ClipStore:
         self.conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
     def compact_history(self) -> None:
-        """Explicit user-initiated compaction; may use CPU on large histories."""
-        self.conn.commit()
-        self.conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-        self.conn.execute("VACUUM")
-        self.conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        return self._retention.compact_history()
 
     def close(self) -> None:
         if not self.closed:
