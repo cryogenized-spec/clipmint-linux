@@ -9,7 +9,7 @@ test -x dist/ClipMint/ClipMint
 test -x dist/ClipMint/_internal/tools/ffmpeg
 root="build/clipmint-deb"
 rm -rf "$root"
-mkdir -p "$root/DEBIAN" "$root/opt/clipmint" "$root/usr/share/applications" "$root/usr/share/icons/hicolor/scalable/apps" "$root/usr/share/doc/clipmint" dist-packages
+mkdir -p "$root/DEBIAN" "$root/opt/clipmint" "$root/usr/share/applications" "$root/usr/share/icons/hicolor/96x96/apps" "$root/usr/share/doc/clipmint" dist-packages
 cp -a dist/ClipMint/. "$root/opt/clipmint/"
 # Keep the expensive PyInstaller executable for genuine cold starts only.
 # Preserve the existing /opt/clipmint/ClipMint shortcut path using a tiny
@@ -17,7 +17,7 @@ cp -a dist/ClipMint/. "$root/opt/clipmint/"
 mv "$root/opt/clipmint/ClipMint" "$root/opt/clipmint/ClipMintApp"
 install -m 755 packaging/clipmint-launcher.py "$root/opt/clipmint/ClipMint"
 install -m 644 packaging/clipmint.desktop "$root/usr/share/applications/clipmint.desktop"
-install -m 644 packaging/clipmint.svg "$root/usr/share/icons/hicolor/scalable/apps/clipmint.svg"
+install -m 644 packaging/clipmint.png "$root/usr/share/icons/hicolor/96x96/apps/clipmint.png"
 install -m 644 LICENSE "$root/usr/share/doc/clipmint/LICENSE-ClipMint"
 install -m 644 LICENSES/MIT-legacy.txt "$root/usr/share/doc/clipmint/MIT-legacy.txt"
 install -m 644 THIRD-PARTY-NOTICES.md "$root/usr/share/doc/clipmint/THIRD-PARTY-NOTICES.md"
