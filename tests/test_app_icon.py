@@ -6,12 +6,19 @@ from pathlib import Path
 import unittest
 from unittest.mock import patch
 
-from PySide6.QtGui import QIcon, QImageReader
+from PySide6.QtGui import QImageReader
+from PySide6.QtWidgets import QApplication
 
 from clipmint.app_icon import ICON_RELATIVE, clipmint_icon, icon_path
 
 
 class AppIconTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        # QIcon uses QPixmap, which requires a live GUI application.
+        # The workflow already sets QT_QPA_PLATFORM=offscreen.
+        cls._app = QApplication.instance() or QApplication([])
+
     def test_repository_source_icon_is_shipped_and_decodable(self):
         path = icon_path()
         self.assertTrue(path.is_file())
