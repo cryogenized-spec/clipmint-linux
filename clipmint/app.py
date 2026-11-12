@@ -7,6 +7,7 @@ import sys
 from PySide6.QtCore import QTimer, QSettings
 from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox
 
+from .app_icon import clipmint_icon
 from .branding import ChromaticWordmark, register_display_font
 from .crimson_ui import build_crimson_ui
 from .capture import AreaSelector, RegionRecorder
@@ -244,6 +245,7 @@ def main():
     # owns the clipboard; --toggle never starts a second clipboard watcher.
     app = QApplication([sys.argv[0]])
     app.setApplicationName("ClipMint")
+    app.setWindowIcon(clipmint_icon())
     # The Qt event loop and clipboard signals must remain alive after *all*
     # windows are hidden. Only explicit Quit/--quit ends the watcher.
     app.setQuitOnLastWindowClosed(False)
